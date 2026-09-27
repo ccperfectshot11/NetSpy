@@ -3,6 +3,8 @@
   <Import Project="..\..\DnSpyCommon.props" />
 
   <PropertyGroup>
+    <AssemblyName>NetSpy</AssemblyName>
+    <Product>NetSpy</Product>
     <Copyright>$(DnSpyAssemblyCopyright)</Copyright>
     <Version>$(DnSpyAssemblyVersion)</Version>
     <InformationalVersion>$(DnSpyAssemblyInformationalVersion)</InformationalVersion>

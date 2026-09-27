@@ -166,7 +166,7 @@
     <value>Caricare ed eseguire uno script, #load "myscript.csx"</value>
   </data>
   <data name="HelpScriptDirective_r" xml:space="preserve">
-    <value>Aggiungere un riferimento, un assembly o un percorso di un file su disco o un percorso relativo a dnSpy o la directory utente, #r "MyFile. dll"</value>
+    <value>Aggiungere un riferimento, un assembly o un percorso di un file su disco o un percorso relativo a NetSpy o la directory utente, #r "MyFile. dll"</value>
   </data>
   <data name="HelpShiftEnter" xml:space="preserve">
     <value>Inserire una nuova riga</value>

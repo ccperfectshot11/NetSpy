@@ -226,7 +226,7 @@
     <value>Alt+F4</value>
   </data>
   <data name="ExplorerOpenWithDnSpy" xml:space="preserve">
-    <value>dnSpy ile birlikte aç</value>
+    <value>NetSpy ile birlikte aç</value>
   </data>
   <data name="FindCommand" xml:space="preserve">
     <value>_Bul</value>
@@ -301,7 +301,7 @@
     <value>Metin geçersiz</value>
   </data>
   <data name="LoadingDnSpyPleaseWait" xml:space="preserve">
-    <value>dnSpy yükleniyor. Lütfen bekleyiniz...</value>
+    <value>NetSpy yükleniyor. Lütfen bekleyiniz...</value>
   </data>
   <data name="Menu_Edit" xml:space="preserve">
     <value>Düzenle</value>
@@ -826,7 +826,7 @@
     <value>Özellikler</value>
   </data>
   <data name="AboutScreen_LicenseInfo" xml:space="preserve">
-    <value>dnSpy GPLv3 altında lisanslıdır.</value>
+    <value>NetSpy GPLv3 altında lisanslıdır.</value>
   </data>
   <data name="AboutScreen_LoadedFiles" xml:space="preserve">
     <value>Yüklenen dosyalar:</value>

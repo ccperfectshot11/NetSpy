@@ -232,7 +232,7 @@
     <value>Alt+F4</value>
   </data>
   <data name="ExplorerOpenWithDnSpy" xml:space="preserve">
-    <value>Open with dnSpy</value>
+    <value>Open with NetSpy</value>
   </data>
   <data name="FindCommand" xml:space="preserve">
     <value>_Find</value>
@@ -307,7 +307,7 @@
     <value>The text is invalid</value>
   </data>
   <data name="LoadingDnSpyPleaseWait" xml:space="preserve">
-    <value>Loading dnSpy. Please wait...</value>
+    <value>Loading NetSpy. Please wait...</value>
   </data>
   <data name="Menu_Edit" xml:space="preserve">
     <value>_Edit</value>
@@ -757,7 +757,7 @@
     <value>System</value>
   </data>
   <data name="LanguageSwitchMessage" xml:space="preserve">
-    <value>You must restart dnSpy for the language change to take effect.</value>
+    <value>You must restart NetSpy for the language change to take effect.</value>
   </data>
   <data name="ShortCutKeyCtrlShiftO" xml:space="preserve">
     <value>Ctrl+Shift+O</value>
@@ -858,16 +858,16 @@
     <value>Failed to retrive update information!</value>
   </data>
   <data name="AboutScreen_LicenseInfo" xml:space="preserve">
-    <value>dnSpy is licensed under GPLv3.</value>
+    <value>NetSpy is licensed under GPLv3. Based on dnSpyEx (https://github.com/dnSpyEx/dnSpy).</value>
   </data>
   <data name="AboutScreen_LoadedFiles" xml:space="preserve">
     <value>Loaded files:</value>
   </data>
   <data name="AboutScreen_NewUpdateAvailable" xml:space="preserve">
-    <value>A new version of dnSpy is available: {0}, Do you want to open the download page?</value>
+    <value>A new version of NetSpy is available: {0}, Do you want to open the download page?</value>
   </data>
   <data name="AboutScreen_RunningLatestVersion" xml:space="preserve">
-    <value>You are running the latest version of dnSpy!</value>
+    <value>You are running the latest version of NetSpy!</value>
   </data>
   <data name="SearchWindow_SearchFrameworkAssemblies" xml:space="preserve">
     <value>Search in framework assemblies</value>
@@ -1110,7 +1110,7 @@
     <value>Incremental Search</value>
   </data>
   <data name="InfoBar_NewUpdateAvailable" xml:space="preserve">
-    <value>A new version of dnSpy is available: {0}</value>
+    <value>A new version of NetSpy is available: {0}</value>
   </data>
   <data name="InfoBar_OpenDownloadPage" xml:space="preserve">
     <value>Open download page</value>

@@ -127,13 +127,13 @@
     <value>_Latest Release</value>
   </data>
   <data name="About_Menu" xml:space="preserve">
-    <value>_Về dnSpy</value>
+    <value>_Về NetSpy</value>
   </data>
   <data name="About_SourceCode" xml:space="preserve">
     <value>_Mã nguồn</value>
   </data>
   <data name="About_TabTitle" xml:space="preserve">
-    <value>Về dnSpy</value>
+    <value>Về NetSpy</value>
   </data>
   <data name="AllFiles" xml:space="preserve">
     <value>All Files</value>
@@ -226,7 +226,7 @@
     <value>Alt + F4</value>
   </data>
   <data name="ExplorerOpenWithDnSpy" xml:space="preserve">
-    <value>Mở với dnSpy</value>
+    <value>Mở với NetSpy</value>
   </data>
   <data name="FindCommand" xml:space="preserve">
     <value>_Tìm kiếm</value>
@@ -301,7 +301,7 @@
     <value>Văn bản không hợp lệ</value>
   </data>
   <data name="LoadingDnSpyPleaseWait" xml:space="preserve">
-    <value>Đang tải dnSpy. Vui lòng chờ...</value>
+    <value>Đang tải NetSpy. Vui lòng chờ...</value>
   </data>
   <data name="Menu_Edit" xml:space="preserve">
     <value>_Chỉnh sửa</value>
@@ -739,7 +739,7 @@
     <value>System</value>
   </data>
   <data name="LanguageSwitchMessage" xml:space="preserve">
-    <value>Bạn phải khởi động lại dnSpy để thay đổi Ngôn ngữ có hiệu lực.</value>
+    <value>Bạn phải khởi động lại NetSpy để thay đổi Ngôn ngữ có hiệu lực.</value>
   </data>
   <data name="ShortCutKeyCtrlShiftO" xml:space="preserve">
     <value>Ctrl+Shift+O</value>
@@ -828,7 +828,7 @@
     <value>Properties</value>
   </data>
   <data name="AboutScreen_LicenseInfo" xml:space="preserve">
-    <value>dnSpy is licensed under GPLv3.</value>
+    <value>NetSpy is licensed under GPLv3.</value>
   </data>
   <data name="AboutScreen_LoadedFiles" xml:space="preserve">
     <value>Loaded Files:</value>

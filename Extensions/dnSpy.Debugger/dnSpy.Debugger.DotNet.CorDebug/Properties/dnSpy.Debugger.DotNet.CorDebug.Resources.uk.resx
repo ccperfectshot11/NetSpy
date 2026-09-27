@@ -168,7 +168,7 @@
 Помилка: {1}</value>
   </data>
   <data name="Error_CouldNotStartDebuggerRequireAdminPrivLvl" xml:space="preserve">
-    <value>Не можу запустити дебагер. Відлагоджувана програма потребує прав адміністратора. Перезапустіть dnSpy в режимі адміністратора та спробуйте знову.</value>
+    <value>Не можу запустити дебагер. Відлагоджувана програма потребує прав адміністратора. Перезапустіть NetSpy в режимі адміністратора та спробуйте знову.</value>
   </data>
   <data name="Error_FileDoesNotExist" xml:space="preserve">
     <value>Файл не існує</value>
@@ -207,10 +207,10 @@
     <value>WaitSleepJoin</value>
   </data>
   <data name="UseDnSpy64ExeToDebug32" xml:space="preserve">
-    <value>Для відладки 32-бітних програм використовуйте 32-біт dnSpy.</value>
+    <value>Для відладки 32-бітних програм використовуйте 32-біт NetSpy.</value>
   </data>
   <data name="UseDnSpyExeToDebug64" xml:space="preserve">
-    <value>Для відладки 64-бітних програм використовуйте 64-біт dnSpy.</value>
+    <value>Для відладки 64-бітних програм використовуйте 64-біт NetSpy.</value>
   </data>
   <data name="ExceptionMessageIsNull" xml:space="preserve">
     <value>«&lt;повідомлення без виключення&gt;»</value>

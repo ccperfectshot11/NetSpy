@@ -142,10 +142,10 @@
     <value>Attach vào Process</value>
   </data>
   <data name="Attach_UseDnSpy32" xml:space="preserve">
-    <value>Sử dụng dnSpy 64-bit để Attach 64-bit processes</value>
+    <value>Sử dụng NetSpy 64-bit để Attach 64-bit processes</value>
   </data>
   <data name="Attach_UseDnSpy64" xml:space="preserve">
-    <value>Sử dụng dnSpy 32-bit để Attach 32-bit processes</value>
+    <value>Sử dụng NetSpy 32-bit để Attach 32-bit processes</value>
   </data>
   <data name="BreakCommand" xml:space="preserve">
     <value>Brea_k All</value>
@@ -169,7 +169,7 @@
     <value>_Call Stack</value>
   </data>
   <data name="CallStack_MaxFramesExceeded" xml:space="preserve">
-    <value>Đã dùng hết số lượng Stack frame tối đa mà dnSpy hỗ trợ.</value>
+    <value>Đã dùng hết số lượng Stack frame tối đa mà NetSpy hỗ trợ.</value>
   </data>
   <data name="Column_Address" xml:space="preserve">
     <value>Địa chỉ</value>
@@ -1525,7 +1525,7 @@ Bạn có chắc chắn muốn mở rộng nó không?</value>
     <value>Tìm kiếm một Processes</value>
   </data>
   <data name="DbgSettings_FocusDebuggerWhenProcessBreaks" xml:space="preserve">
-    <value>Bring dnSpy to the foreground when breaking in the debugger</value>
+    <value>Bring NetSpy to the foreground when breaking in the debugger</value>
   </data>
   <data name="Column_LoadModule" xml:space="preserve">
     <value>Tải</value>

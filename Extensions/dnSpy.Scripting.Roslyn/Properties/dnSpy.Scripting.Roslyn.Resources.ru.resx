@@ -166,7 +166,7 @@
     <value>Загрузить и выполнить скрипт, #load "myscript.csx"</value>
   </data>
   <data name="HelpScriptDirective_r" xml:space="preserve">
-    <value>Добавить ссылку; сборка, или абсолютный путь к файлу на диске или путь относительно каталога dnSpy, или каталога пользователя, #r "myfile.dll"</value>
+    <value>Добавить ссылку; сборка, или абсолютный путь к файлу на диске или путь относительно каталога NetSpy, или каталога пользователя, #r "myfile.dll"</value>
   </data>
   <data name="HelpShiftEnter" xml:space="preserve">
     <value>Вставить новую строку</value>

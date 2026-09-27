@@ -169,7 +169,7 @@
     <value>_تماس پیوسته</value>
   </data>
   <data name="CallStack_MaxFramesExceeded" xml:space="preserve">
-    <value>حداکثر تعداد فریم های که توسط dnSpy ساپورت میشود فراتر رفته است.</value>
+    <value>حداکثر تعداد فریم های که توسط NetSpy ساپورت میشود فراتر رفته است.</value>
   </data>
   <data name="Column_Address" xml:space="preserve">
     <value>آدرس</value>
@@ -1525,7 +1525,7 @@
     <value>جستجو برای یک پروسس</value>
   </data>
   <data name="DbgSettings_FocusDebuggerWhenProcessBreaks" xml:space="preserve">
-    <value>dnSpy را هنگام توقف اجرا در دیباگر به پیش زمینه بیاور</value>
+    <value>NetSpy را هنگام توقف اجرا در دیباگر به پیش زمینه بیاور</value>
   </data>
   <data name="Column_LoadModule" xml:space="preserve">
     <value>بارگذاری</value>

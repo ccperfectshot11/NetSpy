@@ -151,7 +151,7 @@
     <value>Không thể khởi động trình gỡ lỗi. Kiểm tra lại quyền truy cập vào file '{0}'</value>
   </data>
   <data name="Error_CouldNotStartDebuggerRequireAdminPrivLvl" xml:space="preserve">
-    <value>Không thể khởi động trình gỡ lỗi. Trình gỡ lỗi cần chạy với quyền Administrator. Khởi động lại dnSpy với quyền Administrator và thử lại.</value>
+    <value>Không thể khởi động trình gỡ lỗi. Trình gỡ lỗi cần chạy với quyền Administrator. Khởi động lại NetSpy với quyền Administrator và thử lại.</value>
   </data>
   <data name="Error_FileDoesNotExist" xml:space="preserve">
     <value>Tệp tin không tồn tại</value>
@@ -190,10 +190,10 @@
     <value>WaitSleepJoin</value>
   </data>
   <data name="UseDnSpy64ExeToDebug32" xml:space="preserve">
-    <value>Dùng phiên bản dnSpy 32-bit để gỡ lỗi ứng dụng phiên bản 32-bit</value>
+    <value>Dùng phiên bản NetSpy 32-bit để gỡ lỗi ứng dụng phiên bản 32-bit</value>
   </data>
   <data name="UseDnSpyExeToDebug64" xml:space="preserve">
-    <value>Dùng phiên bản dnSpy 64-bit để gỡ lỗi ứng dụng phiên bản 64-bit</value>
+    <value>Dùng phiên bản NetSpy 64-bit để gỡ lỗi ứng dụng phiên bản 64-bit</value>
   </data>
   <data name="ExceptionMessageIsNull" xml:space="preserve">
     <value>"&lt;thông báo không có lỗi&gt;"</value>

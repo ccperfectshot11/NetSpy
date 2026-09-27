@@ -226,7 +226,7 @@
     <value>Alt + F4</value>
   </data>
   <data name="ExplorerOpenWithDnSpy" xml:space="preserve">
-    <value>Megnyitás dnSpy-jal</value>
+    <value>Megnyitás NetSpy-jal</value>
   </data>
   <data name="FindCommand" xml:space="preserve">
     <value>_Keres</value>
@@ -301,7 +301,7 @@
     <value>Hibás szöveg</value>
   </data>
   <data name="LoadingDnSpyPleaseWait" xml:space="preserve">
-    <value>dnSpy indítása. Kérem várjon...</value>
+    <value>NetSpy indítása. Kérem várjon...</value>
   </data>
   <data name="Menu_Edit" xml:space="preserve">
     <value>_Szerkesztés</value>
@@ -739,7 +739,7 @@
     <value>Rendszer</value>
   </data>
   <data name="LanguageSwitchMessage" xml:space="preserve">
-    <value>A nyelvi beállítások módosításához a dnSpy újraindítása szükséges.</value>
+    <value>A nyelvi beállítások módosításához a NetSpy újraindítása szükséges.</value>
   </data>
   <data name="ShortCutKeyCtrlShiftO" xml:space="preserve">
     <value>Ctrl+Shift+O</value>
@@ -828,7 +828,7 @@
     <value>Tulajdonságok</value>
   </data>
   <data name="AboutScreen_LicenseInfo" xml:space="preserve">
-    <value>A dnSpy a GPLv3 szerint van licenszelve.</value>
+    <value>A NetSpy a GPLv3 szerint van licenszelve.</value>
   </data>
   <data name="AboutScreen_LoadedFiles" xml:space="preserve">
     <value>Betöltött fájlok:</value>

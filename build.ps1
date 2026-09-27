@@ -33,9 +33,9 @@ function Build-NetFramework {
 	Rename-Item $outdir bin
 	New-Item -ItemType Directory $outdir > $null
 	Move-Item $net_baseoutput\bin $outdir
-	foreach ($filename in 'dnSpy-x86.exe', 'dnSpy-x86.exe.config', 'dnSpy-x86.pdb',
-			 'dnSpy.exe', 'dnSpy.exe.config', 'dnSpy.pdb',
-			 'dnSpy.Console.exe', 'dnSpy.Console.exe.config', 'dnSpy.Console.pdb') {
+	foreach ($filename in 'NetSpy-x86.exe', 'NetSpy-x86.exe.config', 'NetSpy-x86.pdb',
+			 'NetSpy.exe', 'NetSpy.exe.config', 'NetSpy.pdb',
+			 'NetSpy.Console.exe', 'NetSpy.Console.exe.config', 'NetSpy.Console.pdb') {
 		Move-Item $outdir\bin\$filename $outdir
 	}
 }
@@ -60,7 +60,7 @@ function Build-Net {
     Rename-Item $outdir bin
     New-Item -ItemType Directory $outdir > $null
     Move-Item $net_baseoutput\bin $outdir
-    foreach ($exe in 'dnSpy.exe', 'dnSpy-x86.exe', 'dnSpy.Console.exe') {
+    foreach ($exe in 'NetSpy.exe', 'NetSpy-x86.exe', 'NetSpy.Console.exe') {
         Move-Item $outdir\bin\$exe $outdir
         & $apphostpatcher_dir\bin\$configuration\$netframework_tfm\AppHostPatcher.exe $outdir\$exe -d bin
         if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -93,7 +93,7 @@ function Build-SelfContainedNet {
 	New-Item -ItemType Directory $publishDir > $null
 	Move-Item $outdir\$tmpbin $publishDir
 	Rename-Item $publishDir\$tmpbin bin
-	foreach ($exe in 'dnSpy.exe', 'dnSpy.Console.exe') {
+	foreach ($exe in 'NetSpy.exe', 'NetSpy.Console.exe') {
 		Move-Item $publishDir\bin\$exe $publishDir
 		& $apphostpatcher_dir\bin\$configuration\$netframework_tfm\AppHostPatcher.exe $publishDir\$exe -d bin
 		if ($LASTEXITCODE) { exit $LASTEXITCODE }

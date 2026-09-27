@@ -142,10 +142,10 @@
     <value>Anexar ao Processo</value>
   </data>
   <data name="Attach_UseDnSpy32" xml:space="preserve">
-    <value>Use o dnSpy 64-bit para depurar processos em 64-bit</value>
+    <value>Use o NetSpy 64-bit para depurar processos em 64-bit</value>
   </data>
   <data name="Attach_UseDnSpy64" xml:space="preserve">
-    <value>Use o dnSpy 32-bit para depurar processos em 32-bit</value>
+    <value>Use o NetSpy 32-bit para depurar processos em 32-bit</value>
   </data>
   <data name="BreakCommand" xml:space="preserve">
     <value>Para_r Tudo</value>
@@ -169,7 +169,7 @@
     <value>_Call Stack</value>
   </data>
   <data name="CallStack_MaxFramesExceeded" xml:space="preserve">
-    <value>O número máximo de Stack Frames suportados pelo dnSpy foi excedido.</value>
+    <value>O número máximo de Stack Frames suportados pelo NetSpy foi excedido.</value>
   </data>
   <data name="Column_Address" xml:space="preserve">
     <value>Endereço</value>
@@ -1523,7 +1523,7 @@ Tem certeza que deseja expandi-la?</value>
     <value>Procurar por um processo</value>
   </data>
   <data name="DbgSettings_FocusDebuggerWhenProcessBreaks" xml:space="preserve">
-    <value>Trazer dnSpy para o primeiro plano no breaking do depurador</value>
+    <value>Trazer NetSpy para o primeiro plano no breaking do depurador</value>
   </data>
   <data name="Column_LoadModule" xml:space="preserve">
     <value>Carregar</value>

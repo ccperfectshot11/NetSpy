@@ -166,7 +166,7 @@
     <value>Carregar e executar um script, #load "myscript.csx"</value>
   </data>
   <data name="HelpScriptDirective_r" xml:space="preserve">
-    <value>Adicionar uma referência, seja esta um assembly ou um caminho para um ficheiro no disco ou um caminho relativo para o dnSpy ou o diretório de utilizador, #r "MyFile. dll"</value>
+    <value>Adicionar uma referência, seja esta um assembly ou um caminho para um ficheiro no disco ou um caminho relativo para o NetSpy ou o diretório de utilizador, #r "MyFile. dll"</value>
   </data>
   <data name="HelpShiftEnter" xml:space="preserve">
     <value>Inserir uma nova linha</value>

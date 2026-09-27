@@ -346,7 +346,7 @@ namespace dndbg.Engine {
 					if (res == NativeMethods.WAIT_TIMEOUT) {
 						if (keepWaiting())
 							continue;
-						throw new TimeoutException("Waiting for CoreCLR timed out. Debug 32-bit .NET apps with 32-bit dnSpy (dnSpy-x86.exe), and 64-bit .NET apps with 64-bit dnSpy (dnSpy.exe).");
+						throw new TimeoutException("Waiting for CoreCLR timed out. Debug 32-bit .NET apps with 32-bit NetSpy (NetSpy-x86.exe), and 64-bit .NET apps with 64-bit NetSpy (NetSpy.exe).");
 					}
 					Debug.Fail($"Unknown result from WaitForMultipleObjects: 0x{res:X8}");
 					throw new Exception("Error waiting for startup event");

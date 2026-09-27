@@ -67,6 +67,7 @@ namespace dnSpy.MainApp {
 		static readonly Guid SETTINGS_GUID = new Guid("611A864B-FD4E-4505-8C5F-0165CD09B77A");
 		const string IGNORED_SECTION = "Ignored";
 		const string IGNORED_ATTR = "id";
+		const string LatestReleaseUrl = "https://api.github.com/repos/ccperfectshot11/NetSpy/releases/latest";
 
 		public bool CheckForUpdatesOnStartup {
 			get => checkForUpdatesOnStartup;
@@ -141,9 +142,9 @@ namespace dnSpy.MainApp {
 			try {
 				string result;
 				using (var client = new HttpClient(new HttpClientHandler { UseProxy = true, UseDefaultCredentials = true })) {
-					client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("dnSpyEx", currentVersion.ToString()));
+					client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("NetSpy", currentVersion.ToString()));
 
-					result = await client.GetStringAsync("https://api.github.com/repos/dnSpyEx/dnSpy/releases/latest");
+					result = await client.GetStringAsync(LatestReleaseUrl);
 				}
 
 				using var doc = JsonDocument.Parse(result);

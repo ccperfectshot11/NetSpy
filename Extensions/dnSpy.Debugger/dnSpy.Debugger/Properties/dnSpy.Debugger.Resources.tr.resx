@@ -142,10 +142,10 @@
     <value>İşleme ekle</value>
   </data>
   <data name="Attach_UseDnSpy32" xml:space="preserve">
-    <value>64-bit işlemlere eklemek için dnSpy. exe'yi kullan</value>
+    <value>64-bit işlemlere eklemek için NetSpy. exe'yi kullan</value>
   </data>
   <data name="Attach_UseDnSpy64" xml:space="preserve">
-    <value>64-bit işlemlere eklemek için dnSpy. exe'yi kullan</value>
+    <value>64-bit işlemlere eklemek için NetSpy. exe'yi kullan</value>
   </data>
   <data name="BreakCommand" xml:space="preserve">
     <value>_Hepsini Durdur</value>
@@ -169,7 +169,7 @@
     <value>_Yığın çağrısı</value>
   </data>
   <data name="CallStack_MaxFramesExceeded" xml:space="preserve">
-    <value>dnSpy tarafından desteklenen maksimum çerçeve yığını sayısı aşıldı.</value>
+    <value>NetSpy tarafından desteklenen maksimum çerçeve yığını sayısı aşıldı.</value>
   </data>
   <data name="Column_Address" xml:space="preserve">
     <value>Adres</value>
@@ -1525,7 +1525,7 @@ Genişletmek istediğinizden emin misiniz?</value>
     <value>Bir işlemi ara</value>
   </data>
   <data name="DbgSettings_FocusDebuggerWhenProcessBreaks" xml:space="preserve">
-    <value>Hata ayıklayıcısını keserken dnSpy'ı ön plana getirin</value>
+    <value>Hata ayıklayıcısını keserken NetSpy'ı ön plana getirin</value>
   </data>
   <data name="Column_LoadModule" xml:space="preserve">
     <value>Yükle</value>

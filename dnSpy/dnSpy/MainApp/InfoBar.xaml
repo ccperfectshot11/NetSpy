@@ -21,7 +21,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:dnSpy.MainApp"
              xmlns:img="clr-namespace:dnSpy.Contracts.Images;assembly=dnSpy.Contracts.DnSpy"
-             xmlns:p="clr-namespace:dnSpy.Properties;assembly=dnSpy">
+             xmlns:p="clr-namespace:dnSpy.Properties">
     <ItemsControl ItemsSource="{Binding Elements}">
         <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>

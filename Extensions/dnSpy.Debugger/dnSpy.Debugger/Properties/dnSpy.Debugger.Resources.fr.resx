@@ -142,10 +142,10 @@
     <value>Attacher au processus</value>
   </data>
   <data name="Attach_UseDnSpy32" xml:space="preserve">
-    <value>Utilisez dnSpy 64 pour attacher les exe 64-bit</value>
+    <value>Utilisez NetSpy 64 pour attacher les exe 64-bit</value>
   </data>
   <data name="Attach_UseDnSpy64" xml:space="preserve">
-    <value>Utilisez dnSpy 32 pour attacher les exe 32-bit</value>
+    <value>Utilisez NetSpy 32 pour attacher les exe 32-bit</value>
   </data>
   <data name="BreakCommand" xml:space="preserve">
     <value>Tout _mettre en pause</value>
@@ -169,7 +169,7 @@
     <value>_Pile des appels</value>
   </data>
   <data name="CallStack_MaxFramesExceeded" xml:space="preserve">
-    <value>Le nombre maximum de frames de pile supporté par dnSpy a été dépassé.</value>
+    <value>Le nombre maximum de frames de pile supporté par NetSpy a été dépassé.</value>
   </data>
   <data name="Column_Address" xml:space="preserve">
     <value>Adresse</value>
@@ -1523,7 +1523,7 @@ Voulez-vous vraiment étendre cet élément ?</value>
     <value>Chercher un processus</value>
   </data>
   <data name="DbgSettings_FocusDebuggerWhenProcessBreaks" xml:space="preserve">
-    <value>Apportez dnSpy en premier plan lors de la rupture du débogueur</value>
+    <value>Apportez NetSpy en premier plan lors de la rupture du débogueur</value>
   </data>
   <data name="Column_LoadModule" xml:space="preserve">
     <value>Charger</value>

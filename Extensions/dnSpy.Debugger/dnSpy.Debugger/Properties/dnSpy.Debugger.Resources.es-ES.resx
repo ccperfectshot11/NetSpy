@@ -142,10 +142,10 @@
     <value>Adjuntar al proceso</value>
   </data>
   <data name="Attach_UseDnSpy32" xml:space="preserve">
-    <value>Utilice dnSpy de 64-bit para conectar a los procesos de 64 bits</value>
+    <value>Utilice NetSpy de 64-bit para conectar a los procesos de 64 bits</value>
   </data>
   <data name="Attach_UseDnSpy64" xml:space="preserve">
-    <value>Utilice dnSpy de 32-bit para conectar a procesos de 32 bits</value>
+    <value>Utilice NetSpy de 32-bit para conectar a procesos de 32 bits</value>
   </data>
   <data name="BreakCommand" xml:space="preserve">
     <value>Rompe_r todos</value>
@@ -169,7 +169,7 @@
     <value>Pila de _llamadas</value>
   </data>
   <data name="CallStack_MaxFramesExceeded" xml:space="preserve">
-    <value>Ha superado el número máximo de marcos de pila apoyados por dnSpy.</value>
+    <value>Ha superado el número máximo de marcos de pila apoyados por NetSpy.</value>
   </data>
   <data name="Column_Address" xml:space="preserve">
     <value>Dirección</value>
@@ -1522,7 +1522,7 @@ ERROR: {1}</value>
     <value>Búsqueda de un proceso</value>
   </data>
   <data name="DbgSettings_FocusDebuggerWhenProcessBreaks" xml:space="preserve">
-    <value>Lleva dnSpy al primer plano al romper en el depurador</value>
+    <value>Lleva NetSpy al primer plano al romper en el depurador</value>
   </data>
   <data name="Column_LoadModule" xml:space="preserve">
     <value>Cargar</value>

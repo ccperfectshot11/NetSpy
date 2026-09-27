@@ -192,10 +192,10 @@
     <value>WaitSleepJoin</value>
   </data>
   <data name="UseDnSpy64ExeToDebug32" xml:space="preserve">
-    <value>از dnSpy 32 بیت برای اشکال‌زدایی برنامه‌های 32 بیتی استفاده نمایید.</value>
+    <value>از NetSpy 32 بیت برای اشکال‌زدایی برنامه‌های 32 بیتی استفاده نمایید.</value>
   </data>
   <data name="UseDnSpyExeToDebug64" xml:space="preserve">
-    <value>از dnSpy 64 بیت برای اشکال‌زدایی برنامه‌های 64 بیتی استفاده نمایید.</value>
+    <value>از NetSpy 64 بیت برای اشکال‌زدایی برنامه‌های 64 بیتی استفاده نمایید.</value>
   </data>
   <data name="ExceptionMessageIsNull" xml:space="preserve">
     <value>"&lt;no exception message&gt;"</value>

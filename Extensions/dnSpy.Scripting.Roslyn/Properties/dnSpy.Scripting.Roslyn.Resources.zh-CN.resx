@@ -166,7 +166,7 @@
     <value>加载并执行脚本，#load "myscript.csx"</value>
   </data>
   <data name="HelpScriptDirective_r" xml:space="preserve">
-    <value>添加引用，可以是磁盘上的程序集或是文件路径，也可以是相对于 dnSpy 的路径，或是用户目录，#r "myfile.dll"</value>
+    <value>添加引用，可以是磁盘上的程序集或是文件路径，也可以是相对于 NetSpy 的路径，或是用户目录，#r "myfile.dll"</value>
   </data>
   <data name="HelpShiftEnter" xml:space="preserve">
     <value>插入新行</value>

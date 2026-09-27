@@ -142,10 +142,10 @@
     <value>Приєднатись до процесу</value>
   </data>
   <data name="Attach_UseDnSpy32" xml:space="preserve">
-    <value>Використовуйте 64-біт dnSpy для приєднання до 64-біт процесів</value>
+    <value>Використовуйте 64-біт NetSpy для приєднання до 64-біт процесів</value>
   </data>
   <data name="Attach_UseDnSpy64" xml:space="preserve">
-    <value>Використовуйте 32-біт dnSpy для приєднання до 32-біт процесів</value>
+    <value>Використовуйте 32-біт NetSpy для приєднання до 32-біт процесів</value>
   </data>
   <data name="BreakCommand" xml:space="preserve">
     <value>Перервати Усе</value>
@@ -169,7 +169,7 @@
     <value>Стек викликів</value>
   </data>
   <data name="CallStack_MaxFramesExceeded" xml:space="preserve">
-    <value>Перевищено максимальна к-сть фреймів стеку, що підтримуються dnSpy</value>
+    <value>Перевищено максимальна к-сть фреймів стеку, що підтримуються NetSpy</value>
   </data>
   <data name="Column_Address" xml:space="preserve">
     <value>Адреса</value>
@@ -1259,9 +1259,9 @@
 Ви бажаєте продовжити?</value>
   </data>
   <data name="StartDebuggingWarning_IncorrectBitness" xml:space="preserve">
-    <value>Розрядність цільового файлу не відповідає поточній версії dnSpy. Налагодження може спричинити небажане/неконтрольоване виконання образу.
+    <value>Розрядність цільового файлу не відповідає поточній версії NetSpy. Налагодження може спричинити небажане/неконтрольоване виконання образу.
 
-Рекомендується використовувати 32-розрядний dnSpy для налагодження 32-розрядних зображень і 64-розрядний dnSpy для налагодження 64-розрядних зображень.
+Рекомендується використовувати 32-розрядний NetSpy для налагодження 32-розрядних зображень і 64-розрядний NetSpy для налагодження 64-розрядних зображень.
 
 Ви бажаєте продовжити?</value>
   </data>
@@ -1581,7 +1581,7 @@
     <value>Пошук процесу</value>
   </data>
   <data name="DbgSettings_FocusDebuggerWhenProcessBreaks" xml:space="preserve">
-    <value>Винести dnSpy на перідній фон, коли спрацює точка зупинки в дебагері</value>
+    <value>Винести NetSpy на перідній фон, коли спрацює точка зупинки в дебагері</value>
   </data>
   <data name="Column_LoadModule" xml:space="preserve">
     <value>Зааантажити</value>

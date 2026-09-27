@@ -142,10 +142,10 @@
     <value>Присоединиться к процессу</value>
   </data>
   <data name="Attach_UseDnSpy32" xml:space="preserve">
-    <value>Используйте 64-битный dnSpy для присоединения к 64-битным процессам</value>
+    <value>Используйте 64-битный NetSpy для присоединения к 64-битным процессам</value>
   </data>
   <data name="Attach_UseDnSpy64" xml:space="preserve">
-    <value>Используйте 32-бит dnSpy для присоединения к 32-битным процессам</value>
+    <value>Используйте 32-бит NetSpy для присоединения к 32-битным процессам</value>
   </data>
   <data name="BreakCommand" xml:space="preserve">
     <value>_Прервать все</value>
@@ -169,7 +169,7 @@
     <value>_Стек вызовов</value>
   </data>
   <data name="CallStack_MaxFramesExceeded" xml:space="preserve">
-    <value>Превышено максимальное количество кадров стека, поддерживаемых dnSpy.</value>
+    <value>Превышено максимальное количество кадров стека, поддерживаемых NetSpy.</value>
   </data>
   <data name="Column_Address" xml:space="preserve">
     <value>Адрес</value>
@@ -1525,7 +1525,7 @@
     <value>Поиск процесса</value>
   </data>
   <data name="DbgSettings_FocusDebuggerWhenProcessBreaks" xml:space="preserve">
-    <value>Открывать dnSpy на переднем плане при останове в отладчике</value>
+    <value>Открывать NetSpy на переднем плане при останове в отладчике</value>
   </data>
   <data name="Column_LoadModule" xml:space="preserve">
     <value>Загрузить</value>
@@ -1545,9 +1545,9 @@
 Вы точно хотите продолжить?</value>
   </data>
   <data name="StartDebuggingWarning_IncorrectBitness" xml:space="preserve">
-    <value>Разрядность целевого файла не соответствует текущей версии dnSpy. Отладка может привести к нежелательному/неконтролируемому выполнению образа.
+    <value>Разрядность целевого файла не соответствует текущей версии NetSpy. Отладка может привести к нежелательному/неконтролируемому выполнению образа.
 
-Рекомендуется использовать 32-разрядный dnSpy для отладки 32-разрядных образов и 64-разрядный dnSpy для отладки 64-разрядных образов.
+Рекомендуется использовать 32-разрядный NetSpy для отладки 32-разрядных образов и 64-разрядный NetSpy для отладки 64-разрядных образов.
 
 Вы точно хотите продолжить?</value>
   </data>

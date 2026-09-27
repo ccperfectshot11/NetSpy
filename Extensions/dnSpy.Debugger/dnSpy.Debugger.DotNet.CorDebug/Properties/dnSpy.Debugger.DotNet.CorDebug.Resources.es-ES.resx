@@ -153,7 +153,7 @@
 Error: {1}</value>
   </data>
   <data name="Error_CouldNotStartDebuggerRequireAdminPrivLvl" xml:space="preserve">
-    <value>No se puede iniciar al depurador. El programa depurado requiere privilegios de administrador. Reinicie dnSpy con derechos de administrador e inténtelo de nuevo.</value>
+    <value>No se puede iniciar al depurador. El programa depurado requiere privilegios de administrador. Reinicie NetSpy con derechos de administrador e inténtelo de nuevo.</value>
   </data>
   <data name="Error_FileDoesNotExist" xml:space="preserve">
     <value>El archivo no existe</value>
@@ -192,10 +192,10 @@ Error: {1}</value>
     <value>WaitSleepJoin</value>
   </data>
   <data name="UseDnSpy64ExeToDebug32" xml:space="preserve">
-    <value>Utilizar dnSpy de 32 bits para depurar aplicaciones de 32 bits.</value>
+    <value>Utilizar NetSpy de 32 bits para depurar aplicaciones de 32 bits.</value>
   </data>
   <data name="UseDnSpyExeToDebug64" xml:space="preserve">
-    <value>Utilice dnSpy- X64-Bit para depurar aplicaciones de 64 bits.</value>
+    <value>Utilice NetSpy- X64-Bit para depurar aplicaciones de 64 bits.</value>
   </data>
   <data name="ExceptionMessageIsNull" xml:space="preserve">
     <value>"&lt; ningún mensaje de la excepción &gt;"</value>

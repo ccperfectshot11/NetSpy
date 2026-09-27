@@ -142,10 +142,10 @@
     <value>Connettersi al processo</value>
   </data>
   <data name="Attach_UseDnSpy32" xml:space="preserve">
-    <value>Usa dnSpy.exe a 64-bit per connetterti ai processi a 64-bit</value>
+    <value>Usa NetSpy.exe a 64-bit per connetterti ai processi a 64-bit</value>
   </data>
   <data name="Attach_UseDnSpy64" xml:space="preserve">
-    <value>Usa dnSpy.exe a 32-bit per connetterti ai processi a 32-bit</value>
+    <value>Usa NetSpy.exe a 32-bit per connetterti ai processi a 32-bit</value>
   </data>
   <data name="BreakCommand" xml:space="preserve">
     <value>Interromp_i tutto</value>
@@ -169,7 +169,7 @@
     <value>_Call Stack</value>
   </data>
   <data name="CallStack_MaxFramesExceeded" xml:space="preserve">
-    <value>È stato superato il numero massimo di stack frames supportato da dnSpy.</value>
+    <value>È stato superato il numero massimo di stack frames supportato da NetSpy.</value>
   </data>
   <data name="Column_Address" xml:space="preserve">
     <value>Indirizzo</value>
@@ -1519,7 +1519,7 @@
     <value>Cerca un processo</value>
   </data>
   <data name="DbgSettings_FocusDebuggerWhenProcessBreaks" xml:space="preserve">
-    <value>Porta dnSpy in primo piano quando il debug si interrompe</value>
+    <value>Porta NetSpy in primo piano quando il debug si interrompe</value>
   </data>
   <data name="Column_LoadModule" xml:space="preserve">
     <value>Carica</value>

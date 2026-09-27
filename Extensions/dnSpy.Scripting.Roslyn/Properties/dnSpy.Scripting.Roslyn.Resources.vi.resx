@@ -166,7 +166,7 @@
     <value>Tải và thực thi một tập lệnh, #load "myscript.csx"</value>
   </data>
   <data name="HelpScriptDirective_r" xml:space="preserve">
-    <value>Add a reference, either an assembly or a path to a file on disk or a path relative to the dnSpy or user directory, #r "myfile.dll"</value>
+    <value>Add a reference, either an assembly or a path to a file on disk or a path relative to the NetSpy or user directory, #r "myfile.dll"</value>
   </data>
   <data name="HelpShiftEnter" xml:space="preserve">
     <value>Insert a new line</value>

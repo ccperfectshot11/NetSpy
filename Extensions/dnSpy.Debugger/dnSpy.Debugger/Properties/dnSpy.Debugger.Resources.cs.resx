@@ -1525,7 +1525,7 @@ opravdu ho chcete rozbalit?</value>
     <value>Hledat proces</value>
   </data>
   <data name="DbgSettings_FocusDebuggerWhenProcessBreaks" xml:space="preserve">
-    <value>Přenést dnSpy do popředí při zastavení v debuggeru</value>
+    <value>Přenést NetSpy do popředí při zastavení v debuggeru</value>
   </data>
   <data name="Column_LoadModule" xml:space="preserve">
     <value>Load</value>

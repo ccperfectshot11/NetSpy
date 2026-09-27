@@ -142,10 +142,10 @@
     <value>Anexar ao Processo</value>
   </data>
   <data name="Attach_UseDnSpy32" xml:space="preserve">
-    <value>Use a versão 64 bits do dnSpy para fazer attach de processos de 64 bits</value>
+    <value>Use a versão 64 bits do NetSpy para fazer attach de processos de 64 bits</value>
   </data>
   <data name="Attach_UseDnSpy64" xml:space="preserve">
-    <value>Use a versão 32 bits do dnSpy para fazer attach de processos de 32 bits</value>
+    <value>Use a versão 32 bits do NetSpy para fazer attach de processos de 32 bits</value>
   </data>
   <data name="BreakCommand" xml:space="preserve">
     <value>_Pausar Todos</value>
@@ -169,7 +169,7 @@
     <value>Pilha de _Chamada</value>
   </data>
   <data name="CallStack_MaxFramesExceeded" xml:space="preserve">
-    <value>Foi excedido o número máximo de stack frames, suportado por dnSpy.</value>
+    <value>Foi excedido o número máximo de stack frames, suportado por NetSpy.</value>
   </data>
   <data name="Column_Address" xml:space="preserve">
     <value>Endereço</value>
@@ -1521,7 +1521,7 @@ Tem certeza que deseja expandi-la?</value>
     <value>Procurar processo</value>
   </data>
   <data name="DbgSettings_FocusDebuggerWhenProcessBreaks" xml:space="preserve">
-    <value>Bring dnSpy to the foreground when breaking in the debugger</value>
+    <value>Bring NetSpy to the foreground when breaking in the debugger</value>
   </data>
   <data name="Column_LoadModule" xml:space="preserve">
     <value>Carregar</value>

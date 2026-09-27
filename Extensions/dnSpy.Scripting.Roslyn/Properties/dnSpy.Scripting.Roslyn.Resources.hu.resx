@@ -166,7 +166,7 @@
     <value>Betölt és futtat egy szkriptet, #load "myscript.csx"</value>
   </data>
   <data name="HelpScriptDirective_r" xml:space="preserve">
-    <value>Hozzáad egy hivatkozást, akár szerelvény, akár elérési út egy fájlhoz a lemezen vagy relatív elérési út a dnSpy vagy a felhasználó mappájához, #r "myfile.dll"</value>
+    <value>Hozzáad egy hivatkozást, akár szerelvény, akár elérési út egy fájlhoz a lemezen vagy relatív elérési út a NetSpy vagy a felhasználó mappájához, #r "myfile.dll"</value>
   </data>
   <data name="HelpShiftEnter" xml:space="preserve">
     <value>Egy új sor beszúrása</value>

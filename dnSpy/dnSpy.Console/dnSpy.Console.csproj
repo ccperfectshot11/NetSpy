@@ -9,6 +9,8 @@ The workaround is to add WindowsDesktop above.
   <Import Project="..\..\DnSpyCommon.props" />
 
   <PropertyGroup>
+    <AssemblyName>NetSpy.Console</AssemblyName>
+    <Product>NetSpy</Product>
     <Copyright>$(DnSpyAssemblyCopyright)</Copyright>
     <Version>$(DnSpyAssemblyVersion)</Version>
     <InformationalVersion>$(DnSpyAssemblyInformationalVersion)</InformationalVersion>

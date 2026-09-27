@@ -142,10 +142,10 @@
     <value>An den Prozess anhängen</value>
   </data>
   <data name="Attach_UseDnSpy32" xml:space="preserve">
-    <value>Verwende 64-Bit dnSpy um sich an 64-Bit Prozesse anzuhängen</value>
+    <value>Verwende 64-Bit NetSpy um sich an 64-Bit Prozesse anzuhängen</value>
   </data>
   <data name="Attach_UseDnSpy64" xml:space="preserve">
-    <value>Verwende 32-Bit dnSpy um sich an 32-Bit Prozesse anzuhängen</value>
+    <value>Verwende 32-Bit NetSpy um sich an 32-Bit Prozesse anzuhängen</value>
   </data>
   <data name="BreakCommand" xml:space="preserve">
     <value>Alle unter_brechen</value>
@@ -169,7 +169,7 @@
     <value>_Aufrufliste</value>
   </data>
   <data name="CallStack_MaxFramesExceeded" xml:space="preserve">
-    <value>Die von dnSpy maximal unterstützte Anzahl von Stack-Rahmen wurde überschritten.</value>
+    <value>Die von NetSpy maximal unterstützte Anzahl von Stack-Rahmen wurde überschritten.</value>
   </data>
   <data name="Column_Address" xml:space="preserve">
     <value>Adresse</value>
@@ -1525,7 +1525,7 @@ Sind Sie sicher, dass Sie es ausklappen möchten?</value>
     <value>Nach einem Prozess suchen</value>
   </data>
   <data name="DbgSettings_FocusDebuggerWhenProcessBreaks" xml:space="preserve">
-    <value>Hole dnSpy in den Vordergrund, wenn der Debugger hält</value>
+    <value>Hole NetSpy in den Vordergrund, wenn der Debugger hält</value>
   </data>
   <data name="Column_LoadModule" xml:space="preserve">
     <value>Lade</value>

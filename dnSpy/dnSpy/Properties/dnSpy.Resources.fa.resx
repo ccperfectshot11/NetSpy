@@ -301,7 +301,7 @@
     <value>متن نامعتبر است</value>
   </data>
   <data name="LoadingDnSpyPleaseWait" xml:space="preserve">
-    <value>در حال بارگذاری dnSpy. لطفا صبر کنید...</value>
+    <value>در حال بارگذاری NetSpy. لطفا صبر کنید...</value>
   </data>
   <data name="Menu_Edit" xml:space="preserve">
     <value>_ویرایش</value>
@@ -739,7 +739,7 @@
     <value>سیستم</value>
   </data>
   <data name="LanguageSwitchMessage" xml:space="preserve">
-    <value>شما باید dnSpy مجدداً اجرا کنید تا تغییرات بر روی آن اعمال شود.</value>
+    <value>شما باید NetSpy مجدداً اجرا کنید تا تغییرات بر روی آن اعمال شود.</value>
   </data>
   <data name="ShortCutKeyCtrlShiftO" xml:space="preserve">
     <value>Ctrl+Shift+O</value>
@@ -828,7 +828,7 @@
     <value>ویژگی‌ها</value>
   </data>
   <data name="AboutScreen_LicenseInfo" xml:space="preserve">
-    <value>dnSpy تحت لیسانس GPLv3 می باشد.</value>
+    <value>NetSpy تحت لیسانس GPLv3 می باشد.</value>
   </data>
   <data name="AboutScreen_LoadedFiles" xml:space="preserve">
     <value>فایل های بارگذاری شده:</value>

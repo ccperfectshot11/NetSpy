@@ -151,7 +151,7 @@
     <value>N'a pas pu démarrer le débogueur. Assurez-vous que vous avez accès au fichier "{0}" Erreur : {1}</value>
   </data>
   <data name="Error_CouldNotStartDebuggerRequireAdminPrivLvl" xml:space="preserve">
-    <value>N'a pas pu démarrer le débogueur. Le programme débogué requiert des privilèges d’administrateur. Redémarrez dnSpy avec les droits d’administrateur, puis réessayez.</value>
+    <value>N'a pas pu démarrer le débogueur. Le programme débogué requiert des privilèges d’administrateur. Redémarrez NetSpy avec les droits d’administrateur, puis réessayez.</value>
   </data>
   <data name="Error_FileDoesNotExist" xml:space="preserve">
     <value>Le fichier n’existe pas</value>
@@ -190,10 +190,10 @@
     <value>WaitSleepJoin</value>
   </data>
   <data name="UseDnSpy64ExeToDebug32" xml:space="preserve">
-    <value>Utilisez dnSpy 32-bit pour les exécutables 32-bit.</value>
+    <value>Utilisez NetSpy 32-bit pour les exécutables 32-bit.</value>
   </data>
   <data name="UseDnSpyExeToDebug64" xml:space="preserve">
-    <value>Utilisez dnSpy 64-bit pour les exécutables 64-bit.</value>
+    <value>Utilisez NetSpy 64-bit pour les exécutables 64-bit.</value>
   </data>
   <data name="ExceptionMessageIsNull" xml:space="preserve">
     <value>« &lt;no message exception&gt; »</value>

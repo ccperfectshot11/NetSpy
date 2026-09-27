@@ -153,7 +153,7 @@
 Hiba: {1}</value>
   </data>
   <data name="Error_CouldNotStartDebuggerRequireAdminPrivLvl" xml:space="preserve">
-    <value>A hibakereső nem indítható. A nyomkövetett programnak rendszergazdai jogosultság szükséges. Indítsa újra a dnSpy-t rendszergazdai jogkörrel és próbálja újra.</value>
+    <value>A hibakereső nem indítható. A nyomkövetett programnak rendszergazdai jogosultság szükséges. Indítsa újra a NetSpy-t rendszergazdai jogkörrel és próbálja újra.</value>
   </data>
   <data name="Error_FileDoesNotExist" xml:space="preserve">
     <value>A fájl nem létezik</value>
@@ -192,10 +192,10 @@ Hiba: {1}</value>
     <value>WaitSleepJoin</value>
   </data>
   <data name="UseDnSpy64ExeToDebug32" xml:space="preserve">
-    <value>32 bites dnSpy használata 32 bites alkalmazások hibakereséséhez.</value>
+    <value>32 bites NetSpy használata 32 bites alkalmazások hibakereséséhez.</value>
   </data>
   <data name="UseDnSpyExeToDebug64" xml:space="preserve">
-    <value>64 bites dnSpy használata 64 bites alkalmazások hibakereséséhez.</value>
+    <value>64 bites NetSpy használata 64 bites alkalmazások hibakereséséhez.</value>
   </data>
   <data name="ExceptionMessageIsNull" xml:space="preserve">
     <value>"&lt; nincs kivétel üzenet &gt;"</value>

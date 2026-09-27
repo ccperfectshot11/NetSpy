@@ -166,7 +166,7 @@
     <value>Betiği yükle ve çalıştır, #load "betikadı.csx"</value>
   </data>
   <data name="HelpScriptDirective_r" xml:space="preserve">
-    <value>Bir başvuru, bir derleme, diskteki bir dosya yolu, dnSpy'ın yolu veya bir klasör ekleyin, #r "myfile.dll"</value>
+    <value>Bir başvuru, bir derleme, diskteki bir dosya yolu, NetSpy'ın yolu veya bir klasör ekleyin, #r "myfile.dll"</value>
   </data>
   <data name="HelpShiftEnter" xml:space="preserve">
     <value>Yeni bir satır ekle</value>

@@ -26,7 +26,7 @@ namespace dnSpy.Contracts.App {
 	/// Application directories
 	/// </summary>
 	public static class AppDirectories {
-		const string DNSPY_SETTINGS_FILENAME = "dnSpy.xml";
+		const string DNSPY_SETTINGS_FILENAME = "NetSpy.xml";
 
 		/// <summary>
 		/// Base directory of dnSpy binaries. If all files have been moved to a 'bin' sub dir,
@@ -62,7 +62,7 @@ namespace dnSpy.Contracts.App {
 			if (File.Exists(settingsFilename))
 				DataDirectory = BinDirectory;
 			else {
-				DataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "dnSpy");
+				DataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NetSpy");
 				settingsFilename = Path.Combine(DataDirectory, DNSPY_SETTINGS_FILENAME);
 			}
 		}

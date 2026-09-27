@@ -153,7 +153,7 @@
 Errore: {1}</value>
   </data>
   <data name="Error_CouldNotStartDebuggerRequireAdminPrivLvl" xml:space="preserve">
-    <value>Impossibile avviare il debugger. Il programma debuggato richiedere diritti di amministratore. Riavvia dnSpy con diritti di amministratore e riprova.</value>
+    <value>Impossibile avviare il debugger. Il programma debuggato richiedere diritti di amministratore. Riavvia NetSpy con diritti di amministratore e riprova.</value>
   </data>
   <data name="Error_FileDoesNotExist" xml:space="preserve">
     <value>Il file non esiste</value>
@@ -192,10 +192,10 @@ Errore: {1}</value>
     <value>WaitSleepJoin</value>
   </data>
   <data name="UseDnSpy64ExeToDebug32" xml:space="preserve">
-    <value>Usa applicazione dnSpy a 32-bit per debug a 32-bit.</value>
+    <value>Usa applicazione NetSpy a 32-bit per debug a 32-bit.</value>
   </data>
   <data name="UseDnSpyExeToDebug64" xml:space="preserve">
-    <value>Usa applicazione dnSpy a 64-bit per debug a 64-bit.</value>
+    <value>Usa applicazione NetSpy a 64-bit per debug a 64-bit.</value>
   </data>
   <data name="ExceptionMessageIsNull" xml:space="preserve">
     <value>"&lt;nessun messaggio di errore&gt;"</value>

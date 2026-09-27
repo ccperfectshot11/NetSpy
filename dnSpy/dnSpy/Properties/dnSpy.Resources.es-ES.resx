@@ -226,7 +226,7 @@
     <value>Alt+F4</value>
   </data>
   <data name="ExplorerOpenWithDnSpy" xml:space="preserve">
-    <value>Abrir con dnSpy</value>
+    <value>Abrir con NetSpy</value>
   </data>
   <data name="FindCommand" xml:space="preserve">
     <value>_Buscar</value>
@@ -301,7 +301,7 @@
     <value>El texto no es válido</value>
   </data>
   <data name="LoadingDnSpyPleaseWait" xml:space="preserve">
-    <value>Cargando dnSpy. Por favor, espere...</value>
+    <value>Cargando NetSpy. Por favor, espere...</value>
   </data>
   <data name="Menu_Edit" xml:space="preserve">
     <value>_Editar</value>
@@ -739,7 +739,7 @@
     <value>Sistema</value>
   </data>
   <data name="LanguageSwitchMessage" xml:space="preserve">
-    <value>Debe reiniciar dnSpy para que el cambio de idioma surta efecto.</value>
+    <value>Debe reiniciar NetSpy para que el cambio de idioma surta efecto.</value>
   </data>
   <data name="ShortCutKeyCtrlShiftO" xml:space="preserve">
     <value>Ctrl+Mayús+O</value>
@@ -828,7 +828,7 @@
     <value>Propiedades</value>
   </data>
   <data name="AboutScreen_LicenseInfo" xml:space="preserve">
-    <value>dnSpy está licenciado bajo GPLv3.</value>
+    <value>NetSpy está licenciado bajo GPLv3.</value>
   </data>
   <data name="AboutScreen_LoadedFiles" xml:space="preserve">
     <value>Archivos cargados:</value>

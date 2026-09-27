@@ -142,10 +142,10 @@
     <value>附加到进程</value>
   </data>
   <data name="Attach_UseDnSpy32" xml:space="preserve">
-    <value>请改用 64 位的 dnSpy 来调试 64 位应用程序。</value>
+    <value>请改用 64 位的 NetSpy 来调试 64 位应用程序。</value>
   </data>
   <data name="Attach_UseDnSpy64" xml:space="preserve">
-    <value>请改用 32 位的 dnSpy 来调试 32 位应用程序。</value>
+    <value>请改用 32 位的 NetSpy 来调试 32 位应用程序。</value>
   </data>
   <data name="BreakCommand" xml:space="preserve">
     <value>全部中断(_K)</value>
@@ -169,7 +169,7 @@
     <value>调用堆栈(_C)</value>
   </data>
   <data name="CallStack_MaxFramesExceeded" xml:space="preserve">
-    <value>堆栈帧数量已超出 dnSpy 所支持的最大值。</value>
+    <value>堆栈帧数量已超出 NetSpy 所支持的最大值。</value>
   </data>
   <data name="Column_Address" xml:space="preserve">
     <value>地址</value>
@@ -1260,9 +1260,9 @@
 是否继续？</value>
   </data>
   <data name="StartDebuggingWarning_IncorrectBitness" xml:space="preserve">
-    <value>目标文件的位数与当前版本的 dnSpy 不匹配。调试可能会导致非预期的或者不受控制的程序映像执行。
+    <value>目标文件的位数与当前版本的 NetSpy 不匹配。调试可能会导致非预期的或者不受控制的程序映像执行。
 
-建议使用 32 位 dnSpy 调试 32 位程序，使用 64 位 dnSpy 调试 64 位程序。
+建议使用 32 位 NetSpy 调试 32 位程序，使用 64 位 NetSpy 调试 64 位程序。
 
 是否继续？</value>
   </data>
@@ -1582,7 +1582,7 @@
     <value>搜索进程</value>
   </data>
   <data name="DbgSettings_FocusDebuggerWhenProcessBreaks" xml:space="preserve">
-    <value>当调试器中断时，为 dnSpy 设置焦点</value>
+    <value>当调试器中断时，为 NetSpy 设置焦点</value>
   </data>
   <data name="Column_LoadModule" xml:space="preserve">
     <value>加载</value>

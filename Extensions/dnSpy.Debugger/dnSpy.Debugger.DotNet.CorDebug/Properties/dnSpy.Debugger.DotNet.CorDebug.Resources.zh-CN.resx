@@ -168,7 +168,7 @@
 错误: {1}</value>
   </data>
   <data name="Error_CouldNotStartDebuggerRequireAdminPrivLvl" xml:space="preserve">
-    <value>无法启动调试器。因为调试的目标程序需要管理员权限，请以管理员的身份运行 dnSpy 并重试。</value>
+    <value>无法启动调试器。因为调试的目标程序需要管理员权限，请以管理员的身份运行 NetSpy 并重试。</value>
   </data>
   <data name="Error_FileDoesNotExist" xml:space="preserve">
     <value>文件不存在</value>
@@ -207,10 +207,10 @@
     <value>WaitSleepJoin</value>
   </data>
   <data name="UseDnSpy64ExeToDebug32" xml:space="preserve">
-    <value>请改用 32 位的 dnSpy 来调试 32 位应用程序。</value>
+    <value>请改用 32 位的 NetSpy 来调试 32 位应用程序。</value>
   </data>
   <data name="UseDnSpyExeToDebug64" xml:space="preserve">
-    <value>请改用 64 位的 dnSpy 来调试 64 位应用程序。</value>
+    <value>请改用 64 位的 NetSpy 来调试 64 位应用程序。</value>
   </data>
   <data name="ExceptionMessageIsNull" xml:space="preserve">
     <value>"&lt;没有异常消息&gt;"</value>

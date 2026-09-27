@@ -166,7 +166,7 @@
     <value>بارگذاری و اجرای یک اسکریپت، #load "myscript.csx"</value>
   </data>
   <data name="HelpScriptDirective_r" xml:space="preserve">
-    <value>اضافه کردن یک مرجع، همچنین یک اسمبلی یا مسیر فایل بر روی دیسک یا مسیر نسبی مرتبط با dnSpy و یا دایرکتوری کاربر، #r "myfile.dll"</value>
+    <value>اضافه کردن یک مرجع، همچنین یک اسمبلی یا مسیر فایل بر روی دیسک یا مسیر نسبی مرتبط با NetSpy و یا دایرکتوری کاربر، #r "myfile.dll"</value>
   </data>
   <data name="HelpShiftEnter" xml:space="preserve">
     <value>درج یک خط جدید</value>

@@ -133,8 +133,8 @@ namespace dnSpy.BackgroundImage {
 			images.Where(a => !IsBetaImage(a));
 
 		static bool IsBetaImage(string image) =>
-			image.EndsWith("pack://application:,,,/dnSpy;component/Images/DefaultWatermarkLight.png", StringComparison.CurrentCultureIgnoreCase) ||
-			image.EndsWith("pack://application:,,,/dnSpy;component/Images/DefaultWatermarkDark.png", StringComparison.CurrentCultureIgnoreCase);
+			image.EndsWith("pack://application:,,,/NetSpy;component/Images/DefaultWatermarkLight.png", StringComparison.CurrentCultureIgnoreCase) ||
+			image.EndsWith("pack://application:,,,/NetSpy;component/Images/DefaultWatermarkDark.png", StringComparison.CurrentCultureIgnoreCase);
 
 		const string SEP_STRING = "<{[]}>";
 		static string SerializeImages(string[] s) => string.Join(SEP_STRING, s);

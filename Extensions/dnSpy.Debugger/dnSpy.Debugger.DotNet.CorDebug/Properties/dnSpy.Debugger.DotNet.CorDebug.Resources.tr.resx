@@ -153,7 +153,7 @@
 Hata:{1}</value>
   </data>
   <data name="Error_CouldNotStartDebuggerRequireAdminPrivLvl" xml:space="preserve">
-    <value>Hata ayıklayıcı başlatılamadı. Hata ayıklayıcı programı yönetici izinleri gerektirir. Yönetici izniyle beraber dnSpy'ı tekrar başlatın ve işlemi tekrar deneyin.</value>
+    <value>Hata ayıklayıcı başlatılamadı. Hata ayıklayıcı programı yönetici izinleri gerektirir. Yönetici izniyle beraber NetSpy'ı tekrar başlatın ve işlemi tekrar deneyin.</value>
   </data>
   <data name="Error_FileDoesNotExist" xml:space="preserve">
     <value>Dosya mevcut değil</value>
@@ -192,10 +192,10 @@ Hata:{1}</value>
     <value>BekleUyuKatıl</value>
   </data>
   <data name="UseDnSpy64ExeToDebug32" xml:space="preserve">
-    <value>32-bit uygulamalardaki hataları ayıklamak için dnSpy 32-bit kullanın.</value>
+    <value>32-bit uygulamalardaki hataları ayıklamak için NetSpy 32-bit kullanın.</value>
   </data>
   <data name="UseDnSpyExeToDebug64" xml:space="preserve">
-    <value>64 bit uygulamalarda hata ayıklamak için 64 bit dnSpy kullanın.</value>
+    <value>64 bit uygulamalarda hata ayıklamak için 64 bit NetSpy kullanın.</value>
   </data>
   <data name="ExceptionMessageIsNull" xml:space="preserve">
     <value>"&lt; istisna mesajı yok &gt;"</value>

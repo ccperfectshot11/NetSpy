@@ -33,11 +33,15 @@
 
     <!-- Update app.config whenever this value changes -->
     <DnSpyAssemblyVersion>6.6.0.0</DnSpyAssemblyVersion>
+    <!-- NetSpy: AssemblyVersion above stays 6.6.0.0 so existing dnSpy extensions still bind (see app.config).
+         The NetSpy version below is what users see (title bar, file properties) and what the update check compares. -->
+    <NetSpyVersion>1.0.0.0</NetSpyVersion>
+    <FileVersion>$(NetSpyVersion)</FileVersion>
     <!-- This is shown in the title bar -->
-    <DnSpyAssemblyInformationalVersion>v6.6.0</DnSpyAssemblyInformationalVersion>
+    <DnSpyAssemblyInformationalVersion>v1.0.0</DnSpyAssemblyInformationalVersion>
     <!-- Prevent .NET SDK from appening the git commit hash to the information version -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <DnSpyAssemblyCopyright>Copyright (C) 2014-2020 de4dot@gmail.com</DnSpyAssemblyCopyright>
+    <DnSpyAssemblyCopyright>Copyright (C) 2014-2020 de4dot@gmail.com, dnSpyEx contributors, NetSpy contributors</DnSpyAssemblyCopyright>
 
     <!-- AD0001: buggy Roslyn analyzer(s) crash, disable that warning -->
     <!-- WFAC010,WFO0003: Prevent warning about app.manifest properties -->
