@@ -77,7 +77,16 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 				rootNode.DescendantsAndSelf.OfType<Identifier>().Select(i => i.Name), StringComparer.Ordinal);
 			foreach (var ident in rootNode.DescendantsAndSelf.OfType<Identifier>())
 			{
-				string newName = ReplaceInvalid(ident.Name, existingNames);
+				string newName;
+				if (ident.Parent is NamedArgumentExpression { Parent: RecursivePatternExpression } && ident.Name.Contains('.'))
+				{
+					// NetSpy: "{ Address.City: "" }" is a member path (C# 10 extended property pattern)
+					newName = string.Join(".", ident.Name.Split('.').Select(part => ReplaceInvalid(part, existingNames)));
+				}
+				else
+				{
+					newName = ReplaceInvalid(ident.Name, existingNames);
+				}
 				if (newName != ident.Name)
 				{
 					context.Step($"Escape identifier '{ident.Name}'", ident);

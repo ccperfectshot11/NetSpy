@@ -42,8 +42,14 @@ namespace ICSharpCode.Decompiler.CSharp.Syntax
 	[DecompilerAstNode]
 	public sealed partial class SwitchExpressionSection : AstNode
 	{
+		public const string WhenKeyword = "when";
+
 		[Slot("Pattern")]
 		public partial Expression Pattern { get; set; }
+
+		/// <summary>NetSpy: the arm's "when" clause (case guard), or null</summary>
+		[Slot("Condition")]
+		public partial Expression? Condition { get; set; }
 
 		[Slot("SwitchExpressionBody")]
 		public partial Expression Body { get; set; }

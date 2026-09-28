@@ -148,6 +148,10 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 						return PrecedenceLevel.NullCoalescing;
 					case BinaryOperatorType.IsPattern:
 						return PrecedenceLevel.RelationalAndTypeTesting;
+					case BinaryOperatorType.PatternAnd: // NetSpy: pattern combinators bind like && and ||
+						return PrecedenceLevel.ConditionalAnd;
+					case BinaryOperatorType.PatternOr:
+						return PrecedenceLevel.ConditionalOr;
 					default:
 						throw new NotSupportedException("Invalid value for BinaryOperatorType");
 				}
@@ -348,6 +352,17 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 					ParenthesizeIfRequired(binaryOperatorExpression.Left, precedence + 1);
 					ParenthesizeIfRequired(binaryOperatorExpression.Right, precedence);
 				}
+			}
+			else if (binaryOperatorExpression.Operator == BinaryOperatorType.IsPattern)
+			{
+				// NetSpy: the right side is a pattern, its combinators have their own precedence rules
+				ParenthesizeIfRequired(binaryOperatorExpression.Left, precedence);
+			}
+			else if (binaryOperatorExpression.Operator is BinaryOperatorType.PatternAnd or BinaryOperatorType.PatternOr)
+			{
+				// NetSpy: "a and b or c" (left-associative, 'and' binds tighter than 'or')
+				ParenthesizeIfRequired(binaryOperatorExpression.Left, precedence);
+				ParenthesizeIfRequired(binaryOperatorExpression.Right, precedence + 1);
 			}
 			else
 			{

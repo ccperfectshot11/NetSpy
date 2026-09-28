@@ -889,6 +889,8 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 					break;
 				case BinaryOperatorType.NullCoalescing:
 				case BinaryOperatorType.IsPattern:
+				case BinaryOperatorType.PatternAnd:
+				case BinaryOperatorType.PatternOr:
 					spacePolicy = true;
 					break;
 				case BinaryOperatorType.Range:
@@ -899,7 +901,7 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 			}
 			Space(spacePolicy);
 			string operatorToken = BinaryOperatorExpression.GetOperatorToken(binaryOperatorExpression.Operator);
-			if (operatorToken == BinaryOperatorExpression.IsKeyword)
+			if (operatorToken is BinaryOperatorExpression.IsKeyword or BinaryOperatorExpression.PatternAndKeyword or BinaryOperatorExpression.PatternOrKeyword)
 			{
 				WriteKeyword(operatorToken);
 			}
@@ -1013,25 +1015,25 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 		{
 			StartNode(recursivePatternExpression);
 
+			// NetSpy: written like source code: "Point(var x, var y)", "(1, 2)", "string { Length: 0 }", "{ }"
 			recursivePatternExpression.Type?.AcceptVisitor(this);
-			Space();
 			if (recursivePatternExpression.IsPositional)
 			{
 				WriteToken(Tokens.LPar);
-			}
-			else
-			{
-				WriteToken(Tokens.LBrace);
-			}
-			Space();
-			WriteCommaSeparatedList(recursivePatternExpression.SubPatterns);
-			Space();
-			if (recursivePatternExpression.IsPositional)
-			{
+				WriteCommaSeparatedList(recursivePatternExpression.SubPatterns);
 				WriteToken(Tokens.RPar);
 			}
 			else
 			{
+				if (recursivePatternExpression.Type is not null)
+					Space();
+				WriteToken(Tokens.LBrace);
+				Space();
+				if (recursivePatternExpression.SubPatterns.Count > 0)
+				{
+					WriteCommaSeparatedList(recursivePatternExpression.SubPatterns);
+					Space();
+				}
 				WriteToken(Tokens.RBrace);
 			}
 			if (recursivePatternExpression.Designation is not null)
@@ -1378,6 +1380,10 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 			else if (!IsPostfixOperator(opType) && opSymbol != null)
 			{
 				WriteToken(opSymbol);
+				// NetSpy: relational patterns are written "< 10", not "<10"
+				if (opType is UnaryOperatorType.PatternRelationalLessThan or UnaryOperatorType.PatternRelationalLessThanOrEqual
+					or UnaryOperatorType.PatternRelationalGreaterThan or UnaryOperatorType.PatternRelationalGreaterThanOrEqual)
+					Space();
 			}
 			unaryOperatorExpression.Expression.AcceptVisitor(this);
 			if (IsPostfixOperator(opType))
@@ -2149,7 +2155,7 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 			foreach (AstNode node in switchExpression.SwitchSections)
 			{
 				node.AcceptVisitor(this);
-				Comma(node);
+				Comma(node, noSpaceAfterComma: true);
 				NewLine();
 			}
 			CloseBrace(policy.ArrayInitializerBraceStyle);
@@ -2160,6 +2166,13 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 		{
 			StartNode(switchExpressionSection);
 			switchExpressionSection.Pattern.AcceptVisitor(this);
+			if (switchExpressionSection.Condition is not null)
+			{
+				Space();
+				WriteKeyword(SwitchExpressionSection.WhenKeyword);
+				Space();
+				switchExpressionSection.Condition.AcceptVisitor(this);
+			}
 			Space();
 			WriteToken(Tokens.Arrow);
 			Space();

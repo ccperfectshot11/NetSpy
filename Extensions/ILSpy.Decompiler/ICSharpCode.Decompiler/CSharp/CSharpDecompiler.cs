@@ -290,6 +290,7 @@ namespace ICSharpCode.Decompiler.CSharp
 				new RenameVisualBasicAnonymousTypes(), // must run before FixNameCollisions
 				new FixNameCollisions(),
 				new AddXmlDocumentationTransform(),
+				new IntroduceSwitchExpressions(), // NetSpy: pattern switch expressions from decision trees
 				new ExpressionBodiedMembers(), // NetSpy: must be last (marks final bodies)
 			};
 		}

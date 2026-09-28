@@ -61,6 +61,8 @@ namespace ICSharpCode.Decompiler.CSharp.Syntax
 		public const string NullCoalescingToken = "??";
 		public const string RangeToken = "..";
 		public const string IsKeyword = IsExpression.IsKeyword;
+		public const string PatternAndKeyword = "and"; // NetSpy
+		public const string PatternOrKeyword = "or"; // NetSpy
 
 		[Slot("Left")]
 		public partial Expression? Left { get; set; }
@@ -118,6 +120,10 @@ namespace ICSharpCode.Decompiler.CSharp.Syntax
 					return RangeToken;
 				case BinaryOperatorType.IsPattern:
 					return IsKeyword;
+				case BinaryOperatorType.PatternAnd:
+					return PatternAndKeyword;
+				case BinaryOperatorType.PatternOr:
+					return PatternOrKeyword;
 				default:
 					throw new NotSupportedException("Invalid value for BinaryOperatorType");
 			}
@@ -236,5 +242,9 @@ namespace ICSharpCode.Decompiler.CSharp.Syntax
 		/// <summary>left is right</summary>
 		/// <remarks>right must be a pattern</remarks>
 		IsPattern,
+		/// <summary>NetSpy: pattern "left and right" (both operands are patterns)</summary>
+		PatternAnd,
+		/// <summary>NetSpy: pattern "left or right" (both operands are patterns)</summary>
+		PatternOr,
 	}
 }
