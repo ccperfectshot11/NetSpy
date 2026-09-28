@@ -36,5 +36,11 @@ namespace dnSpy.Contracts.Decompiler {
 		/// Decompiles selected methods, the other ones have empty bodies, data is a <see cref="DecompileTypeMethods"/>
 		/// </summary>
 		TypeMethods,
+
+		/// <summary>
+		/// Writes a whole project (project file + all source files) of a module, data is a
+		/// <see cref="DecompileWholeProject"/> instance. Used by NetSpy's C# decompiler (modern ILSpy engine).
+		/// </summary>
+		WholeProject,
 	}
 }

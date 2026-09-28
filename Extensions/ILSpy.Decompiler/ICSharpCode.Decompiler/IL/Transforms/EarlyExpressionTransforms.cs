@@ -1,0 +1,280 @@
+// Copyright (c) 2017 Daniel Grunwald
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal in the Software
+// without restriction, including without limitation the rights to use, copy, modify, merge,
+// publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+// to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or
+// substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
+
+using System.Linq;
+
+using ICSharpCode.Decompiler.TypeSystem;
+
+namespace ICSharpCode.Decompiler.IL.Transforms
+{
+	public class EarlyExpressionTransforms : ILVisitor, IILTransform
+	{
+		ILTransformContext context;
+
+		public void Run(ILFunction function, ILTransformContext context)
+		{
+			this.context = context;
+			Default(function);
+		}
+
+		protected override void Default(ILInstruction inst)
+		{
+			foreach (var child in inst.Children)
+			{
+				child.AcceptVisitor(this);
+			}
+		}
+
+		protected internal override void VisitComp(Comp inst)
+		{
+			base.VisitComp(inst);
+			FixComparisonKindLdNull(inst, context);
+		}
+
+		internal static void FixComparisonKindLdNull(Comp inst, ILTransformContext context)
+		{
+			if (inst.IsLifted)
+			{
+				return;
+			}
+			if (inst.Right.MatchLdNull())
+			{
+				if (inst.Kind == ComparisonKind.GreaterThan)
+				{
+					context.Step("comp(left > ldnull)  => comp(left != ldnull)", inst);
+					inst.Kind = ComparisonKind.Inequality;
+				}
+				else if (inst.Kind == ComparisonKind.LessThanOrEqual)
+				{
+					context.Step("comp(left <= ldnull) => comp(left == ldnull)", inst);
+					inst.Kind = ComparisonKind.Equality;
+				}
+			}
+			else if (inst.Left.MatchLdNull())
+			{
+				if (inst.Kind == ComparisonKind.LessThan)
+				{
+					context.Step("comp(ldnull < right)  => comp(ldnull != right)", inst);
+					inst.Kind = ComparisonKind.Inequality;
+				}
+				else if (inst.Kind == ComparisonKind.GreaterThanOrEqual)
+				{
+					context.Step("comp(ldnull >= right) => comp(ldnull == right)", inst);
+					inst.Kind = ComparisonKind.Equality;
+				}
+			}
+
+			if (inst.Right.MatchLdNull() && inst.Left.MatchBox(out var arg, out var type) && type.Kind == TypeKind.TypeParameter)
+			{
+				if (inst.Kind is ComparisonKind.Equality or ComparisonKind.Inequality)
+				{
+					context.Step("comp(box T(..) == ldnull) -> comp(.. == ldnull)", inst);
+					inst.Left = arg;
+					inst.InputType = arg.ResultType;
+				}
+			}
+		}
+
+		protected internal override void VisitStObj(StObj inst)
+		{
+			base.VisitStObj(inst);
+			StObjToStLoc(inst, context);
+		}
+
+		// This transform is required because ILInlining only works with stloc/ldloc
+		internal static bool StObjToStLoc(StObj inst, ILTransformContext context)
+		{
+			if (inst.Target.MatchLdLoca(out ILVariable v)
+				&& TypeUtils.IsCompatibleTypeForMemoryAccess(v.Type, inst.Type)
+				&& inst.UnalignedPrefix == 0
+				&& !inst.IsVolatile)
+			{
+				context.Step($"stobj(ldloca {v.Name}, ...) => stloc {v.Name}(...)", inst);
+				ILInstruction replacement = new StLoc(v, inst.Value).WithILRange(inst);
+				if (v.StackType == StackType.Unknown && inst.Type.Kind != TypeKind.Unknown
+					&& inst.SlotInfo != Block.InstructionSlot)
+				{
+					replacement = new Conv(replacement, inst.Type.ToPrimitiveType(),
+						checkForOverflow: false, Sign.None);
+				}
+				inst.ReplaceWith(replacement);
+				context.EndStep(replacement);
+				return true;
+			}
+			return false;
+		}
+
+		protected internal override void VisitLdObj(LdObj inst)
+		{
+			base.VisitLdObj(inst);
+			AddressOfLdLocToLdLoca(inst, context);
+			LdObjToLdLoc(inst, context);
+		}
+
+		internal static bool LdObjToLdLoc(LdObj inst, ILTransformContext context)
+		{
+			if (inst.Target.MatchLdLoca(out ILVariable v)
+				&& TypeUtils.IsCompatibleTypeForMemoryAccess(v.Type, inst.Type)
+				&& inst.UnalignedPrefix == 0
+				&& !inst.IsVolatile)
+			{
+				context.Step($"ldobj(ldloca {v.Name}) => ldloc {v.Name}", inst);
+				ILInstruction replacement = new LdLoc(v).WithILRange(inst);
+				if (v.StackType == StackType.Unknown && inst.Type.Kind != TypeKind.Unknown)
+				{
+					replacement = new Conv(replacement, inst.Type.ToPrimitiveType(),
+						checkForOverflow: false, Sign.None);
+				}
+				inst.ReplaceWith(replacement);
+				context.EndStep(replacement);
+				return true;
+			}
+			return false;
+		}
+
+		internal static void AddressOfLdLocToLdLoca(LdObj inst, ILTransformContext context)
+		{
+			// ldobj(...(addressof(ldloc V))) where ... can be zero or more ldflda instructions
+			// =>
+			// ldobj(...(ldloca V))
+			var temp = inst.Target;
+			var range = temp.ILRanges;
+			while (temp.MatchLdFlda(out var ldfldaTarget, out _))
+			{
+				temp = ldfldaTarget;
+				range = range.Concat(temp.ILRanges);
+			}
+			if (!temp.MatchAddressOf(out var addressOfTarget, out var addressOfType))
+				return;
+			ILInstruction replacement;
+			switch (addressOfTarget)
+			{
+				case LdLoc { Variable: var v }:
+					context.Step($"ldobj(...(addressof(ldloca {v.Name}))) => ldobj(...(ldloca {v.Name}))", inst);
+					replacement = new LdLoca(v).WithILRange(addressOfTarget);
+					break;
+				// The enclosing ldobj only reads through the temporary the addressof creates, so
+				// the copy can be elided and the read go directly through the inner address.
+				// This shape arises when a struct field chain is read by value (ldfld, then a
+				// field of the loaded value), e.g. reading element 8+ of a long tuple via Rest.
+				// The type check keeps the elision on that shape: re-rooting a read of an
+				// incompatible type onto the inner address would read memory behind it that the
+				// copy never covered.
+				case LdObj { UnalignedPrefix: 0, IsVolatile: false } innerLdObj
+					when TypeUtils.IsCompatibleTypeForMemoryAccess(innerLdObj.Type, addressOfType):
+					context.Step("ldobj(...(addressof(ldobj(addr)))) => ldobj(...(addr))", inst);
+					replacement = innerLdObj.Target;
+					range = range.Concat(addressOfTarget.ILRanges);
+					break;
+				default:
+					return;
+			}
+			foreach (var r in range)
+			{
+				replacement = replacement.WithILRange(r);
+			}
+			temp.ReplaceWith(replacement);
+			context.EndStep(replacement);
+		}
+
+		protected internal override void VisitCall(Call inst)
+		{
+			base.VisitCall(inst);
+			TransformAsyncHelpersAwaitToAwait(inst, context);
+		}
+
+		// runtime-async lowering emits `call AsyncHelpers.Await(value)` in place of the IL Await
+		// instruction. Convert it back so downstream transforms (UsingTransform's MatchDisposeBlock
+		// and friends pattern-match on Await via UnwrapAwait) see the canonical shape that the
+		// state-machine async pipeline also produces. Gate on the current function actually being
+		// a runtime-async method — ILReader sets IsAsync iff the MethodImpl.Async bit is present —
+		// so a non-async method that calls the helper directly (legal, just unusual) doesn't get
+		// rewritten into IL that the surrounding non-async control flow can't represent.
+		internal static bool TransformAsyncHelpersAwaitToAwait(Call inst, ILTransformContext context)
+		{
+			if (!context.Settings.AsyncAwait || !context.Function.IsAsync)
+				return false;
+			if (!inst.Method.IsStatic || inst.Arguments.Count != 1 || !IsAsyncHelpersMethod(inst.Method, "Await"))
+				return false;
+			context.Step("call AsyncHelpers.Await(value) => await(value)", inst);
+			var awaitInst = new Await(inst.Arguments[0]).WithILRange(inst);
+			awaitInst.GetAwaiterMethod = null;
+			awaitInst.GetResultMethod = inst.Method;
+			inst.ReplaceWith(awaitInst);
+			context.EndStep(awaitInst);
+			return true;
+		}
+
+		internal static bool IsAsyncHelpersMethod(IMethod method, string name)
+		{
+			return method.Name == name
+				&& method.DeclaringType?.FullName == "System.Runtime.CompilerServices.AsyncHelpers";
+		}
+
+		protected internal override void VisitNewObj(NewObj inst)
+		{
+			if (TransformDecimalCtorToConstant(inst, out LdcDecimal decimalConstant))
+			{
+				context.Step("TransformDecimalCtorToConstant", inst);
+				inst.ReplaceWith(decimalConstant);
+				context.EndStep(decimalConstant);
+				return;
+			}
+
+			base.VisitNewObj(inst);
+		}
+
+		bool TransformDecimalCtorToConstant(NewObj inst, out LdcDecimal result)
+		{
+			IType t = inst.Method.DeclaringType;
+			result = null;
+			if (!t.IsKnownType(KnownTypeCode.Decimal))
+				return false;
+			var args = inst.Arguments;
+			if (args.Count == 1)
+			{
+				long val;
+				if (args[0].MatchLdcI(out val))
+				{
+					var paramType = inst.Method.Parameters[0].Type.GetDefinition()?.KnownTypeCode;
+					result = paramType switch {
+						KnownTypeCode.Int32 => new LdcDecimal(new decimal(unchecked((int)val))),
+						KnownTypeCode.UInt32 => new LdcDecimal(new decimal(unchecked((uint)val))),
+						KnownTypeCode.Int64 => new LdcDecimal(new decimal(val)),
+						KnownTypeCode.UInt64 => new LdcDecimal(new decimal(unchecked((ulong)val))),
+						_ => null
+					};
+					return result is not null;
+				}
+			}
+			else if (args.Count == 5)
+			{
+				int lo, mid, hi, isNegative, scale;
+				if (args[0].MatchLdcI4(out lo) && args[1].MatchLdcI4(out mid) &&
+					args[2].MatchLdcI4(out hi) && args[3].MatchLdcI4(out isNegative) &&
+					args[4].MatchLdcI4(out scale) && unchecked((byte)scale) <= 28)
+				{
+					result = new LdcDecimal(new decimal(lo, mid, hi, isNegative != 0, unchecked((byte)scale)));
+					return true;
+				}
+			}
+			return false;
+		}
+
+	}
+}

@@ -81,7 +81,9 @@ namespace dnSpy.Decompiler.MSBuild {
 					string name;
 					lock (filenameCreator)
 						name = filenameCreator.Create(modOpts.Module);
-					var p = new Project(modOpts, name, satelliteAssemblyFinder, options.CreateDecompilerOutput);
+					var p = new Project(modOpts, name, satelliteAssemblyFinder, options.CreateDecompilerOutput) {
+						SdkStyle = options.GenerateSDKStyleProjects,
+					};
 					lock (projects)
 						projects.Add(p);
 					p.CreateProjectFiles(ctx);
@@ -113,6 +115,11 @@ namespace dnSpy.Decompiler.MSBuild {
 				Parallel.ForEach(projects, opts, p => {
 					options.CancellationToken.ThrowIfCancellationRequested();
 					try {
+						// Already written by the decompiler
+						if (p.IsWholeProject) {
+							progressListener.SetProgress(Interlocked.Increment(ref totalProgress));
+							return;
+						}
 						ProjectWriterBase writer;
 						if (options.GenerateSDKStyleProjects)
 							writer = new SdkProjectWriter(p, p.Options.ProjectVersion ?? options.ProjectVersion, projects, options.UserGACPaths);

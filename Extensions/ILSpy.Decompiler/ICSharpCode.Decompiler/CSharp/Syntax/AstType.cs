@@ -1,0 +1,142 @@
+// Copyright (c) 2010-2013 AlphaSierraPapa for the SharpDevelop Team
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal in the Software
+// without restriction, including without limitation the rights to use, copy, modify, merge,
+// publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+// to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or
+// substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
+
+#nullable enable
+
+using System.Collections.Generic;
+
+using ICSharpCode.Decompiler.CSharp.Resolver;
+using ICSharpCode.Decompiler.CSharp.Syntax.PatternMatching;
+
+namespace ICSharpCode.Decompiler.CSharp.Syntax
+{
+	/// <summary>
+	/// A type reference in the C# AST.
+	/// </summary>
+	[DecompilerAstNode(hasPatternPlaceholder: true)]
+	public abstract partial class AstType : AstNode
+	{
+		public new AstType Clone()
+		{
+			return (AstType)base.Clone();
+		}
+
+		/// <summary>
+		/// Gets whether this type is a SimpleType "var".
+		/// </summary>
+		public bool IsVar()
+		{
+			SimpleType? st = this as SimpleType;
+			return st != null && st.Identifier == "var" && st.TypeArguments.Count == 0;
+		}
+
+		/// <summary>
+		/// Gets the name lookup mode from the context (looking at the ancestors of this <see cref="AstType"/>).
+		/// </summary>
+		public NameLookupMode GetNameLookupMode()
+		{
+			AstType outermostType = this;
+			while (outermostType.Parent is AstType)
+				outermostType = (AstType)outermostType.Parent;
+
+			if (outermostType.Parent is UsingDeclaration || outermostType.Parent is UsingAliasDeclaration)
+			{
+				return NameLookupMode.TypeInUsingDeclaration;
+			}
+			else if (outermostType.Slot?.Kind == Slots.BaseType)
+			{
+				// Use BaseTypeReference for a type's base type, and for a constraint on a type.
+				// Do not use it for a constraint on a method.
+				if (outermostType.Parent is TypeDeclaration || (outermostType.Parent is Constraint && outermostType.Parent.Parent is TypeDeclaration))
+					return NameLookupMode.BaseTypeReference;
+			}
+			return NameLookupMode.Type;
+		}
+
+		/// <summary>
+		/// Creates a pointer type from this type by nesting it in a <see cref="ComposedType"/>.
+		/// If this type already is a pointer type, this method just increases the PointerRank of the existing pointer type.
+		/// </summary>
+		public virtual AstType MakePointerType()
+		{
+			return new ComposedType { BaseType = this }.MakePointerType();
+		}
+
+		/// <summary>
+		/// Creates an array type from this type by nesting it in a <see cref="ComposedType"/>.
+		/// If this type already is an array type, the additional rank is prepended to the existing array specifier list.
+		/// Thus, <c>new SimpleType("T").MakeArrayType(1).MakeArrayType(2)</c> will result in "T[,][]".
+		/// </summary>
+		public virtual AstType MakeArrayType(int rank = 1)
+		{
+			return new ComposedType { BaseType = this }.MakeArrayType(rank);
+		}
+
+		/// <summary>
+		/// Creates a nullable type from this type by nesting it in a <see cref="ComposedType"/>.
+		/// </summary>
+		public AstType MakeNullableType()
+		{
+			return new ComposedType { BaseType = this, HasNullableSpecifier = true };
+		}
+
+		/// <summary>
+		/// Creates a C# 7 ref type from this type by nesting it in a <see cref="ComposedType"/>.
+		/// </summary>
+		public virtual AstType MakeRefType()
+		{
+			return new ComposedType { BaseType = this, HasRefSpecifier = true };
+		}
+
+		/// <summary>
+		/// Builds an expression that can be used to access a static member on this type.
+		/// </summary>
+		public MemberType MemberType(string memberName, params AstType[] typeArguments)
+		{
+			var memberType = new MemberType(this, memberName);
+			memberType.TypeArguments.AddRange(typeArguments);
+			return memberType;
+		}
+
+		/// <summary>
+		/// Builds an expression that can be used to access a static member on this type.
+		/// </summary>
+		public MemberType MemberType(string memberName, IEnumerable<AstType> typeArguments)
+		{
+			var memberType = new MemberType(this, memberName);
+			memberType.TypeArguments.AddRange(typeArguments);
+			return memberType;
+		}
+
+		/// <summary>
+		/// Creates a simple AstType from a dotted name.
+		/// Does not support generics, arrays, etc. - just simple dotted names,
+		/// e.g. namespace names.
+		/// </summary>
+		public static AstType Create(string dottedName)
+		{
+			string[] parts = dottedName.Split('.');
+			AstType type = new SimpleType(parts[0]);
+			for (int i = 1; i < parts.Length; i++)
+			{
+				type = new MemberType(type, parts[i]);
+			}
+			return type;
+		}
+	}
+}

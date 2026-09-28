@@ -1,0 +1,574 @@
+// Copyright (c) 2011 AlphaSierraPapa for the SharpDevelop Team
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal in the Software
+// without restriction, including without limitation the rights to use, copy, modify, merge,
+// publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+// to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or
+// substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+using ICSharpCode.Decompiler.CSharp;
+using ICSharpCode.Decompiler.CSharp.OutputVisitor;
+using ICSharpCode.Decompiler.CSharp.Syntax;
+using ICSharpCode.Decompiler.IL;
+using ICSharpCode.Decompiler.Semantics;
+using ICSharpCode.Decompiler.TypeSystem;
+using ICSharpCode.Decompiler.TypeSystem.Implementation;
+using ICSharpCode.Decompiler.Util;
+
+namespace ICSharpCode.Decompiler
+{
+	public class TextTokenWriter : TokenWriter
+	{
+		readonly ITextOutput output;
+		readonly DecompilerSettings settings;
+		readonly Stack<AstNode> nodeStack = new Stack<AstNode>();
+		int braceLevelWithinType = -1;
+		bool inDocumentationComment = false;
+		bool firstUsingDeclaration;
+		bool lastUsingDeclaration;
+
+		public TextTokenWriter(ITextOutput output, DecompilerSettings settings)
+		{
+			if (output == null)
+				throw new ArgumentNullException(nameof(output));
+			if (settings == null)
+				throw new ArgumentNullException(nameof(settings));
+			this.output = output;
+			this.settings = settings;
+		}
+
+		public override void WriteIdentifier(Identifier identifier)
+		{
+			if (identifier.IsVerbatim || CSharpOutputVisitor.IsKeyword(identifier.Name, identifier))
+			{
+				output.Write('@');
+			}
+
+			var definition = GetCurrentDefinition();
+			string name = TextWriterTokenWriter.EscapeIdentifier(identifier.Name);
+			switch (definition)
+			{
+				case IType t:
+					output.WriteReference(t, name, true);
+					return;
+				case IMember m:
+					output.WriteReference(m, name, true);
+					return;
+			}
+
+			var member = GetCurrentMemberReference();
+			switch (member)
+			{
+				case IType t:
+					output.WriteReference(t, name, false);
+					return;
+				case IMember m:
+					if (IsDynamicMemberReference(nodeStack.Peek()))
+					{
+						// A member synthesized for a dynamic access: show its signature on hover, but do not
+						// make it a navigation target (there is no real member to jump to), and no occurrence
+						// highlight either - it is a distinct synthetic member at every use.
+						output.WriteLocalReference(name, m, isHoverOnly: true);
+					}
+					else
+					{
+						output.WriteReference(m, name, false);
+					}
+					return;
+			}
+
+			var localDefinition = GetCurrentLocalDefinition(identifier);
+			if (localDefinition != null)
+			{
+				output.WriteLocalReference(name, localDefinition, isDefinition: true);
+				return;
+			}
+
+			var localRef = GetCurrentLocalReference();
+			if (localRef != null)
+			{
+				output.WriteLocalReference(name, localRef);
+				return;
+			}
+
+			if (firstUsingDeclaration && !lastUsingDeclaration)
+			{
+				output.MarkFoldStart(defaultCollapsed: !settings.ExpandUsingDeclarations);
+				firstUsingDeclaration = false;
+			}
+
+			output.Write(name);
+		}
+
+		ISymbol GetCurrentMemberReference()
+		{
+			AstNode node = nodeStack.Peek();
+			var symbol = node.GetSymbol();
+			if (symbol == null && node.Slot?.Kind == Slots.TargetExpression && node.Parent is InvocationExpression)
+			{
+				symbol = node.Parent.GetSymbol();
+			}
+			if (symbol != null && node.Slot?.Kind == Slots.Type && node.Parent is ObjectCreateExpression)
+			{
+				var ctorSymbol = node.Parent.GetSymbol();
+				if (ctorSymbol != null)
+					symbol = ctorSymbol;
+			}
+
+			if (node is IdentifierExpression && node.Slot?.Kind == Slots.TargetExpression && node.Parent is InvocationExpression && symbol is IMember member)
+			{
+				var declaringType = member.DeclaringType;
+				if (declaringType != null && declaringType.Kind == TypeKind.Delegate)
+					return null;
+			}
+			return FilterMember(symbol);
+		}
+
+		ISymbol FilterMember(ISymbol symbol)
+		{
+			if (symbol == null)
+				return null;
+
+			if (symbol is LocalFunctionMethod)
+				return null;
+
+			return symbol;
+		}
+
+		/// <summary>
+		/// True if the member reference at this node was synthesized for a dynamic member access/invocation.
+		/// Such members carry a hover tooltip but must not be navigation targets, since they do not exist in
+		/// metadata.
+		/// </summary>
+		static bool IsDynamicMemberReference(AstNode node)
+		{
+			if (node.Annotation<ResolveResult>() is DynamicMemberResolveResult)
+				return true;
+			// The node itself is a dynamic invocation/indexing (a.Method(b), a[b]): its parentheses/brackets
+			// carry the synthesized member.
+			if (node.Annotation<ResolveResult>() is DynamicInvocationResolveResult)
+				return true;
+			if (node.Slot?.Kind == Slots.TargetExpression && node.Parent is InvocationExpression
+				&& node.Parent.Annotation<ResolveResult>() is DynamicInvocationResolveResult)
+				return true;
+			// new T(dynamicArg): the object creation (or its type-name slot) is backed by a dynamic newobj,
+			// whose synthesized constructor has no metadata to navigate to.
+			if (node.Annotation<IL.DynamicInvokeConstructorInstruction>() != null)
+				return true;
+			if (node.Slot?.Kind == Slots.Type && node.Parent?.Annotation<IL.DynamicInvokeConstructorInstruction>() != null)
+				return true;
+			return false;
+		}
+
+		object GetCurrentLocalReference()
+		{
+			AstNode node = nodeStack.Peek();
+			ILVariable variable = node.Annotation<ILVariableResolveResult>()?.Variable;
+			if (variable != null)
+				return variable;
+
+			var letClauseVariable = node.Annotation<CSharp.Transforms.LetIdentifierAnnotation>();
+			if (letClauseVariable != null)
+				return letClauseVariable;
+
+			if (node is GotoStatement gotoStatement)
+			{
+				var method = nodeStack.Select(nd => nd.GetSymbol() as IMethod).FirstOrDefault(mr => mr != null);
+				if (method != null)
+					return method + gotoStatement.Label;
+			}
+
+			// Local-function references are recorded with the unspecialized definition, so that
+			// generic use sites (which carry specialized methods) and the declaration all share
+			// equal reference objects and can be matched for highlighting.
+			if (node.Slot?.Kind == Slots.TargetExpression && node.Parent is InvocationExpression)
+			{
+				var symbol = node.Parent.GetSymbol();
+				if (symbol is LocalFunctionMethod localFunction)
+					return localFunction.MemberDefinition;
+			}
+
+			// Method-group references to local functions (delegate conversions) are annotated
+			// with a MethodGroupResolveResult, which GetSymbol() does not surface. A local
+			// function cannot be overloaded, so such a group contains exactly one method.
+			if (node.GetResolveResult() is MethodGroupResolveResult methodGroup
+				&& methodGroup.Methods.FirstOrDefault() is LocalFunctionMethod methodGroupLocalFunction)
+			{
+				return methodGroupLocalFunction.MemberDefinition;
+			}
+
+			return null;
+		}
+
+		object GetCurrentLocalDefinition(Identifier id)
+		{
+			AstNode node = nodeStack.Peek();
+			if (node is Identifier && node.Parent != null)
+				node = node.Parent;
+
+			if (node is ParameterDeclaration || node is VariableInitializer || node is CatchClause || node is VariableDesignation)
+			{
+				var variable = node.Annotation<ILVariableResolveResult>()?.Variable;
+				if (variable != null)
+					return variable;
+			}
+
+			if (id.Slot?.Kind == Slots.IntoIdentifier || id.Slot?.Kind == Slots.JoinIdentifier)
+			{
+				var variable = id.Annotation<ILVariableResolveResult>()?.Variable;
+				if (variable != null)
+					return variable;
+			}
+
+			if (node is QueryLetClause)
+			{
+				var variable = node.Annotation<CSharp.Transforms.LetIdentifierAnnotation>();
+				if (variable != null)
+					return variable;
+			}
+
+			if (node is LabelStatement label)
+			{
+				var method = nodeStack.Select(nd => nd.GetSymbol() as IMethod).FirstOrDefault(mr => mr != null);
+				if (method != null)
+					return method + label.Label;
+			}
+
+			if (node is MethodDeclaration && node.Parent is LocalFunctionDeclarationStatement)
+			{
+				var localFunction = node.Parent.GetResolveResult() as MemberResolveResult;
+				if (localFunction != null)
+					return localFunction.Member.MemberDefinition;
+			}
+
+			return null;
+		}
+
+		ISymbol GetCurrentDefinition()
+		{
+			if (nodeStack == null || nodeStack.Count == 0)
+				return null;
+
+			var node = nodeStack.Peek();
+			if (node is Identifier)
+				node = node.Parent;
+			if (IsDefinition(ref node))
+				return node.GetSymbol();
+
+			return null;
+		}
+
+		public override void WriteKeyword(string keyword)
+		{
+			//To make reference for 'this' and 'base' keywords in the ClassName():this() expression
+			if (keyword is "this" or "base")
+			{
+				if (nodeStack.Peek() is ConstructorInitializer initializer && initializer.GetSymbol() is IMember member)
+				{
+					output.WriteReference(member, keyword);
+					return;
+				}
+				// As primary expressions, 'this' and 'base' reference the current and the
+				// base type respectively, matching IDE go-to-definition behavior.
+				if (nodeStack.Peek() is ThisReferenceExpression or BaseReferenceExpression)
+				{
+					var type = ((Expression)nodeStack.Peek()).GetResolveResult().Type;
+					if (type.Kind != TypeKind.Unknown)
+					{
+						output.WriteReference(type, keyword);
+						return;
+					}
+				}
+			}
+			// Make the 'override' modifier a reference to the nearest overridden member,
+			// so that go-to-definition on 'override' navigates to the base member.
+			// Modifier tokens are written without being pushed onto the node stack,
+			// so the top of the stack is the declaration the modifier belongs to.
+			if (keyword == "override"
+				&& nodeStack.Peek() is EntityDeclaration entityDeclaration
+				&& entityDeclaration.GetSymbol() is IMember { IsOverride: true } overrideMember
+				&& InheritanceHelper.GetBaseMember(overrideMember) is IMember baseMember)
+			{
+				output.WriteReference(baseMember, keyword);
+				return;
+			}
+			output.Write(keyword);
+		}
+
+		static bool NeedsFold(AstNode node)
+		{
+			if (node == null)
+			{
+				return false;
+			}
+
+			if (node is EntityDeclaration)
+				return true;
+
+			if (node is BlockStatement { Parent: EntityDeclaration or LocalFunctionDeclarationStatement or AnonymousMethodExpression or LambdaExpression })
+				return true;
+
+			return false;
+		}
+
+		public override void WriteToken(string token)
+		{
+			switch (token)
+			{
+				case "{":
+					// Interpolation braces ("{" inside an interpolated string) are not structural
+					// braces: they neither fold nor affect the within-type brace level.
+					if (nodeStack.PeekOrDefault() is Interpolation)
+					{
+						output.Write("{");
+						break;
+					}
+					if (braceLevelWithinType >= 0 || nodeStack.Peek() is TypeDeclaration)
+						braceLevelWithinType++;
+					if (NeedsFold(nodeStack.PeekOrDefault()) || settings.FoldBraces)
+						output.MarkFoldStart(defaultCollapsed: !settings.ExpandMemberDefinitions && braceLevelWithinType == 1, isDefinition: braceLevelWithinType == 1);
+					output.Write("{");
+					break;
+				case "}":
+					output.Write('}');
+					if (nodeStack.PeekOrDefault() is Interpolation)
+						break;
+					if (NeedsFold(nodeStack.PeekOrDefault()) || settings.FoldBraces)
+						output.MarkFoldEnd();
+					if (braceLevelWithinType >= 0)
+						braceLevelWithinType--;
+					break;
+				default:
+					// Attach member reference to token only if there's no identifier in the current node.
+					var member = GetCurrentMemberReference();
+					var node = nodeStack.Peek();
+					if (member != null && node.GetChild(Slots.Identifier) is null)
+					{
+						switch (member)
+						{
+							case IType t:
+								output.WriteReference(t, token, false);
+								return;
+							case IMember m:
+								if (IsDynamicMemberReference(node))
+									output.WriteLocalReference(token, m, isHoverOnly: true);
+								else
+									output.WriteReference(m, token, false);
+								return;
+						}
+					}
+					else
+						output.Write(token);
+					break;
+			}
+		}
+
+		public override void Space()
+		{
+			output.Write(' ');
+		}
+
+		public override void Indent()
+		{
+			output.Indent();
+		}
+
+		public override void Unindent()
+		{
+			output.Unindent();
+		}
+
+		public override void NewLine()
+		{
+			if (!firstUsingDeclaration && lastUsingDeclaration)
+			{
+				output.MarkFoldEnd();
+				lastUsingDeclaration = false;
+			}
+			output.WriteLine();
+		}
+
+		public override void WriteComment(CommentType commentType, string content)
+		{
+			switch (commentType)
+			{
+				case CommentType.SingleLine:
+					output.Write("//");
+					output.WriteLine(content);
+					break;
+				case CommentType.MultiLine:
+					output.Write("/*");
+					output.Write(content);
+					output.Write("*/");
+					break;
+				case CommentType.Documentation:
+					// Only a following documentation comment continues the fold: a regular comment in
+					// the same trivia list must not keep the fold open (it never calls MarkFoldEnd).
+					bool isLastLine = nodeStack.Peek().NextSibling is not Comment { CommentType: CommentType.Documentation };
+					if (!inDocumentationComment && !isLastLine)
+					{
+						inDocumentationComment = true;
+						output.MarkFoldStart("///" + content, defaultCollapsed: !settings.ExpandXmlDocumentationComments);
+					}
+					output.Write("///");
+					output.Write(content);
+					if (inDocumentationComment && isLastLine)
+					{
+						inDocumentationComment = false;
+						output.MarkFoldEnd();
+					}
+					output.WriteLine();
+					break;
+				default:
+					output.Write(content);
+					break;
+			}
+		}
+
+		public override void WritePreProcessorDirective(PreProcessorDirectiveType type, string argument)
+		{
+			// pre-processor directive must start on its own line
+			output.Write('#');
+			output.Write(type.ToString().ToLowerInvariant());
+			if (!string.IsNullOrEmpty(argument))
+			{
+				output.Write(' ');
+				output.Write(argument);
+			}
+			output.WriteLine();
+		}
+
+		public override void WritePrimitiveValue(object value, LiteralFormat format = LiteralFormat.None)
+		{
+			new TextWriterTokenWriter(new TextOutputWriter(output)).WritePrimitiveValue(value, format);
+		}
+
+		public override void WriteInterpolatedText(string text)
+		{
+			output.Write(TextWriterTokenWriter.ConvertString(text));
+		}
+
+		public override void WritePrimitiveType(string type)
+		{
+			switch (type)
+			{
+				case "new":
+					output.Write(type);
+					output.Write("()");
+					break;
+				case "dynamic":
+					// dynamic has no metadata type definition; emit it as a hover-only reference (no navigation
+					// target, no occurrence highlight) so it can still carry a tooltip.
+					output.WriteLocalReference(type, SpecialType.Dynamic, isHoverOnly: true);
+					return;
+				case "bool":
+				case "byte":
+				case "sbyte":
+				case "short":
+				case "ushort":
+				case "int":
+				case "uint":
+				case "long":
+				case "ulong":
+				case "float":
+				case "double":
+				case "decimal":
+				case "char":
+				case "string":
+				case "object":
+					var node = nodeStack.Peek();
+					ISymbol symbol;
+					if (node.Slot?.Kind == Slots.Type && node.Parent is ObjectCreateExpression)
+					{
+						symbol = node.Parent.GetSymbol();
+					}
+					else
+					{
+						symbol = nodeStack.Peek().GetSymbol();
+					}
+					if (symbol == null)
+						goto default;
+					switch (symbol)
+					{
+						case IType t:
+							output.WriteReference(t, type, false);
+							return;
+						case IMember m:
+							output.WriteReference(m, type, false);
+							return;
+					}
+					break;
+				default:
+					output.Write(type);
+					break;
+			}
+		}
+
+		public override void StartNode(AstNode node)
+		{
+			if (nodeStack.Count == 0)
+			{
+				if (IsUsingDeclaration(node))
+				{
+					firstUsingDeclaration = !IsUsingDeclaration(node.PrevSibling);
+					lastUsingDeclaration = !IsUsingDeclaration(node.NextSibling);
+				}
+				else
+				{
+					firstUsingDeclaration = false;
+					lastUsingDeclaration = false;
+				}
+			}
+			if (node is EntityDeclaration)
+			{
+				// The declaration's logical region starts here, before its documentation
+				// comments and attributes are written; the body fold marked later refers
+				// back to this position for group toggling in the UI.
+				output.MarkDefinitionStart();
+			}
+			nodeStack.Push(node);
+		}
+
+		private bool IsUsingDeclaration(AstNode node)
+		{
+			return node is UsingDeclaration || node is UsingAliasDeclaration;
+		}
+
+		public override void EndNode(AstNode node)
+		{
+			if (nodeStack.Pop() != node)
+				throw new InvalidOperationException();
+		}
+
+		public static bool IsDefinition(ref AstNode node)
+		{
+			if (node is EntityDeclaration && !(node.Parent is LocalFunctionDeclarationStatement))
+				return true;
+			if (node is VariableInitializer && node.Parent is FieldDeclaration or EventDeclaration)
+			{
+				node = node.Parent;
+				return true;
+			}
+			if (node is FixedVariableInitializer && node.Parent is FixedFieldDeclaration)
+			{
+				node = node.Parent;
+				return true;
+			}
+			return false;
+		}
+	}
+}

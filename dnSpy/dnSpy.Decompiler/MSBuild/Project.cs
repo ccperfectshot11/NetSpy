@@ -46,6 +46,11 @@ namespace dnSpy.Decompiler.MSBuild {
 		public string? StartupObject { get; private set; }
 		public bool AllowUnsafeBlocks { get; private set; }
 		public string PropertiesFolder { get; }
+		/// <summary>
+		/// true if the decompiler writes the whole project itself (<see cref="DecompilationType.WholeProject"/>)
+		/// </summary>
+		public bool IsWholeProject { get; private set; }
+		public bool SdkStyle { get; set; }
 		public ApplicationIcon? ApplicationIcon => applicationIcon;
 		public ApplicationManifest? ApplicationManifest => applicationManifest;
 
@@ -85,6 +90,14 @@ namespace dnSpy.Decompiler.MSBuild {
 		}
 
 		public void CreateProjectFiles(DecompileContext ctx) {
+			if (Options.Decompiler.CanDecompile(DecompilationType.WholeProject)) {
+				// The decompiler (modern ILSpy engine) writes the project file and all files
+				IsWholeProject = true;
+				System.IO.Directory.CreateDirectory(Directory);
+				Files.Add(new WholeProjectFile(this));
+				return;
+			}
+
 			var filenameCreator = new FilenameCreator(Directory, DefaultNamespace);
 			var resourceNameCreator = new ResourceNameCreator(Options.Module, filenameCreator);
 

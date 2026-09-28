@@ -1,44 +1,51 @@
-// Copyright (c) 2011 AlphaSierraPapa for the SharpDevelop Team
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy of this
-// software and associated documentation files (the "Software"), to deal in the Software
-// without restriction, including without limitation the rights to use, copy, modify, merge,
-// publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
-// to whom the Software is furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all copies or
-// substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
-// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
-// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-// DEALINGS IN THE SOFTWARE.
+/*
+    Copyright (C) 2026 NetSpy contributors
+
+    This file is part of NetSpy (a dnSpy fork)
+
+    NetSpy is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    NetSpy is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with NetSpy.  If not, see <http://www.gnu.org/licenses/>.
+*/
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
-using System.Text;
-using System.Xml;
+using System.Reflection.Metadata.Ecma335;
 using dnlib.DotNet;
 using dnSpy.Contracts.Decompiler;
-using dnSpy.Contracts.Decompiler.XmlDoc;
+using XmlDocLoader = dnSpy.Contracts.Decompiler.XmlDoc.XmlDocLoader;
 using dnSpy.Contracts.Text;
+using System.Diagnostics;
+using dnSpy.Decompiler.CSharp;
 using dnSpy.Decompiler.ILSpy.Core.Settings;
 using dnSpy.Decompiler.ILSpy.Core.Text;
-using dnSpy.Decompiler.ILSpy.Core.XmlDoc;
-using ICSharpCode.Decompiler;
-using ICSharpCode.Decompiler.Ast;
-using ICSharpCode.Decompiler.Ast.Transforms;
-using ICSharpCode.NRefactory.CSharp;
+using ICSharpCode.Decompiler.CSharp.OutputVisitor;
+using ICSharpCode.Decompiler.CSharp.Syntax;
+using ICSharpCode.Decompiler.CSharp.Transforms;
+using ICSharpCode.Decompiler.Documentation;
+using ICSharpCode.Decompiler.TypeSystem;
+using IMethod = ICSharpCode.Decompiler.TypeSystem.IMethod;
+using IType = ICSharpCode.Decompiler.TypeSystem.IType;
+using IField = ICSharpCode.Decompiler.TypeSystem.IField;
+using SRM = System.Reflection.Metadata;
+using ILSpyDecompiler = ICSharpCode.Decompiler.CSharp.CSharpDecompiler;
+using ILSpySettings = ICSharpCode.Decompiler.DecompilerSettings;
 
 namespace dnSpy.Decompiler.ILSpy.Core.CSharp {
 	sealed class DecompilerProvider : IDecompilerProvider {
 		readonly DecompilerSettingsService decompilerSettingsService;
 
-		// Keep the default ctor. It's used by dnSpy.Console.exe
+		// Keep the default ctor. It's used by NetSpy.Console.exe
 		public DecompilerProvider()
 			: this(DecompilerSettingsService.__Instance_DONT_USE) {
 		}
@@ -49,397 +56,204 @@ namespace dnSpy.Decompiler.ILSpy.Core.CSharp {
 		}
 
 		public IEnumerable<IDecompiler> Create() {
-			yield return new CSharpDecompiler(decompilerSettingsService.CSharpVBDecompilerSettings, DecompilerConstants.CSHARP_ILSPY_ORDERUI);
-#if DEBUG
-			foreach (var l in CSharpDecompiler.GetDebugDecompilers(decompilerSettingsService.CSharpVBDecompilerSettings))
-				yield return l;
-#endif
+			yield return new CSharpDecompiler(decompilerSettingsService.CSharpDecompilerSettings, DecompilerConstants.CSHARP_ILSPY_ORDERUI);
 		}
 	}
 
 	/// <summary>
-	/// Decompiler logic for C#.
+	/// C# decompiler using the modern ILSpy engine (vendored in Extensions/ILSpy.Decompiler/ICSharpCode.Decompiler)
 	/// </summary>
 	sealed class CSharpDecompiler : DecompilerBase {
-		string uniqueNameUI = "C#";
-		Guid uniqueGuid = DecompilerConstants.LANGUAGE_CSHARP_ILSPY;
-		bool showAllMembers = false;
-		readonly Func<BuilderCache> createBuilderCache;
-		Predicate<IAstTransform>? transformAbortCondition = null;
+		readonly CSharpDecompilerSettings langSettings;
 
-		public override DecompilerSettingsBase Settings => langSettings;
-		readonly CSharpVBDecompilerSettings langSettings;
-
-		public CSharpDecompiler(CSharpVBDecompilerSettings langSettings, double orderUI) {
+		public CSharpDecompiler(CSharpDecompilerSettings langSettings, double orderUI) {
 			this.langSettings = langSettings;
-			createBuilderCache = () => new BuilderCache(this.langSettings.Settings.SettingsVersion);
 			OrderUI = orderUI;
 		}
 
-#if DEBUG
-		internal static IEnumerable<CSharpDecompiler> GetDebugDecompilers(CSharpVBDecompilerSettings langSettings) {
-			DecompilerContext context = new DecompilerContext(0, new ModuleDefUser("dummy"), CSharpMetadataTextColorProvider.Instance);
-			string lastTransformName = "no transforms";
-			double orderUI = DecompilerConstants.CSHARP_ILSPY_DEBUG_ORDERUI;
-			uint id = 0xBF67AF3F;
-			foreach (Type _transformType in TransformationPipeline.CreatePipeline(context).Select(v => v.GetType()).Distinct()) {
-				Type transformType = _transformType; // copy for lambda
-				yield return new CSharpDecompiler(langSettings, orderUI++) {
-					transformAbortCondition = v => transformType.IsInstanceOfType(v),
-					uniqueNameUI = "C# - " + lastTransformName,
-					uniqueGuid = new Guid($"203F702E-7E87-4F01-84CD-B0E8{id++:X8}"),
-					showAllMembers = true
-				};
-				lastTransformName = "after " + transformType.Name;
-			}
-			yield return new CSharpDecompiler(langSettings, orderUI++) {
-				uniqueNameUI = "C# - " + lastTransformName,
-				uniqueGuid = new Guid($"203F702E-7E87-4F01-84CD-B0E8{id++:X8}"),
-				showAllMembers = true
-			};
-		}
-#endif
-
+		public override DecompilerSettingsBase Settings => langSettings;
 		public override string ContentTypeString => ContentTypesInternal.CSharpILSpy;
 		public override string GenericNameUI => DecompilerConstants.GENERIC_NAMEUI_CSHARP;
-		public override string UniqueNameUI => uniqueNameUI;
+		public override string UniqueNameUI => "C#";
 		public override double OrderUI { get; }
 		public override Guid GenericGuid => DecompilerConstants.LANGUAGE_CSHARP;
-		public override Guid UniqueGuid => uniqueGuid;
+		public override Guid UniqueGuid => DecompilerConstants.LANGUAGE_CSHARP_ILSPY;
 		public override string FileExtension => ".cs";
 		public override string? ProjectFileExtension => ".csproj";
 
+		#region Members
 		public override void Decompile(MethodDef method, IDecompilerOutput output, DecompilationContext ctx) {
 			WriteCommentLineDeclaringType(output, method);
-			var state = CreateAstBuilder(ctx, langSettings.Settings, currentType: method.DeclaringType, isSingleMember: true);
-			try {
-				if (method.IsConstructor && !method.IsStatic && !method.DeclaringType.IsValueType) {
-					// also fields and other ctors so that the field initializers can be shown as such
-					AddFieldsAndCtors(state.AstBuilder, method.DeclaringType, method.IsStatic);
-					RunTransformsAndGenerateCode(ref state, output, ctx, new SelectCtorTransform(method));
-				}
-				else {
-					state.AstBuilder.AddMethod(method);
-					RunTransformsAndGenerateCode(ref state, output, ctx);
-				}
+			if (method.IsConstructor && !method.DeclaringType.IsValueType) {
+				// Also show the field initializers that are part of the constructor
+				Run(method.Module, output, ctx, CreateSettings(isSingleMember: true),
+					d => d.Decompile(CollectFieldsAndCtors(method.DeclaringType, method.IsStatic)),
+					new SelectCtorTransform(method));
 			}
-			finally {
-				state.Dispose();
-			}
-		}
-
-		class SelectCtorTransform : IAstTransform {
-			readonly MethodDef ctorDef;
-
-			public SelectCtorTransform(MethodDef ctorDef) => this.ctorDef = ctorDef;
-
-			public void Run(AstNode compilationUnit) {
-				ConstructorDeclaration? ctorDecl = null;
-				foreach (var node in compilationUnit.Children) {
-					if (node is ConstructorDeclaration ctor) {
-						if (ctor.Annotation<MethodDef>() == ctorDef) {
-							ctorDecl = ctor;
-						}
-						else {
-							// remove other ctors
-							ctor.Remove();
-						}
-					}
-					// Remove any fields without initializers
-					if (node is FieldDeclaration fd && fd.Variables.All(v => v.Initializer.IsNull))
-						fd.Remove();
-				}
-				if (ctorDecl?.Initializer.ConstructorInitializerType == ConstructorInitializerType.This) {
-					// remove all fields
-					foreach (var node in compilationUnit.Children)
-						if (node is FieldDeclaration)
-							node.Remove();
-				}
-			}
+			else
+				Run(method.Module, output, ctx, CreateSettings(isSingleMember: true), d => d.Decompile(ToHandle(method)));
 		}
 
 		public override void Decompile(PropertyDef property, IDecompilerOutput output, DecompilationContext ctx) {
 			WriteCommentLineDeclaringType(output, property);
-			var state = CreateAstBuilder(ctx, langSettings.Settings, currentType: property.DeclaringType, isSingleMember: true);
-			try {
-				state.AstBuilder.AddProperty(property);
-				RunTransformsAndGenerateCode(ref state, output, ctx);
-			}
-			finally {
-				state.Dispose();
-			}
+			Run(property.Module, output, ctx, CreateSettings(isSingleMember: true), d => d.Decompile(ToHandle(property)));
 		}
 
 		public override void Decompile(FieldDef field, IDecompilerOutput output, DecompilationContext ctx) {
 			WriteCommentLineDeclaringType(output, field);
-			var state = CreateAstBuilder(ctx, langSettings.Settings, currentType: field.DeclaringType, isSingleMember: true);
-			try {
-				if (field.IsLiteral) {
-					state.AstBuilder.AddField(field);
-				}
-				else {
-					// also decompile ctors so that the field initializer can be shown
-					AddFieldsAndCtors(state.AstBuilder, field.DeclaringType, field.IsStatic);
-				}
-				RunTransformsAndGenerateCode(ref state, output, ctx, new SelectFieldTransform(field));
-			}
-			finally {
-				state.Dispose();
-			}
-		}
-
-		/// <summary>
-		/// Removes all top-level members except for the specified fields.
-		/// </summary>
-		sealed class SelectFieldTransform : IAstTransform {
-			readonly FieldDef field;
-
-			public SelectFieldTransform(FieldDef field) => this.field = field;
-
-			public void Run(AstNode compilationUnit) {
-				foreach (var child in compilationUnit.Children) {
-					if (child is EntityDeclaration) {
-						if (child.Annotation<FieldDef>() != field)
-							child.Remove();
-					}
-				}
-			}
-		}
-
-		void AddFieldsAndCtors(AstBuilder codeDomBuilder, TypeDef declaringType, bool isStatic) {
-			foreach (var field in declaringType.Fields) {
-				if (field.IsStatic == isStatic)
-					codeDomBuilder.AddField(field);
-			}
-			foreach (var ctor in declaringType.Methods) {
-				if (ctor.IsConstructor && ctor.IsStatic == isStatic)
-					codeDomBuilder.AddMethod(ctor);
+			if (field.IsLiteral)
+				Run(field.Module, output, ctx, CreateSettings(isSingleMember: true), d => d.Decompile(ToHandle(field)));
+			else {
+				// Also decompile the constructors so the field initializer can be shown
+				Run(field.Module, output, ctx, CreateSettings(isSingleMember: true),
+					d => d.Decompile(CollectFieldsAndCtors(field.DeclaringType, field.IsStatic)),
+					new SelectFieldTransform(field));
 			}
 		}
 
 		public override void Decompile(EventDef ev, IDecompilerOutput output, DecompilationContext ctx) {
 			WriteCommentLineDeclaringType(output, ev);
-			var state = CreateAstBuilder(ctx, langSettings.Settings, currentType: ev.DeclaringType, isSingleMember: true);
-			try {
-				state.AstBuilder.AddEvent(ev);
-				RunTransformsAndGenerateCode(ref state, output, ctx);
-			}
-			finally {
-				state.Dispose();
-			}
+			Run(ev.Module, output, ctx, CreateSettings(isSingleMember: true), d => d.Decompile(ToHandle(ev)));
 		}
 
-		public override void Decompile(TypeDef type, IDecompilerOutput output, DecompilationContext ctx) {
-			var state = CreateAstBuilder(ctx, langSettings.Settings, currentType: type);
-			try {
-				state.AstBuilder.AddType(type);
-				RunTransformsAndGenerateCode(ref state, output, ctx);
-			}
-			finally {
-				state.Dispose();
-			}
-		}
-
-		void RunTransformsAndGenerateCode(ref BuilderState state, IDecompilerOutput output, DecompilationContext ctx, IAstTransform? additionalTransform = null) {
-			var astBuilder = state.AstBuilder;
-			astBuilder.RunTransformations(transformAbortCondition);
-			if (additionalTransform is not null) {
-				additionalTransform.Run(astBuilder.SyntaxTree);
-			}
-			AddXmlDocumentation(ref state, langSettings.Settings, astBuilder);
-			astBuilder.GenerateCode(output);
-		}
-
-		internal static void AddXmlDocumentation(ref BuilderState state, DecompilerSettings settings, AstBuilder astBuilder) {
-			if (settings.ShowXmlDocumentation) {
-				var module = state.AstBuilder.Context.CurrentModule;
-				var hasXmlDocFileTmp = state.State.HasXmlDocFile(module);
-				bool hasXmlDocFile;
-				if (hasXmlDocFileTmp is null) {
-					hasXmlDocFile = XmlDocLoader.LoadDocumentation(module) is not null;
-					state.State.SetHasXmlDocFile(module, hasXmlDocFile);
-				}
-				else
-					hasXmlDocFile = hasXmlDocFileTmp.Value;
-				if (!hasXmlDocFile)
-					return;
-
-				try {
-					new AddXmlDocTransform(state.State.XmlDoc_StringBuilder).Run(astBuilder.SyntaxTree);
-				}
-				catch (XmlException ex) {
-					string[] msg = (" Exception while reading XmlDoc: " + ex.ToString()).Split(newLineChars, StringSplitOptions.RemoveEmptyEntries);
-					var insertionPoint = astBuilder.SyntaxTree.FirstChild;
-					for (int i = 0; i < msg.Length; i++)
-						astBuilder.SyntaxTree.InsertChildBefore(insertionPoint, new Comment(msg[i], CommentType.Documentation), Roles.Comment);
-				}
-			}
-		}
-		static readonly char[] newLineChars = new char[] { '\r', '\n', '\u0085', '\u2028', '\u2029' };
+		public override void Decompile(TypeDef type, IDecompilerOutput output, DecompilationContext ctx) =>
+			Run(type.Module, output, ctx, CreateSettings(), d => d.Decompile(ToHandle(type)));
 
 		public override void Decompile(AssemblyDef asm, IDecompilerOutput output, DecompilationContext ctx) {
 			WriteAssembly(asm, output, ctx);
-
-			using (ctx.DisableAssemblyLoad()) {
-				var state = CreateAstBuilder(ctx, langSettings.Settings, currentModule: asm.ManifestModule);
-				try {
-					state.AstBuilder.AddAssembly(asm.ManifestModule, true, true, false);
-					RunTransformsAndGenerateCode(ref state, output, ctx);
-				}
-				finally {
-					state.Dispose();
-				}
-			}
+			using (ctx.DisableAssemblyLoad())
+				Run(asm.ManifestModule, output, ctx, CreateSettings(), d => d.DecompileModuleAndAssemblyAttributes());
 		}
 
 		public override void Decompile(ModuleDef mod, IDecompilerOutput output, DecompilationContext ctx) {
 			WriteModule(mod, output, ctx);
-
-			using (ctx.DisableAssemblyLoad()) {
-				var state = CreateAstBuilder(ctx, langSettings.Settings, currentModule: mod);
-				try {
-					state.AstBuilder.AddAssembly(mod, true, false, true);
-					RunTransformsAndGenerateCode(ref state, output, ctx);
-				}
-				finally {
-					state.Dispose();
-				}
-			}
+			using (ctx.DisableAssemblyLoad())
+				Run(mod, output, ctx, CreateSettings(), d => d.DecompileModuleAndAssemblyAttributes());
 		}
 
-		BuilderState CreateAstBuilder(DecompilationContext ctx, DecompilerSettings settings, ModuleDef? currentModule = null, TypeDef? currentType = null, bool isSingleMember = false) {
-			if (currentModule is null)
-				currentModule = currentType?.Module;
+		static SRM.EntityHandle ToHandle(IMDTokenProvider def) => MetadataTokens.EntityHandle((int)def.MDToken.Raw);
+
+		static List<SRM.EntityHandle> CollectFieldsAndCtors(TypeDef type, bool isStatic) {
+			var members = new List<SRM.EntityHandle>();
+			foreach (var field in type.Fields) {
+				if (field.IsStatic == isStatic)
+					members.Add(ToHandle(field));
+			}
+			foreach (var ev in type.Events) {
+				if ((ev.AddMethod ?? ev.RemoveMethod)?.IsStatic == isStatic)
+					members.Add(ToHandle(ev));
+			}
+			foreach (var prop in type.Properties) {
+				var accessor = prop.GetMethod ?? prop.SetMethod;
+				if (accessor is not null && accessor.IsStatic == isStatic && accessor.Parameters.Count == (accessor.IsStatic ? 0 : 1) + (accessor == prop.SetMethod ? 1 : 0))
+					members.Add(ToHandle(prop));
+			}
+			foreach (var ctor in type.Methods) {
+				if (ctor.IsConstructor && ctor.IsStatic == isStatic)
+					members.Add(ToHandle(ctor));
+			}
+			return members;
+		}
+		#endregion
+
+		#region Engine
+		ILSpySettings CreateSettings(bool isSingleMember = false) {
+			var settings = langSettings.Settings.Clone();
 			if (isSingleMember) {
-				settings = settings.Clone();
+				// A single member doesn't need using directives (they'd be shown above the member)
 				settings.UsingDeclarations = false;
 			}
-			var cache = ctx.GetOrCreate(createBuilderCache);
-			var state = new BuilderState(ctx, cache, MetadataTextColorProvider);
-			state.AstBuilder.Context.CurrentModule = currentModule;
-			state.AstBuilder.Context.CancellationToken = ctx.CancellationToken;
-			state.AstBuilder.Context.CurrentType = currentType;
-			state.AstBuilder.Context.Settings = settings;
-			return state;
+			return settings;
+		}
+
+		/// <summary>
+		/// Creates the ILSpy decompiler for a module, runs <paramref name="decompile"/> and writes the syntax tree
+		/// </summary>
+		void Run(ModuleDef module, IDecompilerOutput output, DecompilationContext ctx, ILSpySettings settings, Func<ILSpyDecompiler, SyntaxTree> decompile, params IAstTransform[] extraTransforms) {
+			var decompiler = CreateILSpyDecompiler(module, ctx, settings);
+			foreach (var transform in extraTransforms)
+				decompiler.AstTransforms.Add(transform);
+			var syntaxTree = decompile(decompiler);
+			WriteSyntaxTree(module, output, ctx, settings, decompiler, syntaxTree);
+		}
+
+		internal static ILSpyDecompiler CreateILSpyDecompiler(ModuleDef module, DecompilationContext ctx, ILSpySettings settings) {
+			var typeSystem = TypeSystemCache.Get(module, settings);
+			return new ILSpyDecompiler(typeSystem, settings) {
+				CancellationToken = ctx.CancellationToken,
+				DebugInfoProvider = new DnlibDebugInfoProvider(module),
+				DocumentationProvider = settings.ShowXmlDocumentation ? new DnSpyDocumentationProvider() : null,
+			};
+		}
+
+		void WriteSyntaxTree(ModuleDef module, IDecompilerOutput output, DecompilationContext ctx, ILSpySettings settings, ILSpyDecompiler decompiler, SyntaxTree syntaxTree) {
+			syntaxTree.AcceptVisitor(new InsertParenthesesVisitor { InsertParenthesesForReadability = true });
+
+			var converter = new SymbolConverter(module);
+			var variables = new VariableMapper(converter);
+			var writer = new DnSpyTokenWriter(output, converter, variables, MetadataTextColorProvider);
+			// Same decorators as TokenWriter.CreateWriterThatSetsLocationsInAST(): the node locations
+			// are needed to compute the debug info (IL offset <-> text span)
+			var tokenWriter = TokenWriter.InsertRequiredSpaces(TokenWriter.WrapInWriterThatSetsLocationsInAST(writer));
+			syntaxTree.AcceptVisitor(new CSharpOutputVisitor(tokenWriter, settings.CSharpFormattingOptions));
+
+			if (ctx.CalculateILSpans) {
+				var usings = syntaxTree.Descendants.OfType<UsingDeclaration>().Select(a => a.Namespace).ToArray();
+				DebugInfoCreator.AddDebugInfo(output, decompiler, syntaxTree, converter, variables, langSettings.Settings.GetHashCode() ^ langSettings.Version, usings);
+			}
+		}
+		#endregion
+
+		#region Names, tooltips
+		sealed class OutputTextColorWriter : ITextColorWriter {
+			readonly IDecompilerOutput output;
+			public OutputTextColorWriter(IDecompilerOutput output) => this.output = output;
+			public void Write(object color, string? text) {
+				if (!string.IsNullOrEmpty(text))
+					output.Write(text!, color);
+			}
+			public void Write(TextColor color, string? text) => Write(color.Box(), text);
 		}
 
 		protected override void TypeToString(IDecompilerOutput output, ITypeDefOrRef? type, bool includeNamespace, IHasCustomAttribute? typeAttributes = null) {
-			ConvertTypeOptions options = ConvertTypeOptions.IncludeTypeParameterDefinitions;
-			if (includeNamespace)
-				options |= ConvertTypeOptions.IncludeNamespace;
-
-			TypeToString(output, options, type, typeAttributes);
-		}
-
-		static readonly UTF8String systemRuntimeCompilerServicesString = new UTF8String("System.Runtime.CompilerServices");
-		static readonly UTF8String isReadOnlyAttributeString = new UTF8String("IsReadOnlyAttribute");
-		bool WriteRefIfByRef(IDecompilerOutput output, TypeSig typeSig, ParamDef? pd) {
-			if (typeSig.RemovePinnedAndModifiers() is ByRefSig) {
-				if (pd is not null && (!pd.IsIn && pd.IsOut)) {
-					output.Write("out", BoxedTextColor.Keyword);
-					output.Write(" ", BoxedTextColor.Text);
-				}
-				else if (pd is not null && pd.IsDefined(systemRuntimeCompilerServicesString, isReadOnlyAttributeString)) {
-					output.Write("in", BoxedTextColor.Keyword);
-					output.Write(" ", BoxedTextColor.Text);
-				}
-				else {
-					output.Write("ref", BoxedTextColor.Keyword);
-					output.Write(" ", BoxedTextColor.Text);
-				}
-				return true;
-			}
-			return false;
-		}
-
-		void TypeToString(IDecompilerOutput output, ConvertTypeOptions options, ITypeDefOrRef? type, IHasCustomAttribute? typeAttributes = null) {
 			if (type is null)
 				return;
-			AstType astType = AstBuilder.ConvertType(type, new StringBuilder(), typeAttributes, options);
-
-			if (WriteRefIfByRef(output, type.TryGetByRefSig(), typeAttributes as ParamDef)) {
-				if (astType is ComposedType composedType && composedType.HasRefSpecifier)
-					composedType.HasRefSpecifier = false;
-			}
-
-			var ctx = new DecompilerContext(langSettings.Settings.SettingsVersion, type.Module, MetadataTextColorProvider);
-			astType.AcceptVisitor(new CSharpOutputVisitor(new TextTokenWriter(output, ctx), FormattingOptionsFactory.CreateAllman()));
-		}
-
-		protected override void FormatPropertyName(IDecompilerOutput output, PropertyDef property, bool? isIndexer) {
-			if (property is null)
-				throw new ArgumentNullException(nameof(property));
-
-			if (!isIndexer.HasValue) {
-				isIndexer = property.IsIndexer();
-			}
-			if (isIndexer.Value) {
-				var accessor = property.GetMethod ?? property.SetMethod;
-				if (accessor is not null && accessor.HasOverrides) {
-					var methDecl = accessor.Overrides.First().MethodDeclaration;
-					var declaringType = methDecl is null ? null : methDecl.DeclaringType;
-					TypeToString(output, declaringType, includeNamespace: true);
-					output.Write(".", BoxedTextColor.Operator);
-				}
-				output.Write("this", BoxedTextColor.Keyword);
-				output.Write("[", BoxedTextColor.Punctuation);
-				bool addSeparator = false;
-				foreach (var p in property.PropertySig.GetParams()) {
-					if (addSeparator) {
-						output.Write(",", BoxedTextColor.Punctuation);
-						output.Write(" ", BoxedTextColor.Text);
-					}
-					else
-						addSeparator = true;
-					TypeToString(output, p.ToTypeDefOrRef(), includeNamespace: true);
-				}
-				output.Write("]", BoxedTextColor.Punctuation);
-			}
-			else
-				WriteIdentifier(output, property.Name, MetadataTextColorProvider.GetColor(property));
-		}
-
-		static readonly HashSet<string> isKeyword = new HashSet<string>(StringComparer.Ordinal) {
-			"abstract", "as", "base", "bool", "break", "byte", "case", "catch",
-			"char", "checked", "class", "const", "continue", "decimal", "default", "delegate",
-			"do", "double", "else", "enum", "event", "explicit", "extern", "false",
-			"finally", "fixed", "float", "for", "foreach", "goto", "if", "implicit",
-			"in", "int", "interface", "internal", "is", "lock", "long", "namespace",
-			"new", "null", "object", "operator", "out", "override", "params", "private",
-			"protected", "public", "readonly", "ref", "return", "sbyte", "sealed", "short",
-			"sizeof", "stackalloc", "static", "string", "struct", "switch", "this", "throw",
-			"true", "try", "typeof", "uint", "ulong", "unchecked", "unsafe", "ushort",
-			"using", "virtual", "void", "volatile", "while",
-		};
-
-		static void WriteIdentifier(IDecompilerOutput output, string id, object tokenKind) {
-			if (isKeyword.Contains(id))
-				output.Write("@", tokenKind);
-			output.Write(IdentifierEscaper.Escape(id), tokenKind);
+			var options = FormatterOptions.ShowIntrinsicTypeKeywords;
+			if (includeNamespace)
+				options |= FormatterOptions.ShowNamespaces;
+			new CSharpFormatter(new OutputTextColorWriter(output), options, null).Write(type);
 		}
 
 		protected override void FormatTypeName(IDecompilerOutput output, TypeDef type) {
 			if (type is null)
 				throw new ArgumentNullException(nameof(type));
-
-			TypeToString(output, ConvertTypeOptions.DoNotUsePrimitiveTypeNames | ConvertTypeOptions.IncludeTypeParameterDefinitions | ConvertTypeOptions.DoNotIncludeEnclosingType, type);
+			new CSharpFormatter(new OutputTextColorWriter(output), FormatterOptions.Default & ~(FormatterOptions.ShowNamespaces | FormatterOptions.ShowDeclaringTypes), null).Write(type);
 		}
 
-		internal static bool ShowMember(IMemberRef member, bool showAllMembers, DecompilerSettings settings) {
-			if (showAllMembers)
-				return true;
+		public override bool ShowMember(IMemberRef member) {
 			if (member is MethodDef md && (md.IsGetter || md.IsSetter || md.IsAddOn || md.IsRemoveOn))
 				return true;
-			return !AstBuilder.MemberIsHidden(member, settings);
+			if (langSettings.Settings.ForceShowAllMembers())
+				return true;
+			if (member is not IMemberDef def || def.Module is null)
+				return true;
+			try {
+				var file = DnlibMetadata.GetMetadataFile(def.Module);
+				return !ILSpyDecompiler.MemberIsHidden(file, ToHandle(def), langSettings.Settings);
+			}
+			catch (Exception) {
+				return true;
+			}
 		}
+		#endregion
 
-		public override bool ShowMember(IMemberRef member) => ShowMember(member, showAllMembers, langSettings.Settings);
-
+		#region Assembly editor support (Edit Method / Edit Class / Edit Assembly Attributes)
 		public override bool CanDecompile(DecompilationType decompilationType) {
 			switch (decompilationType) {
 			case DecompilationType.PartialType:
 			case DecompilationType.AssemblyInfo:
 			case DecompilationType.TypeMethods:
+			case DecompilationType.WholeProject:
 				return true;
 			}
 			return base.CanDecompile(decompilationType);
@@ -456,70 +270,57 @@ namespace dnSpy.Decompiler.ILSpy.Core.CSharp {
 			case DecompilationType.TypeMethods:
 				DecompileTypeMethods((DecompileTypeMethods)data);
 				return;
+			case DecompilationType.WholeProject:
+				ProjectExporter.Export(langSettings.Settings, (DecompileWholeProject)data);
+				return;
 			}
 			base.Decompile(decompilationType, data);
 		}
 
+		ILSpySettings CreateEditorSettings(bool useUsingDeclarations) {
+			var settings = langSettings.Settings.Clone();
+			settings.UsingDeclarations = useUsingDeclarations;
+			settings.AlwaysUseGlobal = !useUsingDeclarations;
+			return settings;
+		}
+
 		void DecompilePartial(DecompilePartialType info) {
-			var state = CreateAstBuilder(info.Context, CreateDecompilerSettings(langSettings.Settings, info.UseUsingDeclarations), currentType: info.Type);
-			try {
-				state.AstBuilder.AddType(info.Type);
-				RunTransformsAndGenerateCode(ref state, info.Output, info.Context, new DecompilePartialTransform(info.Type, info.Definitions, info.ShowDefinitions, info.AddPartialKeyword, info.InterfacesToRemove));
-			}
-			finally {
-				state.Dispose();
-			}
+			var settings = CreateEditorSettings(info.UseUsingDeclarations);
+			Run(info.Type.Module, info.Output, info.Context, settings, d => d.DecompileTypes(new[] { (SRM.TypeDefinitionHandle)ToHandle(info.Type) }),
+				new DecompilePartialTransform(info.Type, info.Definitions, info.ShowDefinitions, info.AddPartialKeyword, info.InterfacesToRemove));
 		}
 
 		void DecompileAssemblyInfo(DecompileAssemblyInfo info) {
-			var state = CreateAstBuilder(info.Context, langSettings.Settings, currentModule: info.Module);
-			try {
-				state.AstBuilder.AddAssembly(info.Module, true, info.Module.IsManifestModule, true);
-				RunTransformsAndGenerateCode(ref state, info.Output, info.Context, info.KeepAllAttributes ? null : new AssemblyInfoTransform());
-			}
-			finally {
-				state.Dispose();
-			}
+			var settings = langSettings.Settings.Clone();
+			var transforms = info.KeepAllAttributes ? Array.Empty<IAstTransform>() : new IAstTransform[] { new AssemblyInfoTransform() };
+			Run(info.Module, info.Output, info.Context, settings, d => d.DecompileModuleAndAssemblyAttributes(), transforms);
 		}
 
 		void DecompileTypeMethods(DecompileTypeMethods info) {
-			var state = CreateAstBuilder(info.Context, CreateDecompilerSettings_DecompileTypeMethods(langSettings.Settings, !info.DecompileHidden, info.ShowAll), currentType: info.Type);
-			try {
-				state.AstBuilder.GetDecompiledBodyKind = (builder, method) => GetDecompiledBodyKind(info, builder, method);
-				state.AstBuilder.AddType(info.Type);
-				RunTransformsAndGenerateCode(ref state, info.Output, info.Context, new DecompileTypeMethodsTransform(info.Types, info.Methods, !info.DecompileHidden, info.ShowAll));
-			}
-			finally {
-				state.Dispose();
-			}
+			var settings = CreateEditorSettings(!info.DecompileHidden);
+			Run(info.Type.Module, info.Output, info.Context, settings, d => d.DecompileTypes(new[] { (SRM.TypeDefinitionHandle)ToHandle(info.Type) }),
+				new DecompileTypeMethodsTransform(info.Types, info.Methods, !info.DecompileHidden, info.ShowAll));
 		}
+		#endregion
+	}
 
-		internal static DecompilerSettings CreateDecompilerSettings_DecompileTypeMethods(DecompilerSettings settings, bool useUsingDeclarations, bool showAll) {
-			var s = CreateDecompilerSettings(settings, useUsingDeclarations);
-			// Make sure the ctor is shown if the user tries to edit an empty ctor/cctor
-			s.RemoveEmptyDefaultConstructors = false;
-			if (!showAll) {
-				// Inline all field initialization code
-				s.AllowFieldInitializers = false;
-			}
-			return s;
-		}
+	static class ILSpySettingsExtensions {
+		/// <summary>The modern engine has no "show all members" option; NetSpy keeps it off</summary>
+		public static bool ForceShowAllMembers(this ILSpySettings settings) => false;
+	}
 
-		internal static DecompilerSettings CreateDecompilerSettings(DecompilerSettings settings, bool useUsingDeclarations) {
-			var newOne = settings.Clone();
-			newOne.UsingDeclarations = useUsingDeclarations;
-			newOne.FullyQualifyAllTypes = !useUsingDeclarations;
-			newOne.RemoveNewDelegateClass = useUsingDeclarations;
-			newOne.ForceShowAllMembers = false;
-			return newOne;
-		}
-
-		internal static DecompiledBodyKind GetDecompiledBodyKind(DecompileTypeMethods info, AstBuilder builder, MethodDef method) {
-			if (info.DecompileHidden)
-				return DecompiledBodyKind.Empty;
-			if (info.ShowAll || info.Methods.Contains(method))
-				return DecompiledBodyKind.Full;
-			return DecompiledBodyKind.Empty;
+	/// <summary>
+	/// XML documentation from the .xml files dnSpy finds next to the assemblies (and the reference assemblies)
+	/// </summary>
+	sealed class DnSpyDocumentationProvider : IDocumentationProvider {
+		public string? GetDocumentation(IEntity entity) {
+			var module = DnlibMetadata.TryGetModule(entity.ParentModule?.MetadataFile);
+			if (module is null)
+				return null;
+			var provider = XmlDocLoader.LoadDocumentation(module);
+			if (provider is null)
+				return null;
+			return provider.GetDocumentation(entity.GetIdString());
 		}
 	}
 }
