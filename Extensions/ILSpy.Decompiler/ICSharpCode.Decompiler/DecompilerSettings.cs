@@ -329,6 +329,42 @@ namespace ICSharpCode.Decompiler
 		public partial bool SourceGeneratorPartialMembers { get; set; }
 
 		/// <summary>
+		/// NetSpy: write methods, operators, constructors and accessors whose body is a single
+		/// short return/expression/throw statement as expression-bodied members ("=> expr;").
+		/// </summary>
+		[Category("DecompilerSettings.Other")]
+		[Description("DecompilerSettings.ExpressionBodiedMembers")]
+		[DecompilerSetting]
+		public partial bool ExpressionBodiedMembers { get; set; }
+
+		/// <summary>
+		/// NetSpy: order properties, events, constructors and methods as in the original source
+		/// (compilers emit methods and accessors in declaration order) instead of grouping them by kind.
+		/// </summary>
+		[Category("DecompilerSettings.Other")]
+		[Description("DecompilerSettings.SourceMemberOrder")]
+		[DecompilerSetting]
+		public partial bool SourceMemberOrder { get; set; }
+
+		/// <summary>
+		/// NetSpy: name boolean literal arguments ("GetCustomAttributes(inherit: false)") for readability.
+		/// Off by default: source code rarely names them, the output should look like the original.
+		/// </summary>
+		[Category("DecompilerSettings.Other")]
+		[Description("DecompilerSettings.NamedBooleanArguments")]
+		[DecompilerSetting(DefaultValue = false)]
+		public partial bool NamedBooleanArguments { get; set; }
+
+		/// <summary>
+		/// NetSpy: write array creations with an initializer without sizes: "new[] { 1, 2 }" when the element
+		/// type can be inferred, otherwise "new long[] { 1, 2 }" (instead of "new long[2] { 1L, 2L }").
+		/// </summary>
+		[Category("DecompilerSettings.Other")]
+		[Description("DecompilerSettings.OmitArraySizes")]
+		[DecompilerSetting]
+		public partial bool OmitArraySizes { get; set; }
+
+		/// <summary>
 		/// Decompile foreach statements.
 		/// </summary>
 		[Description("DecompilerSettings.DetectForeachStatements")]

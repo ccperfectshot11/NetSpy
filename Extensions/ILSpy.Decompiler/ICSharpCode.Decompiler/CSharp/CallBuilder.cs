@@ -1170,7 +1170,8 @@ namespace ICSharpCode.Decompiler.CSharp
 			list.IsPrimitiveValue = isPrimitiveValue;
 			list.FirstOptionalArgumentIndex = firstOptionalArgumentIndex;
 			list.UseImplicitlyTypedOut = true;
-			list.AddNamesToPrimitiveValues = expressionBuilder.settings.NamedArguments && expressionBuilder.settings.NonTrailingNamedArguments;
+			list.AddNamesToPrimitiveValues = expressionBuilder.settings.NamedArguments && expressionBuilder.settings.NonTrailingNamedArguments
+				&& expressionBuilder.settings.NamedBooleanArguments; // NetSpy: "f(inherit: false)" is ILSpy style, not source style
 			return list;
 		}
 

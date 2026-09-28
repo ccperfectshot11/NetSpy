@@ -10,6 +10,10 @@ namespace dnSpy.Decompiler.ILSpy.Core.Settings {
 			// NetSpy's own options (not in ILSpy)
 			{ "DecompilerSettings.CollectionExpressions", "Use collection expressions ([a, b, ..c])" },
 			{ "DecompilerSettings.SourceGeneratorPartialMembers", "Show source generated members ([GeneratedRegex], [LibraryImport]...) as partial declarations" },
+			{ "DecompilerSettings.ExpressionBodiedMembers", "Use expression-bodied members (=> expr) for short single-statement bodies" },
+			{ "DecompilerSettings.SourceMemberOrder", "Keep the source order of members (don't group them by kind)" },
+			{ "DecompilerSettings.NamedBooleanArguments", "Name boolean literal arguments (f(inherit: false))" },
+			{ "DecompilerSettings.OmitArraySizes", "Omit array sizes when there is an initializer (new[] { 1, 2 })" },
 			{ "DecompilerSettings.AggressiveInlining", "Always inline local variables if possible" },
 			{ "DecompilerSettings.AllowExtensionAddMethodsInCollectionInitializerExpressions", "Allow extension 'Add' methods in collection initializer expressions" },
 			{ "DecompilerSettings.AllowExtensionMethodSyntaxOnRef", "Use 'ref' extension methods" },

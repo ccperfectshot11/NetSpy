@@ -2144,6 +2144,14 @@ namespace ICSharpCode.Decompiler.CSharp.Syntax
 					{
 						continue;
 					}
+					// NetSpy: "class C : IEnumerable<T>" is also "IEnumerable" in metadata; listing it again changes nothing,
+					// source code normally doesn't (an interface of the base class is kept: re-listing it is a re-implementation)
+					if (baseType.Kind == TypeKind.Interface && typeDefinition.DirectBaseTypes.Any(other => other.Kind == TypeKind.Interface
+						&& !other.Equals(baseType) && other.GetAllBaseTypes().Contains(baseType)
+						&& BaseTypeAccessibleFrom(other, typeDefinition, baseListLookup)))
+					{
+						continue;
+					}
 					if (typeDefinition.Kind == TypeKind.Enum && baseType.IsKnownType(KnownTypeCode.Enum))
 					{
 						// if the declared type is an enum, replace all references to System.Enum with the enum-underlying type

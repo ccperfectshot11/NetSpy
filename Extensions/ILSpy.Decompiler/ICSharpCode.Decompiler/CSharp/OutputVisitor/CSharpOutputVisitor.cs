@@ -543,6 +543,26 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 			{
 				Semicolon();
 			}
+			else if (body.Annotation<Transforms.ExpressionBodyAnnotation>() is not null
+				&& Transforms.ExpressionBodiedMembers.GetExpression(body) is { } expression)
+			{
+				// NetSpy: "=> expr;" (the block and its statement keep their nodes for the debugger's statement ranges)
+				var statement = expression.Parent!;
+				StartNode(body);
+				Space();
+				WriteToken(Tokens.Arrow);
+				Space();
+				StartNode(statement);
+				if (statement is ThrowStatement)
+				{
+					WriteKeyword(ThrowStatement.ThrowKeyword);
+					Space();
+				}
+				expression.AcceptVisitor(this);
+				Semicolon();
+				EndNode(statement);
+				EndNode(body);
+			}
 			else
 			{
 				WriteBlock(body, style);

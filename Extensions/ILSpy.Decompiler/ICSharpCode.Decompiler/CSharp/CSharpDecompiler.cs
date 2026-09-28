@@ -290,6 +290,7 @@ namespace ICSharpCode.Decompiler.CSharp
 				new RenameVisualBasicAnonymousTypes(), // must run before FixNameCollisions
 				new FixNameCollisions(),
 				new AddXmlDocumentationTransform(),
+				new ExpressionBodiedMembers(), // NetSpy: must be last (marks final bodies)
 			};
 		}
 
@@ -1864,6 +1865,7 @@ namespace ICSharpCode.Decompiler.CSharp
 
 				// For COM interop scenarios, the relative order of virtual functions/properties matters:
 				IEnumerable<IMember> allOrderedMembers = RequiresNativeOrdering(typeDef) ? GetMembersWithNativeOrdering(typeDef) :
+					!isRecord && settings.SourceMemberOrder ? GetMembersWithNativeOrdering(typeDef) : // NetSpy: source order (fields first, then members by method token)
 					fieldsAndProperties.Concat(typeDef.Events).Concat(typeDef.Methods);
 
 				var allOrderedEntities = typeDef.NestedTypes.Concat<IEntity>(allOrderedMembers).ToArray();

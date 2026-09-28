@@ -3978,6 +3978,7 @@ namespace ICSharpCode.Decompiler.CSharp
 			var root = new ArrayInitializer(new ArrayInitializerExpression());
 			container.Push(root);
 			var elementResolveResults = new List<ResolveResult>();
+			bool allElementsHaveArrayType = block.Instructions.Count > 1;
 
 			for (int i = 1; i < block.Instructions.Count; i++)
 			{
@@ -4000,7 +4001,11 @@ namespace ICSharpCode.Decompiler.CSharp
 				try
 				{
 					astBuilder.UseSpecialConstants = !type.IsCSharpPrimitiveIntegerType() && !type.IsKnownType(KnownTypeCode.Decimal);
-					val = Translate(value, typeHint: type).ConvertTo(type, this, allowImplicitConversion: true);
+					val = Translate(value, typeHint: type);
+					// NetSpy: "new[] { ... }" needs every element to already have the element type
+					if (!val.Type.Equals(type) || val.ResolveResult.IsCompileTimeConstant && val.ResolveResult.ConstantValue == null)
+						allElementsHaveArrayType = false;
+					val = val.ConvertTo(type, this, allowImplicitConversion: true);
 				}
 				finally
 				{
@@ -4035,12 +4040,24 @@ namespace ICSharpCode.Decompiler.CSharp
 					additionalSpecifiers = Empty<ArraySpecifier>.Array;
 				}
 			}
+			bool omitSizes = settings.OmitArraySizes && typeExpression != null;
+			if (omitSizes && dimensions == 1 && allElementsHaveArrayType)
+			{
+				// NetSpy: "new[] { a, b }"
+				typeExpression = null;
+				additionalSpecifiers = new[] { new ArraySpecifier() };
+			}
+			else if (omitSizes)
+			{
+				// NetSpy: "new T[] { a, b }" (the sizes are implied by the initializer)
+				additionalSpecifiers = additionalSpecifiers.Prepend(new ArraySpecifier(dimensions)).ToArray();
+			}
 			var expr = new ArrayCreateExpression {
 				Type = typeExpression,
 				Initializer = root.Expression
 			};
 			expr.AdditionalArraySpecifiers.AddRange(additionalSpecifiers);
-			if (!type.ContainsAnonymousType())
+			if (!type.ContainsAnonymousType() && !omitSizes)
 				expr.Arguments.AddRange(newArr.Indices.Select(i => Translate(i).Expression));
 			ResolveResult rr = new ArrayCreateResolveResult(new ArrayType(compilation, type, dimensions),
 				newArr.Indices.Select(i => Translate(i).ResolveResult).ToArray(), elementResolveResults);
