@@ -70,6 +70,34 @@ namespace dnSpy.Decompiler.ILSpy.Core.CSharp {
 				data.Error?.Invoke(error.Message);
 		}
 
+		/// <summary>
+		/// Generators whose types are created again when the exported project is built (the C# code of the
+		/// user's partial members is restored by the engine's RestoreSourceGeneratorPartials transform)
+		/// </summary>
+		static readonly HashSet<string> regeneratedByBuild = new HashSet<string>(StringComparer.Ordinal) {
+			"System.Text.RegularExpressions.Generator",
+			"Microsoft.Interop.LibraryImportGenerator",
+			"Microsoft.Extensions.Logging.Generators",
+		};
+
+		protected override bool IncludeTypeWhenDecompilingProject(MetadataFile module, TypeDefinitionHandle type) {
+			if (!base.IncludeTypeWhenDecompilingProject(module, type))
+				return false;
+			if (Settings.SourceGeneratorPartialMembers && IsTypeCreatedBySourceGenerator(type))
+				return false;
+			return true;
+		}
+
+		bool IsTypeCreatedBySourceGenerator(TypeDefinitionHandle handle) {
+			if (DnlibMetadata.ResolveToken(data.Module, handle) is not TypeDef td)
+				return false;
+			var ca = td.CustomAttributes.Find("System.CodeDom.Compiler.GeneratedCodeAttribute");
+			if (ca is null || ca.ConstructorArguments.Count == 0)
+				return false;
+			var generator = ca.ConstructorArguments[0].Value as UTF8String;
+			return generator is not null && regeneratedByBuild.Contains(generator.String);
+		}
+
 		protected override IEnumerable<ProjectItemInfo> WriteResourceFilesInProject(MetadataFile module) {
 			if (!data.UnpackResources)
 				return Array.Empty<ProjectItemInfo>();

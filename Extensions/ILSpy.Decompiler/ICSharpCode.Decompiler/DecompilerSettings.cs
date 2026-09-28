@@ -319,6 +319,16 @@ namespace ICSharpCode.Decompiler
 		public partial bool AlwaysUseBraces { get; set; }
 
 		/// <summary>
+		/// NetSpy: show members implemented by a source generator ([GeneratedRegex], [LibraryImport],
+		/// [LoggerMessage]...) as the 'partial' declaration the user wrote, without the generated body.
+		/// The generated project then builds (the generator runs again) and matches the original source.
+		/// </summary>
+		[Category("DecompilerSettings.Other")]
+		[Description("DecompilerSettings.SourceGeneratorPartialMembers")]
+		[DecompilerSetting]
+		public partial bool SourceGeneratorPartialMembers { get; set; }
+
+		/// <summary>
 		/// Decompile foreach statements.
 		/// </summary>
 		[Description("DecompilerSettings.DetectForeachStatements")]

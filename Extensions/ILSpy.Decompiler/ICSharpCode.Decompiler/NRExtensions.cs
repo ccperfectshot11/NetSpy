@@ -96,6 +96,24 @@ namespace ICSharpCode.Decompiler
 			return false;
 		}
 
+		/// <summary>
+		/// NetSpy: the delegate type the compiler synthesizes for the natural type of a lambda / method group
+		/// when no Func/Action fits (C# 10+), eg. <c>var f = (int x, int y = 10) =&gt; x + y;</c> or a lambda
+		/// with ref/params parameters. It can't be named in C#, so variables of this type must use 'var'.
+		/// </summary>
+		public static bool IsAnonymousDelegate(this IType type)
+		{
+			if (type == null || type.Kind != TypeKind.Delegate || !string.IsNullOrEmpty(type.Namespace))
+				return false;
+			var td = type.GetDefinition();
+			if (td == null || td.DeclaringTypeDefinition != null || !td.IsCompilerGenerated())
+				return false;
+			string name = td.MetadataName;
+			return name.StartsWith("<>f__AnonymousDelegate", StringComparison.Ordinal)
+				|| name.StartsWith("<>A", StringComparison.Ordinal)
+				|| name.StartsWith("<>F", StringComparison.Ordinal);
+		}
+
 		public static bool ContainsAnonymousType(this IType type)
 		{
 			var visitor = new ContainsAnonTypeVisitor();
@@ -109,16 +127,24 @@ namespace ICSharpCode.Decompiler
 
 			public override IType VisitOtherType(IType type)
 			{
-				if (IsAnonymousType(type))
+				if (IsAnonymousType(type) || IsAnonymousDelegate(type))
 					ContainsAnonType = true;
 				return base.VisitOtherType(type);
 			}
 
 			public override IType VisitTypeDefinition(ITypeDefinition type)
 			{
-				if (IsAnonymousType(type))
+				if (IsAnonymousType(type) || IsAnonymousDelegate(type))
 					ContainsAnonType = true;
 				return base.VisitTypeDefinition(type);
+			}
+
+			// NetSpy: anonymous delegates are generic (eg. <>f__AnonymousDelegate0<int, int, int>)
+			public override IType VisitParameterizedType(ParameterizedType type)
+			{
+				if (IsAnonymousDelegate(type))
+					ContainsAnonType = true;
+				return base.VisitParameterizedType(type);
 			}
 		}
 

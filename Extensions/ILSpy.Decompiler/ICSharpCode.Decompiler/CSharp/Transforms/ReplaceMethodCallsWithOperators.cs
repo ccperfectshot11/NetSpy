@@ -102,6 +102,43 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 				return;
 			}
 
+			// NetSpy: C# 14 user-defined compound assignment / instance increment operators:
+			// "x.op_AdditionAssignment(y);" => "x += y;" and "x.op_IncrementAssignment();" => "x++;"
+			if (method.IsOperator && !method.IsStatic
+				&& invocationExpression.Parent is ExpressionStatement
+				&& invocationExpression.Target is MemberReferenceExpression { Target: var compoundTarget }
+				&& compoundTarget is not BaseReferenceExpression
+				&& OperatorDeclaration.GetOperatorType(method.Name) is OperatorType compoundOpType
+				&& OperatorDeclaration.IsCompoundAssignment(compoundOpType))
+			{
+				var assignmentType = OperatorDeclaration.GetAssignmentOperatorType(compoundOpType);
+				Expression? replacement = null;
+				if (assignmentType is { } assignOp && arguments.Length == 1)
+				{
+					context.Step("Replace user-defined compound assignment operator call", invocationExpression);
+					replacement = new AssignmentExpression(compoundTarget.Detach(), assignOp, arguments[0].Detach());
+				}
+				else if (assignmentType is null && arguments.Length == 0)
+				{
+					context.Step("Replace user-defined increment/decrement operator call", invocationExpression);
+					bool isIncrement = compoundOpType is OperatorType.IncrementAssignment or OperatorType.CheckedIncrementAssignment;
+					replacement = new UnaryOperatorExpression(isIncrement ? UnaryOperatorType.PostIncrement : UnaryOperatorType.PostDecrement, compoundTarget.Detach());
+				}
+				if (replacement != null)
+				{
+					// 'checked' operators need a checked context, the unchecked ones an unchecked context
+					// if there's also a checked version (same as the C# 11 checked operators)
+					if (OperatorDeclaration.IsChecked(compoundOpType))
+						replacement.AddAnnotation(AddCheckedBlocks.CheckedAnnotation);
+					else if (HasCheckedEquivalent(method))
+						replacement.AddAnnotation(AddCheckedBlocks.UncheckedAnnotation);
+					replacement.CopyAnnotationsFrom(invocationExpression);
+					invocationExpression.ReplaceWith(replacement);
+					context.EndStep(replacement);
+					return;
+				}
+			}
+
 			switch (method.FullName)
 			{
 				case "System.Type.GetTypeFromHandle":

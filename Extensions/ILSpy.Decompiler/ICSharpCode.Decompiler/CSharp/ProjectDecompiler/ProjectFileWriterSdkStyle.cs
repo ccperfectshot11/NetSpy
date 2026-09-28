@@ -144,6 +144,9 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 			using (new Group(xml, "PropertyGroup"))
 			{
 				WriteProjectInfo(xml, project);
+				// NetSpy: see TargetServices.UsesNullableReferenceTypes()
+				if (TargetServices.UsesNullableReferenceTypes(module))
+					xml.WriteElementString("Nullable", "annotations");
 			}
 			using (new Group(xml, "PropertyGroup"))
 			{

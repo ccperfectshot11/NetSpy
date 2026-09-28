@@ -149,6 +149,33 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 		/// </summary>
 		/// <param name="module">The module to get the target framework description for. Cannot be null.</param>
 		/// <returns>The platform name, e.g. "AnyCPU" or "x86".</returns>
+		/// <summary>
+		/// NetSpy: true if the module was compiled with nullable reference types (the compiler then embeds
+		/// NullableAttribute / NullableContextAttribute, or marks the module with NullablePublicOnlyAttribute).
+		/// The decompiled code contains '?' annotations, so the project must enable the nullable context
+		/// (else: warning CS8632). 'annotations' is used instead of 'enable' because the decompiled code
+		/// doesn't have the original '!' operators, so 'enable' would report bogus nullable warnings.
+		/// </summary>
+		public static bool UsesNullableReferenceTypes(MetadataFile module)
+		{
+			// The attribute types are either embedded in the module (TypeDef) or come from the
+			// framework (TypeRef), so look at the attributes that are actually used.
+			var metadata = module.Metadata;
+			foreach (var h in metadata.CustomAttributes)
+			{
+				var attr = metadata.GetCustomAttribute(h);
+				var name = attr.GetAttributeType(metadata).GetFullTypeName(metadata);
+				switch (name.ReflectionName)
+				{
+					case "System.Runtime.CompilerServices.NullableAttribute":
+					case "System.Runtime.CompilerServices.NullableContextAttribute":
+					case "System.Runtime.CompilerServices.NullablePublicOnlyAttribute":
+						return true;
+				}
+			}
+			return false;
+		}
+
 		public static string GetPlatformName(PEFile module)
 		{
 			if (module is null)

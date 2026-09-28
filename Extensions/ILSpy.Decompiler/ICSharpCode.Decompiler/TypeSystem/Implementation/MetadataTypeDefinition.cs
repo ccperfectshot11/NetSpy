@@ -433,13 +433,17 @@ namespace ICSharpCode.Decompiler.TypeSystem.Implementation
 			}
 			var layout = typeDefinition.GetLayout();
 			LayoutKind defaultLayoutKind = Kind == TypeKind.Struct ? LayoutKind.Sequential : LayoutKind.Auto;
-			if (layoutKind != defaultLayoutKind || charSet != CharSet.Ansi || layout.PackingSize > 0 || layout.Size > 0)
+			// NetSpy: the default charset is the module's [DefaultCharSet], and [StructLayout] can only be
+			// used on classes and structs (enums/interfaces/delegates get the charset from [DefaultCharSet])
+			CharSet defaultCharSet = module.DefaultCharSet;
+			bool canHaveStructLayout = Kind == TypeKind.Class || Kind == TypeKind.Struct;
+			if (canHaveStructLayout && (layoutKind != defaultLayoutKind || charSet != defaultCharSet || layout.PackingSize > 0 || layout.Size > 0))
 			{
 				var structLayout = new AttributeBuilder(module, KnownAttribute.StructLayout);
 				structLayout.AddFixedArg(
 					new TopLevelTypeName("System.Runtime.InteropServices", "LayoutKind"),
 					(int)layoutKind);
-				if (charSet != CharSet.Ansi)
+				if (charSet != defaultCharSet)
 				{
 					var charSetType = Compilation.FindType(new TopLevelTypeName("System.Runtime.InteropServices", "CharSet"));
 					structLayout.AddNamedArg("CharSet", charSetType, (int)charSet);

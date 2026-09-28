@@ -175,6 +175,7 @@ namespace ICSharpCode.Decompiler.CSharp
 				new IntroduceNativeIntTypeOnLocals(),
 				new IntroduceScopedModifierOnLocals(),
 				new ExpandNestedConditionals(),
+				new IntroduceVariablesForConstantConditions(), // NetSpy: must run before AssignVariableNames
 				new AssignVariableNames(),
 			};
 		}
@@ -271,6 +272,7 @@ namespace ICSharpCode.Decompiler.CSharp
 		public static List<IAstTransform> GetAstTransforms()
 		{
 			return new List<IAstTransform> {
+				new RestoreSourceGeneratorPartials(), // NetSpy: must run before IntroduceUsingDeclarations
 				new PatternStatementTransform(),
 				new ReplaceMethodCallsWithOperators(), // must run before DeclareVariables.EnsureExpressionStatementsAreValid
 				new IntroduceUnsafeModifier(),
@@ -480,6 +482,9 @@ namespace ICSharpCode.Decompiler.CSharp
 						if (settings.AnonymousTypes && type.IsAnonymousType(metadata))
 							return true;
 						if (settings.Dynamic && type.IsDelegate(metadata) && (name.StartsWith("<>A", StringComparison.Ordinal) || name.StartsWith("<>F", StringComparison.Ordinal)))
+							return true;
+						// NetSpy: natural type of lambdas that don't fit Func/Action (C# 10), declared with 'var'
+						if (settings.AnonymousTypes && type.IsDelegate(metadata) && name.StartsWith("<>f__AnonymousDelegate", StringComparison.Ordinal))
 							return true;
 					}
 					if (settings.ArrayInitializers && settings.SwitchStatementOnString && name.StartsWith("<PrivateImplementationDetails>", StringComparison.Ordinal))
@@ -2275,6 +2280,11 @@ namespace ICSharpCode.Decompiler.CSharp
 				if (method.IsConstructor && settings.RequiredMembers && RemoveCompilerFeatureRequiredAttribute(methodDecl, "RequiredMembers"))
 				{
 					RemoveObsoleteAttribute(methodDecl, "Constructors of types with required members are not supported in this version of your compiler.");
+				}
+				// NetSpy: C# 14 compound assignment operators ('public void operator +=(T x)') get this attribute from the compiler
+				if (methodDecl is OperatorDeclaration { OperatorType: var compoundOpType } && OperatorDeclaration.IsCompoundAssignment(compoundOpType))
+				{
+					RemoveCompilerFeatureRequiredAttribute(methodDecl, "UserDefinedCompoundAssignmentOperators");
 				}
 				return methodDecl;
 

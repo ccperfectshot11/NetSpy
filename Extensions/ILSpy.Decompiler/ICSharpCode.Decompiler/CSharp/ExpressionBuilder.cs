@@ -304,6 +304,10 @@ namespace ICSharpCode.Decompiler.CSharp
 		{
 			if (settings.AlwaysQualifyMemberReferences || HidesVariableWithName(member.Name))
 				return true;
+			// NetSpy: a static abstract/virtual interface member called through a type parameter
+			// ('constrained. !TSelf') must be written as 'TSelf.Member' (CS8926), even inside the interface
+			if (member.IsStatic && target.Type is ITypeParameter)
+				return true;
 			if (member.IsStatic)
 				return !IsCurrentOrContainingType(member.DeclaringTypeDefinition);
 			if (target.Expression is BaseReferenceExpression)

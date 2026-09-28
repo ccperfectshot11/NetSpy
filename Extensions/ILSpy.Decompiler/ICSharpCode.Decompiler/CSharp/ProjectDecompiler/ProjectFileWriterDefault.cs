@@ -112,6 +112,9 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 					w.WriteElementString("TargetFrameworkProfile", targetFramework.Profile);
 				w.WriteElementString("WarningLevel", "4");
 				w.WriteElementString("AllowUnsafeBlocks", "True");
+				// NetSpy: see TargetServices.UsesNullableReferenceTypes()
+				if (TargetServices.UsesNullableReferenceTypes(module))
+					w.WriteElementString("Nullable", "annotations");
 
 				if (project.StrongNameKeyFile != null)
 				{

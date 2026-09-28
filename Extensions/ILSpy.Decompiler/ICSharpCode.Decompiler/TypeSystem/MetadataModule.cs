@@ -344,6 +344,36 @@ namespace ICSharpCode.Decompiler.TypeSystem
 		}
 		#endregion
 
+		#region DefaultCharSet
+		// NetSpy: [module: DefaultCharSet(CharSet.X)] makes the C# compiler mark every type in the module
+		// with that charset, so the charset of a type must be compared with this value, not with Ansi.
+		int defaultCharSet = -1;
+
+		internal System.Runtime.InteropServices.CharSet DefaultCharSet {
+			get {
+				int value = defaultCharSet;
+				if (value < 0)
+				{
+					value = (int)System.Runtime.InteropServices.CharSet.Ansi;
+					foreach (var h in metadata.GetCustomAttributes(EntityHandle.ModuleDefinition))
+					{
+						var attr = metadata.GetCustomAttribute(h);
+						var name = attr.GetAttributeType(metadata).GetFullTypeName(metadata);
+						if (name.ReflectionName != "System.Runtime.InteropServices.DefaultCharSetAttribute")
+							continue;
+						var reader = metadata.GetBlobReader(attr.Value);
+						// prolog (0x0001) + int32 CharSet value
+						if (reader.Length >= 6 && reader.ReadUInt16() == 1)
+							value = reader.ReadInt32();
+						break;
+					}
+					defaultCharSet = value;
+				}
+				return (System.Runtime.InteropServices.CharSet)value;
+			}
+		}
+		#endregion
+
 		#region Resolve Module
 
 		public IModule ResolveModule(AssemblyReferenceHandle handle)

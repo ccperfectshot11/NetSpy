@@ -1322,7 +1322,11 @@ namespace ICSharpCode.Decompiler.CSharp.Syntax
 			ITypeDefinition enumDefinition = type.GetDefinition()!;
 			TypeCode enumBaseTypeCode = ReflectionHelper.GetTypeCode(enumDefinition.EnumUnderlyingType);
 			bool isFlags = IsFlagsEnum(enumDefinition);
+			// NetSpy: outside of the enum's own declaration, don't use [Obsolete] members: the decompiled
+			// code would get obsolete warnings the original code didn't have (eg. TypeAttributes.Serializable,
+			// SYSLIB0050). If no other member fits, the value is written as a cast, like the original code did.
 			var fields = enumDefinition.Fields
+				.Where(f => declaringEnumMember != null || !f.HasAttribute(KnownAttribute.Obsolete))
 				.Select(PrepareConstant)
 				.WhereNotNull()
 				.ToArray();

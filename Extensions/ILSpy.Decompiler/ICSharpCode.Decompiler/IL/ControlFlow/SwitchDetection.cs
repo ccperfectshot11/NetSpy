@@ -134,6 +134,7 @@ namespace ICSharpCode.Decompiler.IL.ControlFlow
 
 		public void Run(ILFunction function, ILTransformContext context)
 		{
+			InlineAllSwitchExpressionThrowHelpers(function, context);
 			if (!context.Settings.SparseIntegerSwitch)
 				return;
 			this.context = context;
@@ -309,6 +310,63 @@ namespace ICSharpCode.Decompiler.IL.ControlFlow
 		}
 
 #nullable enable
+		/// <summary>
+		/// NetSpy: a switch expression that isn't compiled to a 'switch' IL instruction (eg. list patterns,
+		/// which test Length with ifs) still ends with the throw helper call, in any block:
+		///   call ThrowSwitchExpressionException(value)
+		///   br/leave (unreachable)
+		/// =>
+		///   throw(newobj SwitchExpressionException(value))
+		/// Otherwise the decompiled code calls &lt;PrivateImplementationDetails&gt;, which doesn't compile.
+		/// </summary>
+		static void InlineAllSwitchExpressionThrowHelpers(ILFunction function, ILTransformContext context)
+		{
+			IMethod? invalidOperationCtor = null, switchExpressionCtor = null;
+			bool ctorsSearched = false;
+			var modifiedContainers = new HashSet<BlockContainer>();
+			foreach (var block in function.Descendants.OfType<Block>().ToArray())
+			{
+				if (block.Instructions is not [.., var call, Branch or Leave])
+					continue;
+				if (!MatchSwitchExpressionThrowHelperCall(call, out var value))
+					continue;
+				if (!ctorsSearched)
+				{
+					ctorsSearched = true;
+					invalidOperationCtor = FindCtor(context, "System.InvalidOperationException", null);
+					switchExpressionCtor = FindCtor(context, "System.Runtime.CompilerServices.SwitchExpressionException", context.TypeSystem.FindType(KnownTypeCode.Object));
+				}
+				var ctor = value == null ? invalidOperationCtor : switchExpressionCtor;
+				if (ctor == null)
+					continue;
+				context.Step("Inline switch expression throw helper", call);
+				var newObj = new NewObj(ctor);
+				if (value != null)
+					newObj.Arguments.Add(value);
+				int index = block.Instructions.Count - 2;
+				var branch = block.Instructions[index + 1];
+				block.Instructions[index] = new Throw(newObj).WithILRange(call).WithILRange(branch);
+				block.Instructions.RemoveAt(index + 1);
+				if (block.Parent is BlockContainer container)
+					modifiedContainers.Add(container);
+			}
+			// the branch target may have become unreachable
+			foreach (var container in modifiedContainers)
+				container.SortBlocks(deleteUnreachableBlocks: true);
+
+			static IMethod? FindCtor(ILTransformContext context, string fullTypeName, IType? parameterType)
+			{
+				IType exceptionType = context.TypeSystem.FindType(new FullTypeName(fullTypeName));
+				int paramCount = parameterType == null ? 0 : 1;
+				foreach (var ctor in exceptionType.GetConstructors(m => !m.IsStatic && m.Parameters.Count == paramCount))
+				{
+					if (parameterType == null || NormalizeTypeVisitor.IgnoreNullability.EquivalentTypes(ctor.Parameters[0].Type, parameterType))
+						return ctor;
+				}
+				return null;
+			}
+		}
+
 		/// <summary>
 		/// Matches a call to one of the compiler-generated throw helpers in
 		/// &lt;PrivateImplementationDetails&gt; that implement the implicit default case of a
