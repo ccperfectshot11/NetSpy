@@ -248,9 +248,9 @@ namespace ICSharpCode.Decompiler.CSharp
 					valueTupleAssembly: inst.Method.DeclaringType.GetDefinition()?.ParentModule
 				)).WithILInstruction(inst);
 			}
-			if (settings.StringConcat && IsSpanBasedStringConcat(inst, out var operands))
+			if (settings.StringConcat && IsSpanBasedStringConcat(inst, out var operands, out int toStringIndex))
 			{
-				return BuildStringConcat(inst.Method, operands).WithILInstruction(inst);
+				return BuildStringConcat(inst.Method, operands, toStringIndex).WithILInstruction(inst);
 			}
 			var result = Build(inst.OpCode, inst.Method, inst.Arguments, constrainedTo: inst.ConstrainedTo)
 				.WithILInstruction(inst);
@@ -263,7 +263,7 @@ namespace ICSharpCode.Decompiler.CSharp
 			return result;
 		}
 
-		private ExpressionWithResolveResult BuildStringConcat(IMethod method, List<(ILInstruction Instruction, KnownTypeCode TypeCode)> operands)
+		private ExpressionWithResolveResult BuildStringConcat(IMethod method, List<(ILInstruction Instruction, KnownTypeCode TypeCode)> operands, int toStringIndex)
 		{
 			IType type = typeSystem.FindType(operands[0].TypeCode);
 			ExpressionWithResolveResult result = expressionBuilder.Translate(operands[0].Instruction, type).ConvertTo(type, expressionBuilder);
@@ -272,16 +272,28 @@ namespace ICSharpCode.Decompiler.CSharp
 			for (int i = 1; i < operands.Count; i++)
 			{
 				type = typeSystem.FindType(operands[i].TypeCode);
-				var expr = expressionBuilder.Translate(operands[i].Instruction, type).ConvertTo(type, expressionBuilder);
-				result = new BinaryOperatorExpression(result.Expression, BinaryOperatorType.Add, expr).WithRR(rr);
+				TranslatedExpression expr = expressionBuilder.Translate(operands[i].Instruction, type).ConvertTo(type, expressionBuilder);
+				Expression operand = expr.Expression;
+				if (i == toStringIndex)
+				{
+					// NetSpy: char + char is an int addition, the original code had "c1 + c2.ToString()"
+					var toString = type.GetMethods(m => m.Name == "ToString" && m.Parameters.Count == 0 && !m.IsStatic).FirstOrDefault();
+					if (toString != null)
+					{
+						operand = new InvocationExpression(new MemberReferenceExpression(expr.Expression, "ToString"))
+							.WithRR(new CSharpInvocationResolveResult(expr.ResolveResult, toString, Array.Empty<ResolveResult>()));
+					}
+				}
+				result = new BinaryOperatorExpression(result.Expression, BinaryOperatorType.Add, operand).WithRR(rr);
 			}
 
 			return result;
 		}
 
-		static bool IsSpanBasedStringConcat(CallInstruction call, [NotNullWhen(true)] out List<(ILInstruction, KnownTypeCode)>? operands)
+		static bool IsSpanBasedStringConcat(CallInstruction call, [NotNullWhen(true)] out List<(ILInstruction, KnownTypeCode)>? operands, out int toStringIndex)
 		{
 			operands = null;
+			toStringIndex = -1;
 
 			if (!IsSpanBasedStringConcat(call.Method))
 			{
@@ -308,7 +320,13 @@ namespace ICSharpCode.Decompiler.CSharp
 				}
 			}
 
-			return call.Arguments.Count >= 2 && firstStringArgumentIndex <= 1;
+			if (call.Arguments.Count < 2)
+				return false;
+			// NetSpy: "c1 + c2.ToString()" (both chars) is compiled to Concat(span(c1), span(c2)):
+			// the second operand must become a string again, else "c1 + c2" would be an int addition
+			if (firstStringArgumentIndex is null or > 1)
+				toStringIndex = 1;
+			return true;
 		}
 
 		internal static bool IsSpanBasedStringConcat(IMethod method)

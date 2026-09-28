@@ -107,6 +107,9 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 			{
 				return;
 			}
+			// NetSpy: "[1, 2].Select(...)" is invalid, a collection expression has no natural type
+			if (firstArgument is CollectionExpression)
+				return;
 			var method = (IMethod)invocationExpression.GetSymbol()!;
 			bool stepped = false;
 			if (firstArgument is DirectionExpression dirExpr)

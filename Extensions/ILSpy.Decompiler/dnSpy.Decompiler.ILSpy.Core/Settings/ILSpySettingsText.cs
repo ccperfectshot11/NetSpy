@@ -8,6 +8,7 @@ namespace dnSpy.Decompiler.ILSpy.Core.Settings {
 	static class ILSpySettingsText {
 		public static readonly Dictionary<string, string> Texts = new Dictionary<string, string> {
 			// NetSpy's own options (not in ILSpy)
+			{ "DecompilerSettings.CollectionExpressions", "Use collection expressions ([a, b, ..c])" },
 			{ "DecompilerSettings.SourceGeneratorPartialMembers", "Show source generated members ([GeneratedRegex], [LibraryImport]...) as partial declarations" },
 			{ "DecompilerSettings.AggressiveInlining", "Always inline local variables if possible" },
 			{ "DecompilerSettings.AllowExtensionAddMethodsInCollectionInitializerExpressions", "Allow extension 'Add' methods in collection initializer expressions" },

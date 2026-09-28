@@ -264,6 +264,9 @@ namespace ICSharpCode.Decompiler.IL.Transforms
 				{
 					return false;
 				}
+				// NetSpy: a collection expression has no natural type, so it is only valid C# in a target-typed position.
+				if (inlinedExpression is Block { Kind: BlockKind.CollectionExpression } && !IsTargetTypedPosition(loadInst))
+					return false;
 				if (loadInst.OpCode == OpCode.LdLoca)
 				{
 					if (!IsGeneratedTemporaryForAddressOf((LdLoca)loadInst, v, inlinedExpression, options))
@@ -323,6 +326,28 @@ namespace ICSharpCode.Decompiler.IL.Transforms
 				&& newObj.Arguments[0] == loadInst
 				&& (newObj.Method.DeclaringType.IsKnownType(KnownTypeCode.SpanOfT)
 					|| newObj.Method.DeclaringType.IsKnownType(KnownTypeCode.ReadOnlySpanOfT));
+		}
+
+		/// <summary>
+		/// NetSpy: true if the value loaded by <paramref name="loadInst"/> is converted to a type known from the context:
+		/// a local/field/array element store, a return value or a call argument (but not the 'this' of an instance call).
+		/// </summary>
+		static bool IsTargetTypedPosition(ILInstruction loadInst)
+		{
+			if (loadInst.OpCode != OpCode.LdLoc)
+				return false;
+			switch (loadInst.Parent)
+			{
+				case StLoc:
+				case Leave:
+					return true;
+				case StObj:
+					return loadInst.SlotInfo == StObj.ValueSlot;
+				case CallInstruction call:
+					return !(call.IsInstanceCall && loadInst.ChildIndex == 0);
+				default:
+					return false;
+			}
 		}
 
 		/// <summary>

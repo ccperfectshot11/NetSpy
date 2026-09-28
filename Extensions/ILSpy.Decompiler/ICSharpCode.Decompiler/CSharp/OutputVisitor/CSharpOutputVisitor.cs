@@ -658,6 +658,34 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 			EndNode(arrayInitializerExpression);
 		}
 
+		// NetSpy: C# 12 collection expressions: [a, b, ..c]
+		public virtual void VisitCollectionExpression(CollectionExpression collectionExpression)
+		{
+			StartNode(collectionExpression);
+			WriteToken("[");
+			bool first = true;
+			foreach (var element in collectionExpression.Elements)
+			{
+				if (!first)
+				{
+					WriteToken(",");
+					Space();
+				}
+				first = false;
+				element.AcceptVisitor(this);
+			}
+			WriteToken("]");
+			EndNode(collectionExpression);
+		}
+
+		public virtual void VisitSpreadElement(SpreadElement spreadElement)
+		{
+			StartNode(spreadElement);
+			WriteToken("..");
+			spreadElement.Expression.AcceptVisitor(this);
+			EndNode(spreadElement);
+		}
+
 		protected bool CanBeConfusedWithObjectInitializer(Expression expr)
 		{
 			// "int a; new List<int> { a = 1 };" is an object initalizers and invalid, but

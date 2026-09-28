@@ -226,6 +226,10 @@ namespace ICSharpCode.Decompiler.IL
 						}
 					}
 					break;
+				case BlockKind.CollectionExpression:
+					// NetSpy: Instructions[0] initializes the collection that the other instructions fill
+					DebugAssert(Instructions.Count > 0 && Instructions[0] is StLoc { Variable.Kind: VariableKind.InitializerTarget });
+					break;
 				case BlockKind.DeconstructionConversions:
 					Debug.Assert(this.SlotInfo == DeconstructInstruction.ConversionsSlot);
 					break;
@@ -266,6 +270,7 @@ namespace ICSharpCode.Decompiler.IL
 			{
 				case BlockKind.ControlFlow when Parent is BlockContainer:
 				case BlockKind.ArrayInitializer:
+				case BlockKind.CollectionExpression:
 				case BlockKind.CollectionInitializer:
 				case BlockKind.ObjectInitializer:
 				case BlockKind.CallInlineAssign:
@@ -513,6 +518,12 @@ namespace ICSharpCode.Decompiler.IL
 		CollectionInitializer,
 		ObjectInitializer,
 		StackAllocInitializer,
+		/// <summary>
+		/// NetSpy: C# 12 collection expression ([a, b, ..c]). Instructions[0] stores the collection being built in an
+		/// InitializerTarget variable; the following instructions are the compiler generated code that fills it
+		/// (stobj = element, AddRange = spread element); the final instruction is the resulting collection.
+		/// </summary>
+		CollectionExpression,
 		/// <summary>
 		/// Block is used for using the result of a property setter inline.
 		/// Example: <code>Use(this.Property = value);</code>

@@ -267,6 +267,11 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 					Parenthesize(castExpression.Expression);
 				}
 			}
+			// NetSpy: "(T)[1]" is an element access, not a cast of a collection expression
+			if (castExpression.Expression is CollectionExpression)
+			{
+				Parenthesize(castExpression.Expression);
+			}
 			// The above issue can also happen with PrimitiveExpressions representing negative values:
 			PrimitiveExpression? pe = castExpression.Expression as PrimitiveExpression;
 			if (pe != null && pe.Value != null && TypeCanBeMisinterpretedAsExpression(castExpression.Type))

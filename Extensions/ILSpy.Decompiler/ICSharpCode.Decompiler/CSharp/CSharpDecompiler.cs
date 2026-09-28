@@ -151,6 +151,7 @@ namespace ICSharpCode.Decompiler.CSharp
 							new NullableLiftingStatementTransform(),
 							new NullPropagationStatementTransform(),
 							new TransformArrayInitializers(),
+							new TransformCollectionExpressions(), // NetSpy
 							new TransformCollectionAndObjectInitializers(),
 							new TransformExpressionTrees(),
 							new IndexRangeTransform(),
@@ -485,6 +486,9 @@ namespace ICSharpCode.Decompiler.CSharp
 							return true;
 						// NetSpy: natural type of lambdas that don't fit Func/Action (C# 10), declared with 'var'
 						if (settings.AnonymousTypes && type.IsDelegate(metadata) && name.StartsWith("<>f__AnonymousDelegate", StringComparison.Ordinal))
+							return true;
+						// NetSpy: wrappers for interface-typed collection expressions (IEnumerable<T> e = [a, b];)
+						if (settings.CollectionExpressions && name.StartsWith("<>z__ReadOnly", StringComparison.Ordinal))
 							return true;
 					}
 					if (settings.ArrayInitializers && settings.SwitchStatementOnString && name.StartsWith("<PrivateImplementationDetails>", StringComparison.Ordinal))

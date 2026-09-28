@@ -859,6 +859,14 @@ namespace ICSharpCode.Decompiler
 		public partial bool InlineArrays { get; set; }
 
 		/// <summary>
+		/// NetSpy: Gets/Sets whether C# 12.0 collection expressions ([a, b, ..c]) should be used
+		/// for the code the compiler generates for them.
+		/// </summary>
+		[Description("DecompilerSettings.CollectionExpressions")]
+		[DecompilerSetting(CSharp.LanguageVersion.CSharp12_0)]
+		public partial bool CollectionExpressions { get; set; }
+
+		/// <summary>
 		/// Gets/sets whether lambda parameter lists may declare 'params' and parameter default
 		/// values. When disabled, these modifiers are dropped from anonymous functions instead.
 		/// </summary>

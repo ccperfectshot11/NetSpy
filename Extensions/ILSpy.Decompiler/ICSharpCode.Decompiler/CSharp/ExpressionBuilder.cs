@@ -539,6 +539,8 @@ namespace ICSharpCode.Decompiler.CSharp
 					return TranslateStackAllocInitializer(b, type.TypeArguments[0]);
 				}
 			}
+			if (TranslateReadOnlyCollectionExpression(inst) is { } collectionExpression)
+				return collectionExpression;
 			return new CallBuilder(this, typeSystem, settings).Build(inst, context.TypeHint);
 		}
 
@@ -3616,8 +3618,88 @@ namespace ICSharpCode.Decompiler.CSharp
 					return TranslateCallWithNamedArgs(block);
 				case BlockKind.InterpolatedString:
 					return TranslateInterpolatedString(block);
+				case BlockKind.CollectionExpression:
+					return TranslateCollectionExpression(block);
 				default:
 					return ErrorExpression("Unknown block type: " + block.Kind);
+			}
+		}
+
+		/// <summary>
+		/// NetSpy: translates a block built by <see cref="TransformCollectionExpressions"/> to "[a, b, ..c]".
+		/// </summary>
+		TranslatedExpression TranslateCollectionExpression(Block block)
+		{
+			var final = block.FinalInstruction;
+			IType resultType = final.InferType(compilation);
+			IType spanType = resultType;
+			// CollectionBuilder: Bag.Create(ReadOnlySpan<T>)
+			if (final is Call { Arguments.Count: 1 } builder && TransformCollectionExpressions.IsCollectionBuilderMethod(builder.Method))
+				spanType = builder.Method.Parameters[0].Type;
+			IType elementType = spanType.TypeArguments.Count == 1 ? spanType.TypeArguments[0] : SpecialType.UnknownType;
+			var expr = new CollectionExpression();
+			for (int i = 1; i < block.Instructions.Count; i++)
+			{
+				switch (block.Instructions[i])
+				{
+					case StObj stobj:
+						expr.Elements.Add(TranslateCollectionElement(stobj.Value, elementType));
+						break;
+					case Call { Method.Name: "SetCount" }:
+						break;
+					default:
+						return ErrorExpression("Unknown collection expression instruction: " + block.Instructions[i].OpCode);
+				}
+			}
+			return expr.WithILInstruction(block).WithRR(new ResolveResult(resultType));
+		}
+
+		/// <summary>
+		/// NetSpy: "new &lt;&gt;z__ReadOnlyArray&lt;T&gt;(new T[] { a, b })" is the compiler's lowering of an interface-typed
+		/// collection expression (IEnumerable&lt;T&gt; e = [a, b];).
+		/// </summary>
+		TranslatedExpression? TranslateReadOnlyCollectionExpression(NewObj inst)
+		{
+			var type = inst.Method.DeclaringType;
+			if (!settings.CollectionExpressions || inst.Arguments.Count != 1 || type.TypeArguments.Count != 1
+				|| !type.Name.StartsWith("<>z__ReadOnly", StringComparison.Ordinal))
+				return null;
+			var elementType = type.TypeArguments[0];
+			var expr = new CollectionExpression();
+			var arg = inst.Arguments[0];
+			if (type.Name.StartsWith("<>z__ReadOnlySingleElementList", StringComparison.Ordinal))
+			{
+				expr.Elements.Add(TranslateCollectionElement(arg, elementType));
+			}
+			else if (arg is Block { Kind: BlockKind.ArrayInitializer } array && array.FinalInstruction is LdLoc
+				&& array.Instructions[0].MatchStLoc(out _, out var newArr) && newArr is NewArr { Indices.Count: 1 })
+			{
+				for (int i = 1; i < array.Instructions.Count; i++)
+				{
+					if (array.Instructions[i] is not StObj stobj)
+						return null;
+					expr.Elements.Add(TranslateCollectionElement(stobj.Value, elementType));
+				}
+			}
+			else
+			{
+				// the array/list is already a new copy: [.. source]
+				expr.Elements.Add(new SpreadElement { Expression = Translate(arg).Expression });
+			}
+			return expr.WithILInstruction(inst).WithRR(new ResolveResult(type));
+		}
+
+		Expression TranslateCollectionElement(ILInstruction value, IType elementType)
+		{
+			var old = astBuilder.UseSpecialConstants;
+			try
+			{
+				astBuilder.UseSpecialConstants = !elementType.IsCSharpPrimitiveIntegerType() && !elementType.IsKnownType(KnownTypeCode.Decimal);
+				return Translate(value, typeHint: elementType).ConvertTo(elementType, this, allowImplicitConversion: true).Expression;
+			}
+			finally
+			{
+				astBuilder.UseSpecialConstants = old;
 			}
 		}
 
