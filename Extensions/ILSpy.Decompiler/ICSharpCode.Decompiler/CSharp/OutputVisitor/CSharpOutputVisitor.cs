@@ -706,6 +706,28 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 			EndNode(spreadElement);
 		}
 
+		/// <summary>
+		/// NetSpy: true if the initializer elements, written on a single line, fit in <paramref name="maxLength"/>
+		/// characters and contain nothing that is normally written on several lines (statement lambdas, anonymous methods).
+		/// </summary>
+		static bool FitsOnOneLine(AstNodeCollection<Expression> elements, int maxLength)
+		{
+			if (maxLength <= 0)
+				return false;
+			int length = 4; // "{ " + " }"
+			foreach (var element in elements)
+			{
+				if (element.DescendantsAndSelf.Any(n => n is AnonymousMethodExpression || n is LambdaExpression { Body: BlockStatement }))
+					return false;
+				// the default output wraps nested initializers; joined on one line they read the same
+				var text = System.Text.RegularExpressions.Regex.Replace(element.ToString(), @"\s*\r?\n\s*", " ");
+				length += text.Length + 2;
+				if (length > maxLength)
+					return false;
+			}
+			return true;
+		}
+
 		protected bool CanBeConfusedWithObjectInitializer(Expression expr)
 		{
 			// "int a; new List<int> { a = 1 };" is an object initalizers and invalid, but
@@ -736,6 +758,8 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 			bool wrapAlways = policy.ArrayInitializerWrapping == Wrapping.WrapAlways
 				|| (elements.Count > 1 && elements.Any(e => !IsSimpleExpression(e)))
 				|| elements.Any(IsComplexExpression);
+			if (wrapAlways && policy.ArrayInitializerWrapping != Wrapping.WrapAlways && FitsOnOneLine(elements, policy.MaxSingleLineInitializerLength))
+				wrapAlways = false; // NetSpy: "{ X = 1, Y = 2 }"
 			bool wrap = wrapAlways
 				|| elements.Count > 10;
 			OpenBrace(wrap ? policy.ArrayInitializerBraceStyle : BraceStyle.EndOfLine, newLine: wrap);

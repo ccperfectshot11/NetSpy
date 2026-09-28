@@ -14,6 +14,7 @@ namespace dnSpy.Decompiler.ILSpy.Core.Settings {
 			{ "DecompilerSettings.SourceMemberOrder", "Keep the source order of members (don't group them by kind)" },
 			{ "DecompilerSettings.NamedBooleanArguments", "Name boolean literal arguments (f(inherit: false))" },
 			{ "DecompilerSettings.OmitArraySizes", "Omit array sizes when there is an initializer (new[] { 1, 2 })" },
+			{ "DecompilerSettings.ImplicitlyTypedLocals", "Use 'var' when the type is apparent (var x = new T())" },
 			{ "DecompilerSettings.AggressiveInlining", "Always inline local variables if possible" },
 			{ "DecompilerSettings.AllowExtensionAddMethodsInCollectionInitializerExpressions", "Allow extension 'Add' methods in collection initializer expressions" },
 			{ "DecompilerSettings.AllowExtensionMethodSyntaxOnRef", "Use 'ref' extension methods" },

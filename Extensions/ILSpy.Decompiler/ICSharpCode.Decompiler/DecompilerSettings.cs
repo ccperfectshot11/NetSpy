@@ -365,6 +365,14 @@ namespace ICSharpCode.Decompiler
 		public partial bool OmitArraySizes { get; set; }
 
 		/// <summary>
+		/// NetSpy: declare locals with "var" when the initializer names the type ("var list = new List&lt;int&gt;();").
+		/// </summary>
+		[Category("DecompilerSettings.Other")]
+		[Description("DecompilerSettings.ImplicitlyTypedLocals")]
+		[DecompilerSetting]
+		public partial bool ImplicitlyTypedLocals { get; set; }
+
+		/// <summary>
 		/// Decompile foreach statements.
 		/// </summary>
 		[Description("DecompilerSettings.DetectForeachStatements")]

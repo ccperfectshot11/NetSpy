@@ -862,6 +862,15 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 			set;
 		}
 
+		/// <summary>
+		/// NetSpy: object/collection/anonymous initializers that fit in this many characters are written on one line
+		/// ("new Point { X = 1, Y = 2 }"). 0 = always wrap them (ILSpy's style).
+		/// </summary>
+		public int MaxSingleLineInitializerLength {
+			get;
+			set;
+		} = 120;
+
 		public BraceStyle ArrayInitializerBraceStyle {
 			get;
 			set;

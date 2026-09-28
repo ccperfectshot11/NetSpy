@@ -576,6 +576,23 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 			}
 		}
 
+		/// <summary>
+		/// NetSpy: the initializer names the variable's exact type ("new T()", "(T)x", "x as T", "default(T)",
+		/// "new T[] { }"), so "var" infers the same type and reads as in modern source code.
+		/// </summary>
+		static bool IsTypeApparent(Expression initializer, IType variableType)
+		{
+			bool namesType = initializer switch {
+				ObjectCreateExpression oce => oce.Type is not null,
+				ArrayCreateExpression ace => ace.Type is not null,
+				CastExpression => true,
+				AsExpression => true,
+				DefaultValueExpression => true,
+				_ => false
+			};
+			return namesType && initializer.GetResolveResult() is { Type: var type } && type.Equals(variableType);
+		}
+
 		bool IsMatchingAssignment(VariableToDeclare v, [NotNullWhen(true)] out AssignmentExpression? assignment)
 		{
 			assignment = v.InsertionPoint.nextNode as AssignmentExpression;
@@ -624,6 +641,12 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 					AstType type;
 					if (context.Settings.AnonymousTypes && v.Type.ContainsAnonymousType())
 					{
+						type = new SimpleType("var");
+					}
+					else if (context.Settings.ImplicitlyTypedLocals && v.ILVariable.Kind != VariableKind.PinnedLocal
+						&& v.Type.Kind != TypeKind.ByReference && IsTypeApparent(assignment.Right, v.Type))
+					{
+						// NetSpy: "var x = new T();" (modern style: var when the type is apparent from the initializer)
 						type = new SimpleType("var");
 					}
 					else
