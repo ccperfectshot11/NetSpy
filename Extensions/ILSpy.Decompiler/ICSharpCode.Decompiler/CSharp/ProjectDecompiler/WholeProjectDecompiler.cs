@@ -475,6 +475,25 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 				return info;
 			}
 
+			// a file of a partial type without enough code of its own is written like the type's other files
+			bool TryGetSiblingPartStyle(TypeDefinitionHandle[] types, out (string Indentation, bool FileScopedNamespace) style)
+			{
+				style = default;
+				if (partialParts == null || sourceFiles == null || sourceStyles == null)
+					return false;
+				foreach (var type in types)
+				{
+					if (!partialParts.TryGetValue(type, out var typeParts) || !sourceFiles.TryGetValue(type, out var main))
+						continue;
+					foreach (var sibling in typeParts.Keys.Prepend(main.FileName))
+					{
+						if (sourceStyles.TryGetValue(sibling, out style))
+							return true;
+					}
+				}
+				return false;
+			}
+
 			void RemoveOtherParts(SyntaxTree syntaxTree, string fileName)
 			{
 				foreach (var typeDeclaration in syntaxTree.Descendants.OfType<TypeDeclaration>().ToList())
@@ -559,7 +578,7 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 							// rather than truncating the file where it failed.
 							// NetSpy: the indentation and namespace style of the original file
 							var formattingOptions = Settings.CSharpFormattingOptions;
-							if (sourceStyles != null && (sourceStyles.TryGetValue(file.Key, out var style) || sourceStyles.TryGetValue("", out style)))
+							if (sourceStyles != null && (sourceStyles.TryGetValue(file.Key, out var style) || TryGetSiblingPartStyle(declaredTypes, out style) || sourceStyles.TryGetValue("", out style)))
 							{
 								formattingOptions = formattingOptions.Clone();
 								formattingOptions.IndentationString = style.Indentation;

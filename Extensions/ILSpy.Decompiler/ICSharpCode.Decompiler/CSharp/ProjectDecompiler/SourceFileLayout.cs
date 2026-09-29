@@ -112,16 +112,9 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 					{
 						continue;
 					}
-					if (isConstructor && points.Count > 0)
-					{
-						// field initializers first (maybe another file), then the declaration "C() : base()" at the
-						// member's column, then the body: keep the body
-						var ownDocument = points[points.Count - 1].DocumentUrl;
-						points = points.Where(p => string.Equals(p.DocumentUrl, ownDocument, StringComparison.OrdinalIgnoreCase)).Skip(1).ToList();
-						if (points.Count == 0)
-							continue;
-						points.Add(points[0]); // (a body is never "=> x" here: the count check below is for methods)
-					}
+					// constructors start with the field initializers, whose points begin at the member's column in structs
+					if (isConstructor)
+						continue;
 					if (points.Count < 2)
 						continue; // one point may be an expression body ("=> x")
 					// per source file: a partial type's methods can be in several (Form1.Designer.cs)
