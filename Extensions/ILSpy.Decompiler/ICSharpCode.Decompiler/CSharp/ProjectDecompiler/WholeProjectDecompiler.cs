@@ -351,15 +351,22 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 		{
 			var metadata = module.Metadata;
 			// NetSpy: the original source file of each type, from the PDB
+			string? sourceRoot = null;
 			var sourceFiles = Settings.SourceLayoutFromPdb && DebugInfoProvider != null
-				? SourceFileLayout.Compute(metadata, DebugInfoProvider)
+				? SourceFileLayout.Compute(metadata, DebugInfoProvider, out sourceRoot)
 				: null;
-			var sourceStyles = sourceFiles != null ? SourceFileLayout.ComputeStyles(metadata, DebugInfoProvider!, sourceFiles) : null;
+			var sourceStyles = sourceFiles != null ? SourceFileLayout.ComputeStyles(metadata, DebugInfoProvider!, sourceFiles, sourceRoot) : null;
 			var sourceImports = sourceFiles != null && DebugInfoProvider is ISourceImportProvider importProvider
 				? SourceImports.Compute(metadata, importProvider, sourceFiles)
 				: null;
+			// NetSpy: partial types declared in several files (Form1.cs + Form1.Designer.cs)
+			var partialParts = sourceFiles != null && sourceRoot != null
+				? SourcePartialTypes.Compute(module, DebugInfoProvider!, sourceFiles, sourceRoot)
+				: null;
 			var files = module.Metadata.GetTopLevelTypeDefinitions().Where(td => IncludeTypeWhenDecompilingProject(module, td))
-				.GroupBy(GetFileFileNameForHandle, StringComparer.OrdinalIgnoreCase).ToList();
+				.SelectMany(td => new[] { (File: GetFileFileNameForHandle(td), Type: td) }
+					.Concat(partialParts != null && partialParts.TryGetValue(td, out var parts) ? parts.Keys.Select(f => (File: EnsureDirectory(f), Type: td)) : Enumerable.Empty<(string File, TypeDefinitionHandle Type)>()))
+				.GroupBy(x => x.File, x => x.Type, StringComparer.OrdinalIgnoreCase).ToList();
 			var progressReporter = ProgressIndicator;
 			var progress = new DecompilationProgress { TotalUnits = files.Count, Title = "Exporting project..." };
 			DecompilerTypeSystem ts = new DecompilerTypeSystem(module, AssemblyResolver, Settings);
@@ -428,11 +435,63 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 				var type = metadata.GetTypeDefinition(h);
 				string fileName = sourceFiles != null && sourceFiles.TryGetValue(h, out var source)
 					? source.FileName
+					// NetSpy: a file-local type is only visible in its own file, whose name is part of its metadata name
+					: Settings.FileLocalTypes && RestoreFileLocalTypes.IsFileLocalName(metadata.GetString(type.Name), out var localFile, out _)
+						? CleanUpFileName(localFile, ".cs")
 					: GetFileNameForType(metadata.GetString(type.Namespace), metadata.GetString(type.Name), ".cs");
 				string directory = Path.GetDirectoryName(fileName)!;
 				if (!string.IsNullOrEmpty(directory) && directories.Add(directory))
 					CreateDirectory(Path.Combine(TargetDirectory, directory));
 				return fileName;
+			}
+
+			string EnsureDirectory(string fileName)
+			{
+				string directory = Path.GetDirectoryName(fileName)!;
+				if (!string.IsNullOrEmpty(directory) && directories.Add(directory))
+					CreateDirectory(Path.Combine(TargetDirectory, directory));
+				return fileName;
+			}
+
+			// NetSpy: the members that belong to one file of a type declared in several files
+			bool IsOwnMember(TypeDefinitionHandle type, Dictionary<string, HashSet<EntityHandle>> typeParts, string fileName, EntityHandle member)
+			{
+				return typeParts.TryGetValue(fileName, out var own)
+					? own.Contains(member)
+					: !typeParts.Values.Any(p => p.Contains(member));
+			}
+
+			// the members declared elsewhere (skipped). Fields, properties, events and constructors are always
+			// decompiled, so that field initializers still move from the constructors to the declarations;
+			// the ones of other files are removed afterwards (RemoveOtherParts).
+			PartialTypeInfo PartOf(MetadataReader md, TypeDefinitionHandle type, Dictionary<string, HashSet<EntityHandle>> typeParts, string fileName)
+			{
+				var info = new PartialTypeInfo(type);
+				var definition = md.GetTypeDefinition(type);
+				var skippable = definition.GetMethods().Where(h => md.GetString(md.GetMethodDefinition(h).Name) is not (".ctor" or ".cctor")).Select(h => (EntityHandle)h)
+					.Concat(definition.GetNestedTypes().Select(h => (EntityHandle)h));
+				foreach (var member in skippable.Where(m => !IsOwnMember(type, typeParts, fileName, m)))
+					info.AddDeclaredMember(member);
+				return info;
+			}
+
+			void RemoveOtherParts(SyntaxTree syntaxTree, string fileName)
+			{
+				foreach (var typeDeclaration in syntaxTree.Descendants.OfType<TypeDeclaration>().ToList())
+				{
+					if (typeDeclaration.GetSymbol() is not ITypeDefinition { MetadataToken: { IsNil: false } token }
+						|| !partialParts!.TryGetValue((TypeDefinitionHandle)token, out var typeParts))
+						continue;
+					// the accessibility is written once, in the main file ("partial class Form1" in Form1.Designer.cs)
+					if (typeParts.ContainsKey(fileName))
+						typeDeclaration.Modifiers &= ~Modifiers.VisibilityMask;
+					foreach (var member in typeDeclaration.Members.ToList())
+					{
+						if (member.GetSymbol() is IEntity { MetadataToken: { IsNil: false } memberToken }
+							&& !IsOwnMember((TypeDefinitionHandle)token, typeParts, fileName, memberToken))
+							member.Remove();
+					}
+				}
 			}
 
 			void ProcessFiles(List<IGrouping<string, TypeDefinitionHandle>> files)
@@ -458,6 +517,15 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 							w = CreateFile(Path.Combine(TargetDirectory, file.Key));
 							decompiler = CreateDecompiler(ts);
 
+							// NetSpy: this file's part of a type declared in several files
+							if (partialParts != null)
+							{
+								foreach (var type in declaredTypes)
+								{
+									if (partialParts.TryGetValue(type, out var typeParts))
+										decompiler.AddPartialTypeDefinition(PartOf(metadata, type, typeParts, file.Key));
+								}
+							}
 							foreach (var partialType in partialTypes)
 							{
 								decompiler.AddPartialTypeDefinition(partialType);
@@ -465,6 +533,8 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 
 							decompiler.CancellationToken = cancellationToken;
 							var syntaxTree = decompiler.DecompileTypes(declaredTypes);
+							if (partialParts != null)
+								RemoveOtherParts(syntaxTree, file.Key);
 							sourceImports?.Apply(syntaxTree, file.Key, ts.MainModule); // NetSpy: the original using directives
 
 							foreach (var node in syntaxTree.Descendants)
@@ -489,7 +559,7 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 							// rather than truncating the file where it failed.
 							// NetSpy: the indentation and namespace style of the original file
 							var formattingOptions = Settings.CSharpFormattingOptions;
-							if (sourceStyles != null && sourceStyles.TryGetValue(file.Key, out var style))
+							if (sourceStyles != null && (sourceStyles.TryGetValue(file.Key, out var style) || sourceStyles.TryGetValue("", out style)))
 							{
 								formattingOptions = formattingOptions.Clone();
 								formattingOptions.IndentationString = style.Indentation;

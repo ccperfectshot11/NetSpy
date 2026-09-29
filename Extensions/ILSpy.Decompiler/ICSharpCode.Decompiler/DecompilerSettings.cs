@@ -389,6 +389,13 @@ namespace ICSharpCode.Decompiler
 		public partial bool TopLevelStatements { get; set; }
 
 		/// <summary>
+		/// NetSpy: show C# 11 file-local types as "file class T" (instead of their "&lt;File&gt;F...__T" metadata name).
+		/// </summary>
+		[Description("DecompilerSettings.FileLocalTypes")]
+		[DecompilerSetting(CSharp.LanguageVersion.CSharp11_0)]
+		public partial bool FileLocalTypes { get; set; }
+
+		/// <summary>
 		/// Decompile foreach statements.
 		/// </summary>
 		[Description("DecompilerSettings.DetectForeachStatements")]

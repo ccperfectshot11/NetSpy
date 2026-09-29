@@ -42,7 +42,7 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 		/// Top-level type → (file name relative to the project, first line in that file).
 		/// Types whose file can't be determined are missing (they get the usual one-file-per-type name).
 		/// </summary>
-		public static Dictionary<TypeDefinitionHandle, (string FileName, int Line)> Compute(MetadataReader metadata, IDebugInfoProvider provider)
+		public static Dictionary<TypeDefinitionHandle, (string FileName, int Line)> Compute(MetadataReader metadata, IDebugInfoProvider provider, out string? root)
 		{
 			var documents = new Dictionary<TypeDefinitionHandle, (string Document, int Line)>();
 			var types = metadata.GetTopLevelTypeDefinitions().ToList();
@@ -50,9 +50,12 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 			{
 				var points = new List<SequencePoint>();
 				CollectSequencePoints(metadata, type, provider, points);
+				// the file named after the type (Form1.cs, not Form1.Designer.cs), else the one with the most code
+				string typeName = metadata.GetString(metadata.GetTypeDefinition(type).Name).Split('`')[0];
 				var byDocument = points.Where(p => !IsGenerated(p.DocumentUrl))
 					.GroupBy(p => p.DocumentUrl, StringComparer.OrdinalIgnoreCase)
-					.OrderByDescending(g => g.Count())
+					.OrderByDescending(g => string.Equals(Path.GetFileName(g.Key), typeName + ".cs", StringComparison.OrdinalIgnoreCase))
+					.ThenByDescending(g => g.Count())
 					.FirstOrDefault();
 				if (byDocument != null)
 					documents[type] = (byDocument.Key, byDocument.Min(p => p.StartLine));
@@ -74,7 +77,7 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 				else if (!previous.IsNil && ordered.Take(i).Reverse().TakeWhile(t => !documents.ContainsKey(t) || t == previous).Any(t => Inherits(metadata, t, ordered[i])))
 					documents[ordered[i]] = (documents[previous].Document, documents[previous].Line + 1);
 			}
-			var root = CommonDirectory(documents.Values.Select(d => d.Document).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+			root = CommonDirectory(documents.Values.Select(d => d.Document).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
 			var result = new Dictionary<TypeDefinitionHandle, (string, int)>();
 			if (root == null)
 				return result;
@@ -92,15 +95,14 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 		/// start at column 1 + (indentation × levels): 2 levels with "namespace X;", 3 with "namespace X { }".
 		/// </summary>
 		public static Dictionary<string, (string Indentation, bool FileScopedNamespace)> ComputeStyles(MetadataReader metadata,
-			IDebugInfoProvider provider, Dictionary<TypeDefinitionHandle, (string FileName, int Line)> types)
+			IDebugInfoProvider provider, Dictionary<TypeDefinitionHandle, (string FileName, int Line)> types, string? root)
 		{
 			var columns = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
 			foreach (var pair in types)
 			{
 				foreach (var method in metadata.GetTypeDefinition(pair.Key).GetMethods())
 				{
-					if (metadata.GetString(metadata.GetMethodDefinition(method).Name) is ".ctor" or ".cctor")
-						continue;
+					bool isConstructor = metadata.GetString(metadata.GetMethodDefinition(method).Name) is ".ctor" or ".cctor";
 					List<SequencePoint> points;
 					try
 					{
@@ -110,10 +112,25 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 					{
 						continue;
 					}
+					if (isConstructor && points.Count > 0)
+					{
+						// field initializers first (maybe another file), then the declaration "C() : base()" at the
+						// member's column, then the body: keep the body
+						var ownDocument = points[points.Count - 1].DocumentUrl;
+						points = points.Where(p => string.Equals(p.DocumentUrl, ownDocument, StringComparison.OrdinalIgnoreCase)).Skip(1).ToList();
+						if (points.Count == 0)
+							continue;
+						points.Add(points[0]); // (a body is never "=> x" here: the count check below is for methods)
+					}
 					if (points.Count < 2)
 						continue; // one point may be an expression body ("=> x")
-					if (!columns.TryGetValue(pair.Value.FileName, out var list))
-						columns[pair.Value.FileName] = list = new List<int>();
+					// per source file: a partial type's methods can be in several (Form1.Designer.cs)
+					var document = points.GroupBy(p => p.DocumentUrl, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).First().Key;
+					var file = root != null && document.StartsWith(root, StringComparison.OrdinalIgnoreCase)
+						? document.Substring(root.Length).TrimStart('\\', '/').Replace('/', Path.DirectorySeparatorChar)
+						: pair.Value.FileName;
+					if (!columns.TryGetValue(file, out var list))
+						columns[file] = list = new List<int>();
 					// (a one-character point is a brace: "}" of a void method is at the member's column)
 					if (points.Any(p => !IsBrace(p)))
 						list.Add(points.Where(p => !IsBrace(p)).Min(p => p.StartColumn));
@@ -135,6 +152,9 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 				if (style is { } s)
 					result[pair.Key] = s;
 			}
+			// files without enough code to tell (key ""): the project's most common style
+			if (result.Count > 0)
+				result[""] = result.Values.GroupBy(v => v).OrderByDescending(g => g.Count()).First().Key;
 			return result;
 		}
 

@@ -294,6 +294,7 @@ namespace ICSharpCode.Decompiler.CSharp
 				new IntroduceSwitchExpressions(), // NetSpy: pattern switch expressions from decision trees
 				new ApplySourceLayout(), // NetSpy: PDB layout (after all statement changes)
 				new IntroduceTopLevelStatements(IntroduceTopLevelStatements.Phase.Move), // NetSpy
+				new RestoreFileLocalTypes(), // NetSpy
 				new ExpressionBodiedMembers(), // NetSpy: must be last (marks final bodies)
 			};
 		}
