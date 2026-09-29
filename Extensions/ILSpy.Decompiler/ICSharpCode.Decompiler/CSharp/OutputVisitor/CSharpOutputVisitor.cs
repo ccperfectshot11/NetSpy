@@ -1821,6 +1821,11 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 		{
 			StartNode(usingDeclaration);
 			WriteKeyword(UsingDeclaration.UsingKeyword);
+			if (usingDeclaration.IsStatic)
+			{
+				Space();
+				WriteKeyword("static");
+			}
 			usingDeclaration.Import.AcceptVisitor(this);
 			Semicolon();
 			EndNode(usingDeclaration);
@@ -2901,6 +2906,9 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 			// don't do node tracking as we visit all children directly
 			for (AstNode? node = syntaxTree.FirstChild; node != null; node = node.NextSibling)
 			{
+				// NetSpy: empty lines between top-level statements (from the PDB)
+				if (node is Statement && node.PrevSibling is Statement && node.Annotation<Transforms.SourceLayoutAnnotation>() is { BlankLineBefore: true })
+					NewLine();
 				node.AcceptVisitor(this);
 				MaybeNewLinesAfterUsings(node);
 			}

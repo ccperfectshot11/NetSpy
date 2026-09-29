@@ -47,6 +47,9 @@ namespace ICSharpCode.Decompiler.CSharp.Syntax
 		[Slot("Import")]
 		public partial AstType Import { get; set; }
 
+		/// <summary>NetSpy: "using static T;" (Import is a type).</summary>
+		public bool IsStatic { get; set; }
+
 		// Computed from Import (which is matched); exclude to avoid a redundant compare.
 		[ExcludeFromMatch]
 		public string Namespace {

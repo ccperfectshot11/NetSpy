@@ -382,6 +382,13 @@ namespace ICSharpCode.Decompiler
 		public partial bool SourceLayoutFromPdb { get; set; }
 
 		/// <summary>
+		/// NetSpy: show the compiler-generated Program.&lt;Main&gt;$ of a C# 9 program as top-level statements.
+		/// </summary>
+		[Description("DecompilerSettings.TopLevelStatements")]
+		[DecompilerSetting(CSharp.LanguageVersion.CSharp9_0)]
+		public partial bool TopLevelStatements { get; set; }
+
+		/// <summary>
 		/// Decompile foreach statements.
 		/// </summary>
 		[Description("DecompilerSettings.DetectForeachStatements")]

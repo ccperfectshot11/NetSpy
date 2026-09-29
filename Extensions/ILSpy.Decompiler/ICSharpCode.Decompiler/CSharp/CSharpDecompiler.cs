@@ -274,6 +274,7 @@ namespace ICSharpCode.Decompiler.CSharp
 		{
 			return new List<IAstTransform> {
 				new RestoreSourceGeneratorPartials(), // NetSpy: must run before IntroduceUsingDeclarations
+				new IntroduceTopLevelStatements(IntroduceTopLevelStatements.Phase.Prepare), // NetSpy: before usings are collected
 				new PatternStatementTransform(),
 				new ReplaceMethodCallsWithOperators(), // must run before DeclareVariables.EnsureExpressionStatementsAreValid
 				new IntroduceUnsafeModifier(),
@@ -292,6 +293,7 @@ namespace ICSharpCode.Decompiler.CSharp
 				new AddXmlDocumentationTransform(),
 				new IntroduceSwitchExpressions(), // NetSpy: pattern switch expressions from decision trees
 				new ApplySourceLayout(), // NetSpy: PDB layout (after all statement changes)
+				new IntroduceTopLevelStatements(IntroduceTopLevelStatements.Phase.Move), // NetSpy
 				new ExpressionBodiedMembers(), // NetSpy: must be last (marks final bodies)
 			};
 		}

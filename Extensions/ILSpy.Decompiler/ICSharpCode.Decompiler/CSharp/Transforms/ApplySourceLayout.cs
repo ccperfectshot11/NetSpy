@@ -53,8 +53,11 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 					Accessor a => a.Body,
 					_ => null
 				};
-				if (body is null || entity.GetSymbol() is not IMethod method || method.ParentModule != mainModule
-					|| method.MetadataToken.IsNil || method.MetadataToken.Kind != HandleKind.MethodDefinition)
+				if (body is null || entity.GetSymbol() is not IMethod declaredMethod)
+					continue;
+				// async methods and iterators: the statements (and their sequence points) are in the state machine's MoveNext
+				var method = entity.Annotation<ILFunction>()?.MoveNextMethod ?? declaredMethod;
+				if (method.ParentModule != mainModule || method.MetadataToken.IsNil || method.MetadataToken.Kind != HandleKind.MethodDefinition)
 					continue;
 				var sequencePoints = provider.GetSequencePoints((MethodDefinitionHandle)method.MetadataToken).Where(sp => !sp.IsHidden).ToList();
 				if (sequencePoints.Count == 0)

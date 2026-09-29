@@ -15,6 +15,7 @@ namespace dnSpy.Decompiler.ILSpy.Core.Settings {
 			{ "DecompilerSettings.NamedBooleanArguments", "Name boolean literal arguments (f(inherit: false))" },
 			{ "DecompilerSettings.OmitArraySizes", "Omit array sizes when there is an initializer (new[] { 1, 2 })" },
 			{ "DecompilerSettings.ImplicitlyTypedLocals", "Use 'var' when the type is apparent (var x = new T())" },
+			{ "DecompilerSettings.TopLevelStatements", "Show the generated Program.<Main>$ as top-level statements" },
 			{ "DecompilerSettings.SourceLayoutFromPdb", "Use the PDB to lay out code like the original (empty lines, line breaks, => bodies)" },
 			{ "DecompilerSettings.AggressiveInlining", "Always inline local variables if possible" },
 			{ "DecompilerSettings.AllowExtensionAddMethodsInCollectionInitializerExpressions", "Allow extension 'Add' methods in collection initializer expressions" },

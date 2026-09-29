@@ -355,6 +355,9 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 				? SourceFileLayout.Compute(metadata, DebugInfoProvider)
 				: null;
 			var sourceStyles = sourceFiles != null ? SourceFileLayout.ComputeStyles(metadata, DebugInfoProvider!, sourceFiles) : null;
+			var sourceImports = sourceFiles != null && DebugInfoProvider is ISourceImportProvider importProvider
+				? SourceImports.Compute(metadata, importProvider, sourceFiles)
+				: null;
 			var files = module.Metadata.GetTopLevelTypeDefinitions().Where(td => IncludeTypeWhenDecompilingProject(module, td))
 				.GroupBy(GetFileFileNameForHandle, StringComparer.OrdinalIgnoreCase).ToList();
 			var progressReporter = ProgressIndicator;
@@ -374,6 +377,22 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 				progress.TotalUnits = files.Count;
 			}
 
+			// NetSpy: the global usings in their original file
+			var extraFiles = new List<ProjectItemInfo>();
+			if (sourceImports is { Global.Count: > 0 })
+			{
+				try
+				{
+					using (var w = CreateFile(Path.Combine(TargetDirectory, sourceImports.GlobalFileName)))
+						w.Write(sourceImports.GetGlobalUsingsText(ts.MainModule));
+					extraFiles.Add(new ProjectItemInfo("Compile", sourceImports.GlobalFileName));
+				}
+				catch (Exception ex) when (!(ex is OperationCanceledException))
+				{
+					RecordError(new DecompilerException(module, "Error writing the global usings", ex));
+				}
+			}
+
 			// The assembly-level attributes are a single file like any other: failing to decompile
 			// them costs that file, not the export.
 			IEnumerable<ProjectItemInfo> assemblyInfo;
@@ -388,7 +407,7 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 			}
 
 			return files.Select(f => f.Key).Except(missingFiles, Platform.FileNameComparer)
-				.Select(f => new ProjectItemInfo("Compile", f)).Concat(assemblyInfo);
+				.Select(f => new ProjectItemInfo("Compile", f)).Concat(assemblyInfo).Concat(extraFiles);
 
 			string GetFileFileNameForHandle(TypeDefinitionHandle h)
 			{
@@ -446,6 +465,7 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 
 							decompiler.CancellationToken = cancellationToken;
 							var syntaxTree = decompiler.DecompileTypes(declaredTypes);
+							sourceImports?.Apply(syntaxTree, file.Key, ts.MainModule); // NetSpy: the original using directives
 
 							foreach (var node in syntaxTree.Descendants)
 							{

@@ -285,7 +285,7 @@ namespace dnSpy.Decompiler.ILSpy.Core.CSharp {
 	/// Gives ILSpy the local variable names (and tuple names / dynamic flags) from the PDB
 	/// that dnlib has already loaded
 	/// </summary>
-	sealed class DnlibDebugInfoProvider : IDebugInfoProvider {
+	sealed class DnlibDebugInfoProvider : IDebugInfoProvider, ISourceImportProvider {
 		readonly ModuleDef module;
 
 		public DnlibDebugInfoProvider(ModuleDef module) => this.module = module;
@@ -361,6 +361,46 @@ namespace dnSpy.Decompiler.ILSpy.Core.CSharp {
 			}
 			name = null!;
 			return false;
+		}
+
+		// The source files and using directives of the original project (NetSpy: exported like the original)
+		public IReadOnlyList<string> SourceDocuments =>
+			module.PdbState?.Documents.Select(d => d.Url).Where(u => !string.IsNullOrEmpty(u)).ToList() ?? (IReadOnlyList<string>)Array.Empty<string>();
+
+		readonly Dictionary<PdbImportScope, int> scopeIds = new Dictionary<PdbImportScope, int>();
+
+		public (int ScopeId, IReadOnlyList<SourceImport> Imports)? GetFileImports(MethodDefinitionHandle method) {
+			var scope = GetMethod(method)?.Body?.PdbMethod?.Scope?.ImportScope;
+			if (scope is null)
+				return null;
+			// the file's scope is the one right below the compilation's root scope
+			while (scope.Parent is { Parent: not null } parent)
+				scope = parent;
+			if (scope.Parent is null)
+				return null;
+			int id;
+			lock (scopeIds) {
+				if (!scopeIds.TryGetValue(scope, out id))
+					scopeIds.Add(scope, id = scopeIds.Count + 1);
+			}
+			var imports = new List<SourceImport>();
+			foreach (var import in scope.Imports) {
+				switch (import) {
+				case PdbImportNamespace ns:
+					imports.Add(new SourceImport { Kind = SourceImportKind.Namespace, Namespace = ns.TargetNamespace });
+					break;
+				case PdbAliasNamespace aliasNs:
+					imports.Add(new SourceImport { Kind = SourceImportKind.NamespaceAlias, Alias = aliasNs.Alias, Namespace = aliasNs.TargetNamespace });
+					break;
+				case PdbImportType type when type.TargetType is not null:
+					imports.Add(new SourceImport { Kind = SourceImportKind.Type, Type = MetadataTokens.EntityHandle((int)type.TargetType.MDToken.Raw) });
+					break;
+				case PdbAliasType aliasType when aliasType.TargetType is not null:
+					imports.Add(new SourceImport { Kind = SourceImportKind.TypeAlias, Alias = aliasType.Alias, Type = MetadataTokens.EntityHandle((int)aliasType.TargetType.MDToken.Raw) });
+					break;
+				}
+			}
+			return (id, imports);
 		}
 
 		public bool TryGetExtraTypeInfo(MethodDefinitionHandle method, int index, out PdbExtraTypeInfo extraTypeInfo) {

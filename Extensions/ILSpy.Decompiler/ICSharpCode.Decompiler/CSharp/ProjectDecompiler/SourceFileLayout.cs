@@ -185,7 +185,7 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 		}
 
 		/// <summary>Source generator output and other files under obj\ aren't part of the project's sources.</summary>
-		static bool IsGenerated(string document)
+		internal static bool IsGenerated(string document)
 		{
 			var parts = document.Split('\\', '/');
 			return parts.Any(p => p.Equals("obj", StringComparison.OrdinalIgnoreCase))
@@ -194,7 +194,7 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 		}
 
 		/// <summary>The deepest directory containing all the documents (with a trailing separator), or null.</summary>
-		static string? CommonDirectory(List<string> documents)
+		internal static string? CommonDirectory(List<string> documents)
 		{
 			if (documents.Count == 0)
 				return null;
