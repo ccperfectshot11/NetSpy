@@ -373,6 +373,15 @@ namespace ICSharpCode.Decompiler
 		public partial bool ImplicitlyTypedLocals { get; set; }
 
 		/// <summary>
+		/// NetSpy: when the PDB is available, lay the code out like the original source (empty lines between
+		/// statements, statements on one line, "=> expr" vs block bodies).
+		/// </summary>
+		[Category("DecompilerSettings.Other")]
+		[Description("DecompilerSettings.SourceLayoutFromPdb")]
+		[DecompilerSetting]
+		public partial bool SourceLayoutFromPdb { get; set; }
+
+		/// <summary>
 		/// Decompile foreach statements.
 		/// </summary>
 		[Description("DecompilerSettings.DetectForeachStatements")]
@@ -1039,7 +1048,8 @@ namespace ICSharpCode.Decompiler
 				if (csharpFormattingOptions == null)
 				{
 					csharpFormattingOptions = FormattingOptionsFactory.CreateAllman();
-					csharpFormattingOptions.IndentSwitchBody = false;
+					// NetSpy: 'case' labels indented inside 'switch', as Visual Studio formats C#
+					csharpFormattingOptions.IndentSwitchBody = true;
 					csharpFormattingOptions.ArrayInitializerWrapping = Wrapping.WrapIfTooLong;
 					csharpFormattingOptions.AutoPropertyFormatting = PropertyFormatting.SingleLine;
 				}

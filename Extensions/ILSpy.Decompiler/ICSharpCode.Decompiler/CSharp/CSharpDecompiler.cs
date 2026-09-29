@@ -291,6 +291,7 @@ namespace ICSharpCode.Decompiler.CSharp
 				new FixNameCollisions(),
 				new AddXmlDocumentationTransform(),
 				new IntroduceSwitchExpressions(), // NetSpy: pattern switch expressions from decision trees
+				new ApplySourceLayout(), // NetSpy: PDB layout (after all statement changes)
 				new ExpressionBodiedMembers(), // NetSpy: must be last (marks final bodies)
 			};
 		}
@@ -885,6 +886,7 @@ namespace ICSharpCode.Decompiler.CSharp
 
 			return new DecompileRun(settings, usingScope) {
 				DocumentationProvider = DocumentationProvider ?? CreateDefaultDocumentationProvider(),
+				DebugInfoProvider = DebugInfoProvider,
 				CancellationToken = CancellationToken,
 				Namespaces = namespaces
 			};

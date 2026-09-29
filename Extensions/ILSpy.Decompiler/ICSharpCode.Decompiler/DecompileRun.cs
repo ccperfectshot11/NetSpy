@@ -33,6 +33,8 @@ namespace ICSharpCode.Decompiler
 		public CancellationToken CancellationToken { get; set; }
 		public DecompilerSettings Settings { get; }
 		public IDocumentationProvider DocumentationProvider { get; set; }
+		/// <summary>NetSpy: PDB of the decompiled module (source positions), if any.</summary>
+		public DebugInfo.IDebugInfoProvider DebugInfoProvider { get; set; }
 		public Dictionary<ITypeDefinition, RecordDecompiler> RecordDecompilers { get; } = new Dictionary<ITypeDefinition, RecordDecompiler>();
 
 #nullable enable

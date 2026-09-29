@@ -158,7 +158,7 @@ namespace dnSpy.Documents.Tabs.Dialogs {
 				}
 			}
 		}
-		bool useSDKStyleProjectFormat;
+		bool useSDKStyleProjectFormat = true; // NetSpy: "dotnet build" needs SDK-style projects
 
 		public bool OpenProject {
 			get => openProject;

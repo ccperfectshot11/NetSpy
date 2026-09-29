@@ -728,6 +728,33 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 			return true;
 		}
 
+		/// <summary>
+		/// NetSpy: the PDB layout of the statement containing the initializer (null: unknown), and whether this is
+		/// the outermost initializer of that statement.
+		/// </summary>
+		static Transforms.SourceLayoutAnnotation? GetStatementLayout(AstNodeCollection<Expression> elements, out bool outermost)
+		{
+			outermost = true;
+			foreach (var element in elements)
+			{
+				var owner = element.Parent;
+				for (var n = owner?.Parent; n != null; n = n.Parent)
+				{
+					if (n is Statement statement)
+					{
+						// other constructs that are often written on several lines make "several lines" ambiguous
+						if (statement.Descendants.Any(d => d is LambdaExpression or AnonymousMethodExpression or QueryExpression or SwitchExpression))
+							outermost = false;
+						return statement.Annotation<Transforms.SourceLayoutAnnotation>();
+					}
+					if (n is ArrayInitializerExpression or AnonymousTypeCreateExpression)
+						outermost = false;
+				}
+				break;
+			}
+			return null;
+		}
+
 		protected bool CanBeConfusedWithObjectInitializer(Expression expr)
 		{
 			// "int a; new List<int> { a = 1 };" is an object initalizers and invalid, but
@@ -762,6 +789,12 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 				wrapAlways = false; // NetSpy: "{ X = 1, Y = 2 }"
 			bool wrap = wrapAlways
 				|| elements.Count > 10;
+			// NetSpy: the PDB says whether the statement was one line or several in the original
+			var layout = GetStatementLayout(elements, out bool outermost);
+			if (layout is not null && layout.IsSingleLine && wrap && FitsOnOneLine(elements, int.MaxValue))
+				wrapAlways = wrap = false;
+			else if (layout is not null && layout.IsMultiLine && outermost && !wrap && elements.Count > 0)
+				wrapAlways = wrap = true;
 			OpenBrace(wrap ? policy.ArrayInitializerBraceStyle : BraceStyle.EndOfLine, newLine: wrap);
 			if (!wrap)
 				Space();
@@ -1820,8 +1853,13 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 		{
 			StartNode(blockStatement);
 			OpenBrace(style);
+			bool first = true;
 			foreach (var node in blockStatement.Statements)
 			{
+				// NetSpy: the empty lines of the original (known from the PDB)
+				if (!first && node.Annotation<Transforms.SourceLayoutAnnotation>() is { BlankLineBefore: true })
+					NewLine();
+				first = false;
 				node.AcceptVisitor(this);
 			}
 			CloseBrace(style);

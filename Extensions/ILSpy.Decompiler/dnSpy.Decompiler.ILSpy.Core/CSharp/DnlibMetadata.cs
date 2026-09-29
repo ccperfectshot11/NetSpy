@@ -296,8 +296,32 @@ namespace dnSpy.Decompiler.ILSpy.Core.CSharp {
 		MethodDef? GetMethod(MethodDefinitionHandle handle) =>
 			DnlibMetadata.ResolveToken(module, handle) as MethodDef;
 
-		public IList<ICSharpCode.Decompiler.DebugInfo.SequencePoint> GetSequencePoints(MethodDefinitionHandle method) =>
-			Array.Empty<ICSharpCode.Decompiler.DebugInfo.SequencePoint>();
+		// The source positions of the method's statements (used to lay out the decompiled code like the original)
+		public IList<ICSharpCode.Decompiler.DebugInfo.SequencePoint> GetSequencePoints(MethodDefinitionHandle method) {
+			var body = GetMethod(method)?.Body;
+			if (body is null || body.Instructions.Count == 0)
+				return Array.Empty<ICSharpCode.Decompiler.DebugInfo.SequencePoint>();
+			var result = new List<ICSharpCode.Decompiler.DebugInfo.SequencePoint>();
+			var instructions = body.Instructions;
+			var last = instructions[instructions.Count - 1];
+			int codeSize = (int)last.Offset + last.GetSize();
+			foreach (var instruction in instructions) {
+				if (instruction.SequencePoint is not { } sp)
+					continue;
+				if (result.Count > 0)
+					result[result.Count - 1].EndOffset = (int)instruction.Offset;
+				result.Add(new ICSharpCode.Decompiler.DebugInfo.SequencePoint {
+					Offset = (int)instruction.Offset,
+					EndOffset = codeSize,
+					StartLine = sp.StartLine,
+					StartColumn = sp.StartColumn,
+					EndLine = sp.EndLine,
+					EndColumn = sp.EndColumn,
+					DocumentUrl = sp.Document?.Url ?? string.Empty,
+				});
+			}
+			return result;
+		}
 
 		public IList<Variable> GetVariables(MethodDefinitionHandle method) {
 			var list = new List<Variable>();

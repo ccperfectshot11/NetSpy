@@ -319,6 +319,6 @@
     <value>Missing argument</value>
   </data>
   <data name="CmdLineDescription_SdkProject" xml:space="preserve">
-    <value>generate SDK style project files</value>
+    <value>generate SDK style project files (the default; --legacy-project writes the old format)</value>
   </data>
 </root>

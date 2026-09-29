@@ -80,7 +80,7 @@ namespace dnSpy.Decompiler.MSBuild {
 		/// <summary>
 		/// Set to 'true' to generate the more modern SDK style project files.
 		/// </summary>
-		public bool GenerateSDKStyleProjects { get; set; }
+		public bool GenerateSDKStyleProjects { get; set; } = true; // NetSpy: "dotnet build" needs SDK-style projects
 
 		/// <summary>
 		/// Constructor

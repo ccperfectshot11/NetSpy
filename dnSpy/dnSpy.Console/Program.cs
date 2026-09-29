@@ -172,7 +172,7 @@ namespace dnSpy_Console {
 		bool createResX = true;
 		bool decompileBaml = true;
 		bool colorizeOutput;
-		bool sdkProject;
+		bool sdkProject = true; // NetSpy: SDK-style by default (--legacy-project for the old format)
 		Guid projectGuid = Guid.NewGuid();
 		int numThreads;
 		int mdToken;
@@ -430,6 +430,7 @@ namespace dnSpy_Console {
 			"output-dir",
 			"lang",
 			"sdk-project",
+			"legacy-project",
 			"asm-path",
 			"user-gac",
 			"gac",
@@ -484,6 +485,10 @@ namespace dnSpy_Console {
 					
 					case "--sdk-project":
 						sdkProject = true;
+						break;
+
+					case "--legacy-project":
+						sdkProject = false;
 						break;
 
 					case "-o":

@@ -75,6 +75,13 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 		{
 			if (body is null || body.Statements.Count != 1 || GetExpression(body) is not { } expression)
 				return;
+			// the PDB says how the original was written
+			if (body.Annotation<BodyStyleAnnotation>() is { } style)
+			{
+				if (style.IsExpressionBody)
+					body.AddAnnotation(ExpressionBodyAnnotation.Instance);
+				return;
+			}
 			// "=> switch" bodies are idiomatic even when they span several lines
 			if (expression is not SwitchExpression)
 			{
