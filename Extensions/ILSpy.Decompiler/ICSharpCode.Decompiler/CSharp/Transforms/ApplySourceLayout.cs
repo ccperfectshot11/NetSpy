@@ -109,7 +109,7 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 				return null;
 			// the IL of a sequence point is [Offset, EndOffset); some of its instructions (a ldloc inlined into its
 			// user) carry no annotation, so any overlap with the statement's IL counts
-			var points = sequencePoints.Where(sp => ranges.Any(r => r.Start < sp.EndOffset && sp.Offset <= r.InclusiveEnd)).ToList();
+			var points = sequencePoints.Where(sp => !IsBrace(sp) && ranges.Any(r => r.Start < sp.EndOffset && sp.Offset <= r.InclusiveEnd)).ToList();
 			if (points.Count == 0)
 				return null;
 			var first = points.OrderBy(sp => sp.StartLine).ThenBy(sp => sp.StartColumn).First();
@@ -223,7 +223,8 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 						continue;
 					var points = provider.GetSequencePoints((MethodDefinitionHandle)method.MetadataToken).Where(sp => !sp.IsHidden).ToList();
 					if (points.Count > 1 && points.All(sp => sp.DocumentUrl == document))
-						columns.Add(points.Min(sp => sp.StartColumn));
+						if (points.Any(sp => !IsBrace(sp)))
+						columns.Add(points.Where(sp => !IsBrace(sp)).Min(sp => sp.StartColumn)); // "}" is at the member's column
 				}
 			}
 			var result = Mode(columns);
@@ -231,6 +232,9 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 				cache[(document, depth)] = result;
 			return result;
 		}
+
+		/// <summary>A sequence point of a brace ("}" of a void method, "{" in debug builds).</summary>
+		internal static bool IsBrace(DebugInfo.SequencePoint point) => point.StartLine == point.EndLine && point.EndColumn - point.StartColumn == 1;
 
 		static int Depth(ITypeDefinition type)
 		{

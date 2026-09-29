@@ -1782,15 +1782,19 @@ namespace ICSharpCode.Decompiler.CSharp.OutputVisitor
 				}
 				else
 				{
-					bool first = true;
+					EntityDeclaration? previous = null;
 					foreach (var member in typeDeclaration.Members)
 					{
-						if (!first)
+						if (previous is not null)
 						{
-							for (int i = 0; i < policy.MinimumBlankLinesBetweenMembers; i++)
+							// NetSpy: consecutive fields are grouped without empty lines (as usually written)
+							int blankLines = previous is FieldDeclaration && member is FieldDeclaration
+								? policy.MinimumBlankLinesBetweenFields
+								: policy.MinimumBlankLinesBetweenMembers;
+							for (int i = 0; i < blankLines; i++)
 								NewLine();
 						}
-						first = false;
+						previous = member;
 						member.AcceptVisitor(this);
 					}
 				}

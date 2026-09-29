@@ -350,6 +350,11 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 		IEnumerable<ProjectItemInfo> WriteCodeFilesInProject(MetadataFile module, IList<PartialTypeInfo> partialTypes, CancellationToken cancellationToken)
 		{
 			var metadata = module.Metadata;
+			// NetSpy: the original source file of each type, from the PDB
+			var sourceFiles = Settings.SourceLayoutFromPdb && DebugInfoProvider != null
+				? SourceFileLayout.Compute(metadata, DebugInfoProvider)
+				: null;
+			var sourceStyles = sourceFiles != null ? SourceFileLayout.ComputeStyles(metadata, DebugInfoProvider!, sourceFiles) : null;
 			var files = module.Metadata.GetTopLevelTypeDefinitions().Where(td => IncludeTypeWhenDecompilingProject(module, td))
 				.GroupBy(GetFileFileNameForHandle, StringComparer.OrdinalIgnoreCase).ToList();
 			var progressReporter = ProgressIndicator;
@@ -402,7 +407,9 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 				}
 
 				var type = metadata.GetTypeDefinition(h);
-				string fileName = GetFileNameForType(metadata.GetString(type.Namespace), metadata.GetString(type.Name), ".cs");
+				string fileName = sourceFiles != null && sourceFiles.TryGetValue(h, out var source)
+					? source.FileName
+					: GetFileNameForType(metadata.GetString(type.Namespace), metadata.GetString(type.Name), ".cs");
 				string directory = Path.GetDirectoryName(fileName)!;
 				if (!string.IsNullOrEmpty(directory) && directories.Add(directory))
 					CreateDirectory(Path.Combine(TargetDirectory, directory));
@@ -419,7 +426,9 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 						CancellationToken = cancellationToken
 					},
 					delegate (IGrouping<string, TypeDefinitionHandle> file) {
-						var declaredTypes = file.ToArray();
+						// NetSpy: in the order of the original file
+						var declaredTypes = sourceFiles == null ? file.ToArray()
+							: file.OrderBy(h => sourceFiles.TryGetValue(h, out var s) ? s.Line : int.MaxValue).ToArray();
 						DecompilerEventSource.Log.ProjectFileStart(file.Key, declaredTypes.Length);
 						// Everything that can fail for this one file - creating it included, which is
 						// where a path too long for the file system surfaces - belongs inside the try.
@@ -458,7 +467,19 @@ namespace ICSharpCode.Decompiler.CSharp.ProjectDecompiler
 
 							// A member the output visitor cannot write is replaced by the error text
 							// rather than truncating the file where it failed.
-							var outputVisitor = new ErrorTolerantOutputVisitor(w, Settings.CSharpFormattingOptions);
+							// NetSpy: the indentation and namespace style of the original file
+							var formattingOptions = Settings.CSharpFormattingOptions;
+							if (sourceStyles != null && sourceStyles.TryGetValue(file.Key, out var style))
+							{
+								formattingOptions = formattingOptions.Clone();
+								formattingOptions.IndentationString = style.Indentation;
+								if (!style.FileScopedNamespace)
+								{
+									foreach (var ns in syntaxTree.Descendants.OfType<NamespaceDeclaration>())
+										ns.IsFileScoped = false;
+								}
+							}
+							var outputVisitor = new ErrorTolerantOutputVisitor(w, formattingOptions);
 							syntaxTree.AcceptVisitor(outputVisitor);
 							foreach (var outputError in outputVisitor.Errors)
 							{
