@@ -295,6 +295,7 @@ namespace ICSharpCode.Decompiler.CSharp
 				new CombineBooleanReturns(), // NetSpy: after the switch expressions (their arms are ifs too)
 				new CharLiteralsInArithmetic(), // NetSpy
 				new IntroduceNameof(), // NetSpy
+				new RemoveTargetTypedTupleNames(), // NetSpy
 				new SplitMergedStatements(), // NetSpy: before the layout (the new statements get their lines)
 				new ApplySourceLayout(), // NetSpy: PDB layout (after all statement changes)
 				new IntroduceTopLevelStatements(IntroduceTopLevelStatements.Phase.Move), // NetSpy

@@ -76,6 +76,23 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 				)
 		);
 
+		/// <summary>NetSpy: the PDB shows a "}" sequence point: the original had a constructor with a block body.</summary>
+		static bool WrittenAsConstructor(IMethod ctor, TransformContext context)
+		{
+			if (!context.Settings.SourceLayoutFromPdb || context.DecompileRun.DebugInfoProvider is not { } provider
+				|| ctor.MetadataToken.IsNil || ctor.MetadataToken.Kind != System.Reflection.Metadata.HandleKind.MethodDefinition)
+				return false;
+			try
+			{
+				return provider.GetSequencePoints((System.Reflection.Metadata.MethodDefinitionHandle)ctor.MetadataToken)
+					.Any(sp => !sp.IsHidden && ApplySourceLayout.IsBrace(sp));
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return false;
+			}
+		}
+
 		internal static bool IsGeneratedPrimaryConstructorBackingField(IField field)
 		{
 			var name = field.Name;
@@ -422,6 +439,14 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 									transformToPrimaryConstructor = true;
 								}
 							}
+						}
+
+						// NetSpy: a constructor written with a block body has a sequence point for its closing brace,
+						// a primary constructor never has one ("<x>P" backing fields prove a primary constructor though)
+						if (transformToPrimaryConstructor && BackingFieldToPrimaryConstructorParameterVariableMap == null
+							&& WrittenAsConstructor(ctorMethod, context))
+						{
+							transformToPrimaryConstructor = false;
 						}
 
 						if (context.Settings.ShowXmlDocumentation && context.DecompileRun.DocumentationProvider is { } provider)
