@@ -19,6 +19,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 
@@ -274,6 +275,37 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 			}
 		}
 
+		/// <summary>
+		/// NetSpy: do the statements from <paramref name="end"/> on read a local assigned in [start, end)?
+		/// Then closing the block later keeps its declaration inside (goal 4b); if not, it closes at end.
+		/// </summary>
+		static bool LaterStatementsUseAssigned(Statement? start, Statement? end)
+		{
+			if (start == null)
+				return true; // no block open: keep the original comparison
+			// variables first assigned in the block (the ones DeclareVariables would declare inside it)
+			var usedBefore = new HashSet<string>();
+			for (var s = start.PrevSibling; s != null; s = s.PrevSibling)
+				usedBefore.UnionWith(s.DescendantsAndSelf.OfType<IdentifierExpression>().Select(id => id.Identifier));
+			var assigned = new HashSet<string>();
+			for (var s = start; s != null && s != end; s = s.GetNextStatement())
+			{
+				foreach (var assignment in s.DescendantsAndSelf.OfType<AssignmentExpression>())
+				{
+					if (assignment.Operator == AssignmentOperatorType.Assign && assignment.Left is IdentifierExpression id && !usedBefore.Contains(id.Identifier))
+						assigned.Add(id.Identifier);
+				}
+			}
+			if (assigned.Count == 0)
+				return false;
+			for (var s = end; s != null; s = s.GetNextStatement())
+			{
+				if (s.DescendantsAndSelf.OfType<IdentifierExpression>().Any(id => assigned.Contains(id.Identifier)))
+					return true;
+			}
+			return false;
+		}
+
 		Result GetResultFromBlock(BlockStatement block)
 		{
 			// For a block, we are tracking 4 possibilities:
@@ -292,19 +324,34 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 			InsertedNode? nodesUncheckedContextCheckedBlockOpen = null;
 			Statement? checkedBlockStart = null;
 
+			// NetSpy: where the open block was last closed (for goal 4b below)
+			Statement? uncheckedClosedStart = null, uncheckedClosedEnd = null;
+			Statement? checkedClosedStart = null, checkedClosedEnd = null;
+
 			Statement? statement = block.Statements.FirstOrDefault();
 			while (true)
 			{
 				// Blocks can be closed 'for free'. We use '<=' so that blocks are closed as late as possible (goal 4b)
-				if (costCheckedContextUncheckedBlockOpen <= costCheckedContext)
+				// NetSpy: ... but a later close only replaces an earlier close of the same block when the earlier one
+				// left a variable assigned in the block and used after it; otherwise "checked { a += 1; }" stays
+				// small instead of taking in the rest of the method
+				if (costCheckedContextUncheckedBlockOpen < costCheckedContext
+					|| costCheckedContextUncheckedBlockOpen <= costCheckedContext
+						&& (uncheckedClosedStart != uncheckedBlockStart || LaterStatementsUseAssigned(uncheckedBlockStart, uncheckedClosedEnd)))
 				{
 					costCheckedContext = costCheckedContextUncheckedBlockOpen;
 					nodesCheckedContext = nodesCheckedContextUncheckedBlockOpen + new InsertedBlock(uncheckedBlockStart, statement, false);
+					uncheckedClosedStart = uncheckedBlockStart;
+					uncheckedClosedEnd = statement;
 				}
-				if (costUncheckedContextCheckedBlockOpen <= costUncheckedContext)
+				if (costUncheckedContextCheckedBlockOpen < costUncheckedContext
+					|| costUncheckedContextCheckedBlockOpen <= costUncheckedContext
+						&& (checkedClosedStart != checkedBlockStart || LaterStatementsUseAssigned(checkedBlockStart, checkedClosedEnd)))
 				{
 					costUncheckedContext = costUncheckedContextCheckedBlockOpen;
 					nodesUncheckedContext = nodesUncheckedContextCheckedBlockOpen + new InsertedBlock(checkedBlockStart, statement, true);
+					checkedClosedStart = checkedBlockStart;
+					checkedClosedEnd = statement;
 				}
 				if (statement == null)
 					break;

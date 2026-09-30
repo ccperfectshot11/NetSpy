@@ -411,6 +411,13 @@ namespace ICSharpCode.Decompiler
 		public partial bool ImplicitlyTypedLambdas { get; set; }
 
 		/// <summary>
+		/// NetSpy: C# 14 null-conditional assignment ("a?.B = c;").
+		/// </summary>
+		[Description("DecompilerSettings.NullConditionalAssignment")]
+		[DecompilerSetting(CSharp.LanguageVersion.CSharp14_0)]
+		public partial bool NullConditionalAssignment { get; set; }
+
+		/// <summary>
 		/// Decompile foreach statements.
 		/// </summary>
 		[Description("DecompilerSettings.DetectForeachStatements")]
