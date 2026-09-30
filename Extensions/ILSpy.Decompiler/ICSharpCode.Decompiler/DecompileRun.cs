@@ -62,6 +62,8 @@ namespace ICSharpCode.Decompiler
 		None,
 		All,
 		AllHex,
-		FirstOnly
+		FirstOnly,
+		/// <summary>NetSpy: only where the value isn't the previous one + 1 (what C# assigns implicitly)</summary>
+		Minimal
 	}
 }

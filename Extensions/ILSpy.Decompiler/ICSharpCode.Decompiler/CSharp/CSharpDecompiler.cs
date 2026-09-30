@@ -292,6 +292,9 @@ namespace ICSharpCode.Decompiler.CSharp
 				new FixNameCollisions(),
 				new AddXmlDocumentationTransform(),
 				new IntroduceSwitchExpressions(), // NetSpy: pattern switch expressions from decision trees
+				new CombineBooleanReturns(), // NetSpy: after the switch expressions (their arms are ifs too)
+				new CharLiteralsInArithmetic(), // NetSpy
+				new IntroduceNameof(), // NetSpy
 				new SplitMergedStatements(), // NetSpy: before the layout (the new statements get their lines)
 				new ApplySourceLayout(), // NetSpy: PDB layout (after all statement changes)
 				new IntroduceTopLevelStatements(IntroduceTopLevelStatements.Phase.Move), // NetSpy
@@ -1966,6 +1969,22 @@ namespace ICSharpCode.Decompiler.CSharp
 								}
 							}
 							break;
+						case EnumValueDisplayMode.Minimal:
+						{
+							// NetSpy: "Monday, Tuesday, Thursday = 10, Friday"
+							long expected = 0;
+							foreach (var enumMember in typeDecl.Members.OfType<EnumMemberDeclaration>())
+							{
+								var constantValue = (enumMember.GetSymbol() as IField)?.GetConstantValue();
+								if (constantValue == null)
+									break; // unknown: keep the remaining initializers
+								long value = (long)CSharpPrimitiveCast.Cast(TypeCode.Int64, constantValue, false);
+								if (value == expected)
+									enumMember.Initializer = null;
+								expected = unchecked(value + 1);
+							}
+							break;
+						}
 						case EnumValueDisplayMode.All:
 							// nothing needs to be changed.
 							break;
@@ -2194,13 +2213,13 @@ namespace ICSharpCode.Decompiler.CSharp
 				else if (currentValue <= previousValue)
 				{
 					// If the values are out of order, we fallback to displaying all values.
-					return EnumValueDisplayMode.All;
+					return EnumValueDisplayMode.Minimal; // NetSpy: only the values C# can't infer
 				}
 				else if (!allConsecutive && !allPowersOfTwo)
 				{
 					// We already know that the values are neither consecutive nor all powers of 2,
 					// so we can abort, and just display all values as-is.
-					return EnumValueDisplayMode.All;
+					return EnumValueDisplayMode.Minimal; // NetSpy: only the values C# can't infer
 				}
 				previousValue = currentValue;
 			}

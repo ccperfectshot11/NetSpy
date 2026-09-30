@@ -396,6 +396,13 @@ namespace ICSharpCode.Decompiler
 		public partial bool FileLocalTypes { get; set; }
 
 		/// <summary>
+		/// NetSpy: write strings that name a parameter/member where a name is expected as nameof(x).
+		/// </summary>
+		[Description("DecompilerSettings.NameofExpressions")]
+		[DecompilerSetting(CSharp.LanguageVersion.CSharp6)]
+		public partial bool NameofExpressions { get; set; }
+
+		/// <summary>
 		/// Decompile foreach statements.
 		/// </summary>
 		[Description("DecompilerSettings.DetectForeachStatements")]

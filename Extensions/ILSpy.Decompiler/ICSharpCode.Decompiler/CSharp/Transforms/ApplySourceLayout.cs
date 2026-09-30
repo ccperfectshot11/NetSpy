@@ -158,8 +158,9 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 			foreach (var group in bodies.GroupBy(b => b.Body.GetParent<TypeDeclaration>()))
 			{
 				// the column of statements in bodies that certainly are blocks (several statements)
-				var blockColumns = group.Where(b => b.Body.Statements.Count > 1)
-					.Select(b => b.Body.Statements.FirstOrDefault()?.Annotation<SourceLayoutAnnotation>()?.StartColumn)
+				// (from the PDB, not from the decompiled statements: "=> a && b" may be decompiled as an if)
+				var blockColumns = group.Where(b => b.Body.Parent is not ConstructorDeclaration)
+					.Select(b => BlockBodyColumn(b.SequencePoints))
 					.OfType<int>()
 					.ToList();
 				int? blockColumn = Mode(blockColumns);
@@ -197,6 +198,22 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 			}
 		}
 
+		/// <summary>
+		/// The column of the statements of a block body ("}" of a void method excluded); null for a single point or
+		/// an expression body ("=> x switch { ... }": one point containing all the others).
+		/// </summary>
+		static int? BlockBodyColumn(List<DebugInfo.SequencePoint> sequencePoints)
+		{
+			var points = sequencePoints.Where(sp => !IsBrace(sp)).ToList();
+			if (points.Count < 2)
+				return null;
+			var first = points.OrderBy(sp => sp.StartLine).ThenBy(sp => sp.StartColumn).First();
+			if (points.All(sp => (sp.StartLine, sp.StartColumn).CompareTo((first.StartLine, first.StartColumn)) >= 0
+				&& (sp.EndLine, sp.EndColumn).CompareTo((first.EndLine, first.EndColumn)) <= 0))
+				return null;
+			return points.Min(sp => sp.StartColumn);
+		}
+
 		static int? Mode(List<int> values) => values.Count == 0 ? null : values.GroupBy(c => c).OrderByDescending(g => g.Count()).ThenBy(g => g.Key).First().Key;
 
 		static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, Dictionary<(string, int), int?>> documentBlockColumns = new();
@@ -225,9 +242,8 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 					if (method.IsConstructor || method.Name.Contains('<') || method.MetadataToken.IsNil)
 						continue;
 					var points = provider.GetSequencePoints((MethodDefinitionHandle)method.MetadataToken).Where(sp => !sp.IsHidden).ToList();
-					if (points.Count > 1 && points.All(sp => sp.DocumentUrl == document))
-						if (points.Any(sp => !IsBrace(sp)))
-						columns.Add(points.Where(sp => !IsBrace(sp)).Min(sp => sp.StartColumn)); // "}" is at the member's column
+					if (points.All(sp => sp.DocumentUrl == document) && BlockBodyColumn(points) is { } column)
+						columns.Add(column);
 				}
 			}
 			var result = Mode(columns);
