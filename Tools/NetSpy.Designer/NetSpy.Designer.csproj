@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ApplicationIcon>Assets\NetSpy.ico</ApplicationIcon>
+    <AssemblyName>NetSpy.Designer</AssemblyName>
+    <RootNamespace>NetSpy.Designer</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Randează iconițele SVG (ILSpy) în WPF. -->
+    <PackageReference Include="SharpVectors.Wpf" Version="1.8.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Iconițele sunt copiate lângă .exe și citite ca text: așa le putem recolora pentru tema întunecată. -->
+    <None Include="Icons\*.svg" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Icons\LICENSE-ILSpy.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Resource Include="Assets\NetSpy.ico" />
+  </ItemGroup>
+
+</Project>

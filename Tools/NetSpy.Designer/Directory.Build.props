@@ -1,0 +1,3 @@
+<Project>
+  <!-- Oprește moștenirea Directory.Build.props din rădăcina repo-ului (setările dnSpy). -->
+</Project>

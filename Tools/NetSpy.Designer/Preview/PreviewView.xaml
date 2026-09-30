@@ -1,0 +1,501 @@
+<UserControl x:Class="NetSpy.Designer.Preview.PreviewView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:NetSpy.Designer.Controls"
+             FontFamily="{DynamicResource NS.UiFont}" FontSize="{DynamicResource NS.UiFontSize}"
+             Foreground="{DynamicResource NS.Text}"
+             UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+    <UserControl.Resources>
+        <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+
+        <!-- ===== Butoane (toolbar, meniu): fundal transparent, hover, apăsat ===== -->
+        <Style x:Key="PvButtonBase" TargetType="ButtonBase">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{DynamicResource NS.Text}" />
+            <Setter Property="Padding" Value="6" />
+            <Setter Property="Margin" Value="1,0" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ButtonBase">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="{DynamicResource NS.ControlCorner}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource NS.Hover}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PvButton" TargetType="Button" BasedOn="{StaticResource PvButtonBase}" />
+        <Style x:Key="PvToggle" TargetType="ToggleButton" BasedOn="{StaticResource PvButtonBase}">
+            <Style.Triggers>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource NS.SelectionBg}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PvMenuButton" TargetType="Button" BasedOn="{StaticResource PvButtonBase}">
+            <Setter Property="Padding" Value="9,5" />
+            <Setter Property="Foreground" Value="{DynamicResource NS.TitleBarText}" />
+        </Style>
+
+        <!-- ===== Butoanele ferestrei (minimizare / maximizare / închidere) ===== -->
+        <Style x:Key="PvCaption" TargetType="Button">
+            <Setter Property="Width" Value="46" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource NS.TitleBarText}" />
+            <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource NS.Hover}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PvCaptionClose" TargetType="Button" BasedOn="{StaticResource PvCaption}">
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#C42B1C" />
+                    <Setter Property="Foreground" Value="White" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ===== Bare de derulare subțiri ===== -->
+        <Style x:Key="PvThumb" TargetType="Thumb">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border Margin="2" CornerRadius="3" Background="{DynamicResource NS.ScrollThumb}" Opacity="0.55" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ScrollBar">
+            <Setter Property="Width" Value="10" />
+            <Setter Property="MinWidth" Value="10" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True">
+                            <Track.Thumb>
+                                <Thumb Style="{StaticResource PvThumb}" />
+                            </Track.Thumb>
+                        </Track>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="Orientation" Value="Horizontal">
+                    <Setter Property="Width" Value="Auto" />
+                    <Setter Property="MinWidth" Value="0" />
+                    <Setter Property="Height" Value="10" />
+                    <Setter Property="MinHeight" Value="10" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ScrollBar">
+                                <Track x:Name="PART_Track">
+                                    <Track.Thumb>
+                                        <Thumb Style="{StaticResource PvThumb}" />
+                                    </Track.Thumb>
+                                </Track>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style TargetType="ScrollViewer">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollViewer">
+                        <Grid Background="{TemplateBinding Background}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" CanContentScroll="{TemplateBinding CanContentScroll}" />
+                            <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1" Orientation="Vertical"
+                                       Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}"
+                                       Value="{TemplateBinding VerticalOffset}" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" />
+                            <ScrollBar x:Name="PART_HorizontalScrollBar" Grid.Row="1" Orientation="Horizontal"
+                                       Maximum="{TemplateBinding ScrollableWidth}" ViewportSize="{TemplateBinding ViewportWidth}"
+                                       Value="{TemplateBinding HorizontalOffset}" Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ===== Arbore: rând pe toată lățimea, indentarea vine din Padding (setat din cod) ===== -->
+        <Style x:Key="PvExpander" TargetType="ToggleButton">
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="16" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border Background="Transparent">
+                            <Path x:Name="Chevron" Data="M 0 0 L 3.5 3.5 L 0 7" Stroke="{DynamicResource NS.TextSecondary}"
+                                  StrokeThickness="1.2" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                  RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform>
+                                    <RotateTransform x:Name="Rotation" Angle="0" />
+                                </Path.RenderTransform>
+                            </Path>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Chevron" Property="RenderTransform">
+                                    <Setter.Value>
+                                        <RotateTransform Angle="90" />
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PvTreeItem" TargetType="TreeViewItem">
+            <Setter Property="Foreground" Value="{DynamicResource NS.Text}" />
+            <Setter Property="IsExpanded" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TreeViewItem">
+                        <StackPanel>
+                            <Border x:Name="Bd" Background="Transparent" Margin="4,1"
+                                    CornerRadius="{DynamicResource NS.ControlCorner}" MinHeight="{DynamicResource NS.RowHeight}">
+                                <Grid>
+                                    <Border x:Name="Indicator" Width="3" Height="16" CornerRadius="1.5" HorizontalAlignment="Left"
+                                            Background="{DynamicResource NS.Accent}" Opacity="0"
+                                            Visibility="{DynamicResource NS.SelectionIndicator.Visibility}" />
+                                    <DockPanel Margin="{TemplateBinding Padding}">
+                                        <ToggleButton x:Name="Expander" Style="{StaticResource PvExpander}" Margin="4,0,2,0"
+                                                      ClickMode="Press" DockPanel.Dock="Left"
+                                                      IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}" />
+                                        <ContentPresenter ContentSource="Header" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    </DockPanel>
+                                </Grid>
+                            </Border>
+                            <ItemsPresenter x:Name="ItemsHost" />
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="False">
+                                <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed" />
+                            </Trigger>
+                            <Trigger Property="HasItems" Value="False">
+                                <Setter TargetName="Expander" Property="Visibility" Value="Hidden" />
+                            </Trigger>
+                            <Trigger SourceName="Bd" Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource NS.Hover}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource NS.SelectionBg}" />
+                                <Setter TargetName="Indicator" Property="Opacity" Value="1" />
+                                <Setter Property="Foreground" Value="{DynamicResource NS.SelectionText}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ===== Taburi: 4 stiluri, ales prin resursa NS.TabItemStyle (setată din cod) ===== -->
+        <Style x:Key="TabBase" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{DynamicResource NS.TabText}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="VerticalAlignment" Value="Bottom" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource NS.Hover}" />
+                </Trigger>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource NS.TabActiveText}" />
+                    <Setter Property="Background" Value="{DynamicResource NS.TabActiveBg}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="TabRounded" TargetType="RadioButton" BasedOn="{StaticResource TabBase}">
+            <Setter Property="Margin" Value="4,6,0,0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1,1,1,0" CornerRadius="{DynamicResource NS.TabCorner}" Padding="12,6,8,7">
+                            <ContentPresenter />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource NS.Border}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="TabPill" TargetType="RadioButton" BasedOn="{StaticResource TabBase}">
+            <Setter Property="Margin" Value="4,5,0,5" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="{DynamicResource NS.PillCorner}" Padding="11,4,7,4">
+                            <ContentPresenter />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource NS.Border}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="TabUnderline" TargetType="RadioButton" BasedOn="{StaticResource TabBase}">
+            <Setter Property="Margin" Value="2,0,0,0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid Background="Transparent">
+                            <Border x:Name="Hover" Margin="0,4,0,4" CornerRadius="{DynamicResource NS.ControlCorner}" />
+                            <ContentPresenter Margin="12,9,8,10" />
+                            <Border x:Name="Line" Height="3" Margin="10,0" CornerRadius="1.5" VerticalAlignment="Bottom"
+                                    Background="{DynamicResource NS.Accent}" Visibility="Hidden" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Hover" Property="Background" Value="{DynamicResource NS.Hover}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Line" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="TabClassic" TargetType="RadioButton" BasedOn="{StaticResource TabBase}">
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border Background="{TemplateBinding Background}" Padding="10,5,6,5">
+                            <ContentPresenter />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ===== Card (panou) ===== -->
+        <Style x:Key="PvCard" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource NS.PanelBg}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource NS.Border}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{DynamicResource NS.PanelCorner}" />
+        </Style>
+        <Style x:Key="PvPanelHeader" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource NS.PanelHeaderBg}" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="DockPanel.Dock" Value="Top" />
+        </Style>
+        <Style x:Key="PvPanelHeaderText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource NS.PanelHeaderText}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!-- ===== Meniu deschis (doar desen) ===== -->
+        <Style x:Key="PvMenuRow" TargetType="Border">
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Margin" Value="4,1" />
+            <Setter Property="Padding" Value="8,0,12,0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="{DynamicResource NS.ControlCorner}" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource NS.Hover}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <!-- ================= Fereastra NetSpy ================= -->
+    <Grid>
+    <!-- umbra e un element separat, în spatele ferestrei: un Effect pe fereastră ar randa tot conținutul
+         printr-o imagine intermediară (text neclar, redesenare sacadată) -->
+    <Border Background="{DynamicResource NS.WindowBg}" CornerRadius="{DynamicResource NS.WindowCorner}">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="36" ShadowDepth="10" Direction="270" Opacity="{DynamicResource NS.ShadowOpacity}" />
+        </Border.Effect>
+    </Border>
+    <Border x:Name="Frame" Background="{DynamicResource NS.WindowBg}" BorderBrush="{DynamicResource NS.Border}"
+            BorderThickness="1" CornerRadius="{DynamicResource NS.WindowCorner}">
+        <Grid x:Name="FrameContent" c:RoundClip.Radius="{DynamicResource NS.WindowInnerRadiusValue}">
+            <DockPanel>
+                <!-- Bara de titlu -->
+                <Grid x:Name="TitleBar" DockPanel.Dock="Top" Height="40" Background="{DynamicResource NS.TitleBarBg}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Image Source="pack://application:,,,/Assets/NetSpy.ico" Width="18" Height="18" Margin="12,0,6,0" VerticalAlignment="Center" />
+                    <ContentControl x:Name="TitleMenuHost" Grid.Column="1" VerticalAlignment="Center" Focusable="False" />
+                    <TextBlock x:Name="TitleText" Grid.Column="2" Text="Newtonsoft.Json — NetSpy" VerticalAlignment="Center"
+                               Foreground="{DynamicResource NS.TitleBarText}" FontSize="12" Opacity="0.85" Margin="10,0" />
+                    <StackPanel Grid.Column="3" Orientation="Horizontal">
+                        <Button Style="{StaticResource PvCaption}" Content="&#xE921;" />
+                        <Button Style="{StaticResource PvCaption}" Content="&#xE922;" />
+                        <Button Style="{StaticResource PvCaptionClose}" Content="&#xE8BB;" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- Meniul pe rând separat (bara de titlu clasică) -->
+                <Border x:Name="ClassicMenuRow" DockPanel.Dock="Top" Background="{DynamicResource NS.ToolBarBg}" Padding="4,1">
+                    <ContentControl x:Name="ClassicMenuHost" Focusable="False" />
+                </Border>
+
+                <!-- Bara de unelte -->
+                <Border x:Name="ToolBar" DockPanel.Dock="Top" Background="{DynamicResource NS.ToolBarBg}" Padding="8,4"
+                        Visibility="{DynamicResource NS.ShowToolBar.Visibility}">
+                    <DockPanel>
+                        <Border DockPanel.Dock="Right" Width="260" Height="30" CornerRadius="{DynamicResource NS.ControlCorner}"
+                                Background="{DynamicResource NS.InputBg}" BorderBrush="{DynamicResource NS.Border}" BorderThickness="1">
+                            <StackPanel Orientation="Horizontal" Margin="10,0">
+                                <c:SvgIcon Icon="Search" Width="14" Height="14" />
+                                <TextBlock Text="Search assemblies (Ctrl+Shift+K)" Margin="8,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource NS.TextSecondary}" FontSize="12" />
+                            </StackPanel>
+                        </Border>
+                        <StackPanel x:Name="ToolBarButtons" Orientation="Horizontal" VerticalAlignment="Center" />
+                    </DockPanel>
+                </Border>
+
+                <!-- Bara de stare -->
+                <Border x:Name="StatusBar" DockPanel.Dock="Bottom" Height="26" Background="{DynamicResource NS.StatusBarBg}" Padding="12,0"
+                        Visibility="{DynamicResource NS.ShowStatusBar.Visibility}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource NS.StatusBarText}"
+                                   Text="Newtonsoft.Json 13.0.3   ·   C# 14.0   ·   Ln 12, Col 26" />
+                        <TextBlock VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource NS.StatusBarText}" Text="Ready" />
+                    </DockPanel>
+                </Border>
+
+                <!-- Conținut: arbore + editor (+ panoul de jos) -->
+                <Grid x:Name="Body">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="Col0" />
+                        <ColumnDefinition x:Name="Col1" />
+                        <ColumnDefinition x:Name="Col2" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition x:Name="BottomGapRow" />
+                        <RowDefinition x:Name="BottomRow" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Assembly Explorer -->
+                    <Border x:Name="TreeCard" Style="{StaticResource PvCard}" Grid.RowSpan="3">
+                        <DockPanel c:RoundClip.Radius="{DynamicResource NS.PanelInnerRadiusValue}">
+                            <Border Style="{StaticResource PvPanelHeader}">
+                                <TextBlock Style="{StaticResource PvPanelHeaderText}" Text="Assembly Explorer" />
+                            </Border>
+                            <TreeView x:Name="Tree" Background="Transparent" BorderThickness="0" Padding="0,2"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Editorul cu taburi -->
+                    <Border x:Name="EditorCard" Style="{StaticResource PvCard}">
+                        <DockPanel c:RoundClip.Radius="{DynamicResource NS.PanelInnerRadiusValue}">
+                            <Border x:Name="TabStrip" DockPanel.Dock="Top" Background="{DynamicResource NS.TabStripBg}"
+                                    BorderBrush="{DynamicResource NS.Border}" BorderThickness="0,0,0,1">
+                                <StackPanel x:Name="Tabs" Orientation="Horizontal" Margin="2,0" />
+                            </Border>
+                            <ScrollViewer x:Name="CodeScroll" Background="{DynamicResource NS.EditorBg}"
+                                          HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                                <Grid Margin="0,8">
+                                    <Border x:Name="CurrentLine" VerticalAlignment="Top" Background="{DynamicResource NS.CurrentLine}"
+                                            Height="{DynamicResource NS.CodeLineHeight}" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock x:Name="LineNumbers" MinWidth="34" Margin="6,0,14,0" TextAlignment="Right"
+                                                   Foreground="{DynamicResource NS.LineNumber}" FontFamily="{DynamicResource NS.CodeFont}"
+                                                   FontSize="{DynamicResource NS.CodeFontSize}" LineStackingStrategy="BlockLineHeight"
+                                                   LineHeight="{DynamicResource NS.CodeLineHeight}"
+                                                   Visibility="{DynamicResource NS.ShowLineNumbers.Visibility}" />
+                                        <TextBlock x:Name="Code" Margin="4,0,24,0" Foreground="{DynamicResource NS.EditorText}"
+                                                   FontFamily="{DynamicResource NS.CodeFont}" FontSize="{DynamicResource NS.CodeFontSize}"
+                                                   LineStackingStrategy="BlockLineHeight" LineHeight="{DynamicResource NS.CodeLineHeight}" />
+                                    </StackPanel>
+                                </Grid>
+                            </ScrollViewer>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Panoul de jos: Analyzer -->
+                    <Border x:Name="BottomCard" Style="{StaticResource PvCard}" Grid.Row="2"
+                            Visibility="{DynamicResource NS.ShowBottomPanel.Visibility}">
+                        <DockPanel c:RoundClip.Radius="{DynamicResource NS.PanelInnerRadiusValue}">
+                            <Border Style="{StaticResource PvPanelHeader}">
+                                <TextBlock Style="{StaticResource PvPanelHeaderText}" Text="Analyzer" />
+                            </Border>
+                            <TreeView x:Name="AnalyzerTree" Background="Transparent" BorderThickness="0" Padding="0,2"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+                        </DockPanel>
+                    </Border>
+                </Grid>
+            </DockPanel>
+
+            <!-- Meniul "File" deschis, desenat peste fereastră -->
+            <Canvas x:Name="MenuOverlay" Visibility="{DynamicResource NS.ShowMenuOpen.Visibility}">
+                <Grid x:Name="MenuPopup" Width="290">
+                    <Border Background="{DynamicResource NS.PopupBg}" CornerRadius="{DynamicResource NS.PopupCorner}">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="20" ShadowDepth="6" Direction="270" Opacity="{DynamicResource NS.ShadowOpacity}" />
+                        </Border.Effect>
+                    </Border>
+                    <Border Background="{DynamicResource NS.PopupBg}" BorderBrush="{DynamicResource NS.Border}"
+                            BorderThickness="1" CornerRadius="{DynamicResource NS.PopupCorner}" Padding="0,4">
+                        <StackPanel x:Name="MenuRows" />
+                    </Border>
+                </Grid>
+            </Canvas>
+        </Grid>
+    </Border>
+    </Grid>
+</UserControl>

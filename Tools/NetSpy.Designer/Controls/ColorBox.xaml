@@ -1,0 +1,128 @@
+<UserControl x:Class="NetSpy.Designer.Controls.ColorBox"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Root">
+    <UserControl.Resources>
+        <!-- tablă de șah în spatele culorilor semitransparente -->
+        <DrawingBrush x:Key="Checker" TileMode="Tile" Viewport="0,0,8,8" ViewportUnits="Absolute">
+            <DrawingBrush.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="White" Geometry="M0,0 H2 V2 H0Z" />
+                    <GeometryDrawing Brush="#CCCCCC" Geometry="M0,0 H1 V1 H0Z M1,1 H2 V2 H1Z" />
+                </DrawingGroup>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border x:Name="Swatch" Width="38" Height="24" CornerRadius="4" Cursor="Hand"
+                BorderBrush="#33000000" BorderThickness="1" Background="{StaticResource Checker}"
+                MouseLeftButtonUp="Swatch_Click" ToolTip="Alege culoarea">
+            <Border x:Name="SwatchColor" CornerRadius="3" />
+        </Border>
+
+        <TextBox x:Name="HexBox" Grid.Column="1" Margin="6,0,0,0" VerticalContentAlignment="Center"
+                 FontFamily="Cascadia Mono, Consolas" Style="{DynamicResource DesignerTextBox}"
+                 Text="{Binding Hex, ElementName=Root, UpdateSourceTrigger=LostFocus}"
+                 KeyDown="HexBox_KeyDown" />
+
+        <Popup x:Name="PickerPopup" PlacementTarget="{Binding ElementName=Swatch}" Placement="Bottom"
+               StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade" VerticalOffset="4">
+            <Border Background="White" CornerRadius="8" BorderBrush="#22000000" BorderThickness="1" Padding="12" Margin="8">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="16" ShadowDepth="3" Opacity="0.25" />
+                </Border.Effect>
+                <StackPanel Width="232">
+                    <!-- saturație (orizontal) × valoare (vertical) -->
+                    <Grid x:Name="SvArea" Height="150" Cursor="Cross" ClipToBounds="True"
+                          MouseLeftButtonDown="Sv_MouseDown" MouseMove="Sv_MouseMove" MouseLeftButtonUp="Area_MouseUp">
+                        <Rectangle x:Name="HueFill" RadiusX="4" RadiusY="4" />
+                        <Rectangle RadiusX="4" RadiusY="4">
+                            <Rectangle.Fill>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                    <GradientStop Color="White" Offset="0" />
+                                    <GradientStop Color="#00FFFFFF" Offset="1" />
+                                </LinearGradientBrush>
+                            </Rectangle.Fill>
+                        </Rectangle>
+                        <Rectangle RadiusX="4" RadiusY="4">
+                            <Rectangle.Fill>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Color="#00000000" Offset="0" />
+                                    <GradientStop Color="Black" Offset="1" />
+                                </LinearGradientBrush>
+                            </Rectangle.Fill>
+                        </Rectangle>
+                        <Canvas IsHitTestVisible="False">
+                            <Ellipse x:Name="SvThumb" Width="14" Height="14" Stroke="White" StrokeThickness="2">
+                                <Ellipse.Effect>
+                                    <DropShadowEffect BlurRadius="3" ShadowDepth="0" Opacity="0.8" />
+                                </Ellipse.Effect>
+                            </Ellipse>
+                        </Canvas>
+                    </Grid>
+
+                    <!-- nuanța -->
+                    <Grid x:Name="HueBar" Height="14" Margin="0,10,0,0" Cursor="Hand"
+                          MouseLeftButtonDown="Hue_MouseDown" MouseMove="Hue_MouseMove" MouseLeftButtonUp="Area_MouseUp">
+                        <Rectangle RadiusX="7" RadiusY="7">
+                            <Rectangle.Fill>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                    <GradientStop Color="#FF0000" Offset="0" />
+                                    <GradientStop Color="#FFFF00" Offset="0.1667" />
+                                    <GradientStop Color="#00FF00" Offset="0.3333" />
+                                    <GradientStop Color="#00FFFF" Offset="0.5" />
+                                    <GradientStop Color="#0000FF" Offset="0.6667" />
+                                    <GradientStop Color="#FF00FF" Offset="0.8333" />
+                                    <GradientStop Color="#FF0000" Offset="1" />
+                                </LinearGradientBrush>
+                            </Rectangle.Fill>
+                        </Rectangle>
+                        <Canvas IsHitTestVisible="False">
+                            <Ellipse x:Name="HueThumb" Width="14" Height="14" Stroke="White" StrokeThickness="2">
+                                <Ellipse.Effect>
+                                    <DropShadowEffect BlurRadius="3" ShadowDepth="0" Opacity="0.8" />
+                                </Ellipse.Effect>
+                            </Ellipse>
+                        </Canvas>
+                    </Grid>
+
+                    <!-- transparența -->
+                    <Grid x:Name="AlphaBar" Height="14" Margin="0,10,0,0" Cursor="Hand"
+                          MouseLeftButtonDown="Alpha_MouseDown" MouseMove="Alpha_MouseMove" MouseLeftButtonUp="Area_MouseUp">
+                        <Rectangle RadiusX="7" RadiusY="7" Fill="{StaticResource Checker}" />
+                        <Rectangle x:Name="AlphaFill" RadiusX="7" RadiusY="7" />
+                        <Canvas IsHitTestVisible="False">
+                            <Ellipse x:Name="AlphaThumb" Width="14" Height="14" Stroke="White" StrokeThickness="2">
+                                <Ellipse.Effect>
+                                    <DropShadowEffect BlurRadius="3" ShadowDepth="0" Opacity="0.8" />
+                                </Ellipse.Effect>
+                            </Ellipse>
+                        </Canvas>
+                    </Grid>
+
+                    <TextBlock Margin="0,12,0,4" Text="Culori rapide" Foreground="#5F5F5F" FontSize="11" />
+                    <ItemsControl x:Name="Swatches">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Width="20" Height="20" Margin="0,0,3,3" CornerRadius="4" Cursor="Hand"
+                                        BorderBrush="#33000000" BorderThickness="1" Background="{Binding}"
+                                        ToolTip="{Binding Color}" MouseLeftButtonUp="QuickSwatch_Click" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </Popup>
+    </Grid>
+</UserControl>
