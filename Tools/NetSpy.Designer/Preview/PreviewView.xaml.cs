@@ -120,12 +120,12 @@ namespace NetSpy.Designer.Preview
 		void BuildMenuPopup()
 		{
 			var rows = new (string? Icon, string Text, string? Shortcut, bool Submenu)[] {
-				("Open|", "Open…", "Ctrl+O", false),
-				("AssemblyListGAC|", "Open from GAC…", null, false),
-				("AssemblyList|", "Open List…", null, false),
-				("Refresh|", "Reload All Assemblies", null, false),
+				("Open|\uE838", "Open…", "Ctrl+O", false),
+				("AssemblyListGAC|\uE8F1", "Open from GAC…", null, false),
+				("AssemblyList|\uE8FD", "Open List…", null, false),
+				("Refresh|\uE72C", "Reload All Assemblies", null, false),
 				(null, "-", null, false),
-				("Save|", "Save Code…", "Ctrl+S", false),
+				("Save|\uE74E", "Save Code…", "Ctrl+S", false),
 				(null, "Export to Project…", null, false),
 				(null, "-", null, false),
 				(null, "Recent Files", null, true),
@@ -157,7 +157,7 @@ namespace NetSpy.Designer.Preview
 				if (shortcut is not null || submenu)
 				{
 					var right = new TextBlock {
-						Text = submenu ? "" : shortcut,
+						Text = submenu ? "\uE76C" : shortcut,
 						FontSize = submenu ? 10 : 12,
 						VerticalAlignment = VerticalAlignment.Center,
 						Margin = new Thickness(24, 0, 0, 0),
@@ -193,19 +193,19 @@ namespace NetSpy.Designer.Preview
 
 		void BuildToolBar()
 		{
-			AddButton("Back", "", "Back (Alt+Left)", glyphSize: 13);
-			AddButton("Forward", "", "Forward (Alt+Right)", glyphSize: 13);
+			AddButton("Back", "\uE72B", "Back (Alt+Left)", glyphSize: 13);
+			AddButton("Forward", "\uE72A", "Forward (Alt+Right)", glyphSize: 13);
 			AddSeparator();
-			AddButton("Open", "", "Open… (Ctrl+O)");
-			AddButton("Refresh", "", "Reload (F5)");
-			AddButton("Save", "", "Save Code (Ctrl+S)");
+			AddButton("Open", "\uE838", "Open… (Ctrl+O)");
+			AddButton("Refresh", "\uE72C", "Reload (F5)", glyphSize: 14);
+			AddButton("Save", "\uE74E", "Save Code (Ctrl+S)");
 			AddSeparator();
-			AddToggle("ShowPublicOnly", "", "Show public members only", false);
-			AddToggle("ShowPrivateInternal", "", "Show internal and private members", true);
-			AddToggle("ShowAll", "", "Show all members (incl. compiler-generated)", false);
+			AddToggle("ShowPublicOnly", "\uE774", "Show public members only", false);
+			AddToggle("ShowPrivateInternal", "\uE72E", "Show internal and private members", true);
+			AddToggle("ShowAll", "\uE890", "Show all members (incl. compiler-generated)", false);
 			AddSeparator();
-			AddButton("Sort", "", "Sort assembly list");
-			AddButton("CollapseAll", "", "Collapse all tree nodes");
+			AddButton("Sort", "\uE8CB", "Sort assembly list");
+			AddButton("CollapseAll", "\uE73F", "Collapse all tree nodes");
 			AddSeparator();
 
 			// lista de limbaje (desenată ca un ComboBox WinUI)
@@ -224,7 +224,7 @@ namespace NetSpy.Designer.Preview
 			version.SetResourceReference(TextBlock.ForegroundProperty, "NS.TextSecondary");
 			content.Children.Add(version);
 			var chevron = new TextBlock {
-				Text = "",
+				Text = "\uE70D",
 				FontFamily = (FontFamily)FindResource("IconFont"),
 				FontSize = 10,
 				Margin = new Thickness(14, 0, 0, 0),
@@ -374,7 +374,7 @@ namespace NetSpy.Designer.Preview
 				header.Children.Add(new SvgIcon { Icon = samples[i].Icon, Width = 14, Height = 14, Margin = new Thickness(0, 0, 7, 0) });
 				header.Children.Add(new TextBlock { Text = samples[i].Title, VerticalAlignment = VerticalAlignment.Center });
 				header.Children.Add(new TextBlock {
-					Text = "",
+					Text = "\uE711",
 					FontFamily = (FontFamily)FindResource("IconFont"),
 					FontSize = 9,
 					Opacity = 0.7,
