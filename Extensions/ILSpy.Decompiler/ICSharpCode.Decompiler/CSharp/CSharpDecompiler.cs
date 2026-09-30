@@ -296,6 +296,7 @@ namespace ICSharpCode.Decompiler.CSharp
 				new CharLiteralsInArithmetic(), // NetSpy
 				new IntroduceNameof(), // NetSpy
 				new RemoveTargetTypedTupleNames(), // NetSpy
+				new ImplicitlyTypedLambdas(), // NetSpy
 				new SplitMergedStatements(), // NetSpy: before the layout (the new statements get their lines)
 				new ApplySourceLayout(), // NetSpy: PDB layout (after all statement changes)
 				new IntroduceTopLevelStatements(IntroduceTopLevelStatements.Phase.Move), // NetSpy

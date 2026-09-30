@@ -590,7 +590,28 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 				DefaultValueExpression => true,
 				_ => false
 			};
-			return namesType && initializer.GetResolveResult() is { Type: var type } && type.Equals(variableType);
+			return namesType && initializer.GetResolveResult() is { Type: var type } && type.Equals(variableType)
+				&& SameTupleElementNames(type, variableType);
+		}
+
+		/// <summary>
+		/// NetSpy: type equality ignores tuple element names, "var" doesn't: "var l = new List&lt;(int, string)&gt;()"
+		/// would lose the names a "List&lt;(int Id, string Name)&gt;" variable has (from the PDB).
+		/// </summary>
+		static bool SameTupleElementNames(IType a, IType b)
+		{
+			switch (a)
+			{
+				case TupleType ta when b is TupleType tb:
+					return ta.ElementNames.SequenceEqual(tb.ElementNames)
+						&& ta.ElementTypes.Zip(tb.ElementTypes, SameTupleElementNames).All(x => x);
+				case ParameterizedType pa when b is ParameterizedType pb:
+					return pa.TypeArguments.Zip(pb.TypeArguments, SameTupleElementNames).All(x => x);
+				case ArrayType aa when b is ArrayType ab:
+					return SameTupleElementNames(aa.ElementType, ab.ElementType);
+				default:
+					return true;
+			}
 		}
 
 		bool IsMatchingAssignment(VariableToDeclare v, [NotNullWhen(true)] out AssignmentExpression? assignment)

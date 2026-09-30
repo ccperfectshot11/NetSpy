@@ -15,6 +15,7 @@ namespace dnSpy.Decompiler.ILSpy.Core.Settings {
 			{ "DecompilerSettings.NamedBooleanArguments", "Name boolean literal arguments (f(inherit: false))" },
 			{ "DecompilerSettings.OmitArraySizes", "Omit array sizes when there is an initializer (new[] { 1, 2 })" },
 			{ "DecompilerSettings.ImplicitlyTypedLocals", "Use 'var' when the type is apparent (var x = new T())" },
+			{ "DecompilerSettings.ImplicitlyTypedLambdas", "Use implicitly typed lambdas where the context allows (c => c.Age)" },
 			{ "DecompilerSettings.NameofExpressions", "Use nameof(x) for strings that name a parameter or member" },
 			{ "DecompilerSettings.FileLocalTypes", "Show file-local types as 'file class T'" },
 			{ "DecompilerSettings.TopLevelStatements", "Show the generated Program.<Main>$ as top-level statements" },

@@ -2632,7 +2632,16 @@ namespace ICSharpCode.Decompiler.CSharp
 				// C# 10 lambdas can have attributes, but anonymous methods cannot
 				isLambda = true;
 			}
-			else if (settings.UseLambdaSyntax && ame.Parameters.All(p => p.ParameterModifier == ReferenceKind.None && !p.IsParams)
+			else if (settings.UseLambdaSyntax && settings.ImplicitlyTypedLambdas && !parametersAreUsed && ame.Parameters.Count > 0
+				&& settings.Discards && ame.Parameters.All(p => p.ParameterModifier == ReferenceKind.None && !p.IsParams)
+				&& ParameterTypesAreAccessible(function))
+			{
+				// NetSpy: "delegate { ... }" with unused parameters is "(_, _) => ..." in modern code
+				foreach (var p in ame.Parameters)
+					p.Name = "_";
+				isLambda = true;
+			}
+			else if (settings.UseLambdaSyntax && ame.Parameters.All(p => (p.ParameterModifier == ReferenceKind.None || settings.ImplicitlyTypedLambdas) && !p.IsParams)
 				&& (parametersAreUsed || (ParameterTypesAreAccessible(function) && ParametersAreNameable(function))))
 			{
 				// Lambdas cover statement bodies too. Anonymous method syntax remains where
@@ -2689,6 +2698,16 @@ namespace ICSharpCode.Decompiler.CSharp
 				{
 					lambda.Body = returnStmt.Expression.Detach();
 					inferredReturnType = lambda.Body!.GetResolveResult().Type;
+				}
+				else if (settings.ImplicitlyTypedLambdas && body.Statements.Count == 1
+					&& body.Statements.Single() is ExpressionStatement { Expression: InvocationExpression or UnaryOperatorExpression { Operator: UnaryOperatorType.Await } } expressionStatement
+					&& expressionStatement.Expression.GetResolveResult().Type.Kind == TypeKind.Void)
+				{
+					// NetSpy: "x => Console.WriteLine(x)". Only for a void expression: "() => F()" with a result would
+					// prefer a Func overload over the Action one ("() => { F(); }"); ImplicitlyTypedLambdas does the
+					// others where the context allows it
+					lambda.Body = expressionStatement.Expression.Detach();
+					inferredReturnType = compilation.FindType(KnownTypeCode.Void);
 				}
 				else
 				{

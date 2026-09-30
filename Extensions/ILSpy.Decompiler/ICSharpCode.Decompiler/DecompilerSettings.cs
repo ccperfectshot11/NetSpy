@@ -403,6 +403,14 @@ namespace ICSharpCode.Decompiler
 		public partial bool NameofExpressions { get; set; }
 
 		/// <summary>
+		/// NetSpy: write lambdas like modern source code: implicitly typed parameters where the context gives them
+		/// ("c => c.Age"), "(_, _) =>" for unused parameters, "x => statement" for a single statement.
+		/// </summary>
+		[Description("DecompilerSettings.ImplicitlyTypedLambdas")]
+		[DecompilerSetting(CSharp.LanguageVersion.CSharp3)]
+		public partial bool ImplicitlyTypedLambdas { get; set; }
+
+		/// <summary>
 		/// Decompile foreach statements.
 		/// </summary>
 		[Description("DecompilerSettings.DetectForeachStatements")]
