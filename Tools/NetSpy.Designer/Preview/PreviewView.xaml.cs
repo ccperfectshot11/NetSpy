@@ -193,8 +193,8 @@ namespace NetSpy.Designer.Preview
 
 		void BuildToolBar()
 		{
-			AddButton("Back", "", "Back (Alt+Left)");
-			AddButton("Forward", "", "Forward (Alt+Right)");
+			AddButton("Back", "", "Back (Alt+Left)", glyphSize: 13);
+			AddButton("Forward", "", "Forward (Alt+Right)", glyphSize: 13);
 			AddSeparator();
 			AddButton("Open", "", "Open… (Ctrl+O)");
 			AddButton("Refresh", "", "Reload (F5)");
@@ -237,17 +237,20 @@ namespace NetSpy.Designer.Preview
 
 		/// <summary>Iconița unui buton în ambele stiluri: SVG colorat (clasic) și glifă Segoe Fluent Icons (Windows 11).
 		/// Resursele NS.ClassicIcons / NS.FluentIcons.Visibility o arată doar pe cea aleasă.</summary>
-		UIElement ButtonIcon(string icon, string glyph, double size)
+		UIElement ButtonIcon(string icon, string glyph, double size, double? glyphSize = null)
 		{
 			var classic = new SvgIcon { Icon = icon, Width = size, Height = size };
 			classic.SetResourceReference(VisibilityProperty, "NS.ClassicIcons.Visibility");
 			var fluent = new TextBlock {
 				Text = glyph,
 				FontFamily = (FontFamily)FindResource("IconFont"),
-				FontSize = size,
+				// unele glife (săgețile) umplu tot pătratul: pot fi desenate mai mici decât restul
+				FontSize = glyphSize ?? size,
 				VerticalAlignment = VerticalAlignment.Center,
 				HorizontalAlignment = HorizontalAlignment.Center,
 			};
+			// fără ClearType: pe liniile subțiri ale glifelor lasă margini colorate (roșu/albastru)
+			TextOptions.SetTextRenderingMode(fluent, TextRenderingMode.Grayscale);
 			fluent.SetResourceReference(VisibilityProperty, "NS.FluentIcons.Visibility");
 			var grid = new Grid { Width = size + 2, Height = size + 2 };
 			grid.Children.Add(classic);
@@ -255,10 +258,10 @@ namespace NetSpy.Designer.Preview
 			return grid;
 		}
 
-		void AddButton(string icon, string glyph, string tooltip) =>
+		void AddButton(string icon, string glyph, string tooltip, double? glyphSize = null) =>
 			ToolBarButtons.Children.Add(new Button {
 				Style = (Style)FindResource("PvButton"),
-				Content = ButtonIcon(icon, glyph, 16),
+				Content = ButtonIcon(icon, glyph, 16, glyphSize),
 				ToolTip = tooltip,
 			});
 
