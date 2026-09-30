@@ -387,11 +387,17 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 			var arrayVariable = m.Get<IdentifierExpression>("arrayVariable").Single().GetILVariable();
 			if (itemVariable == null || indexVariable == null || arrayVariable == null)
 				return null;
-			if (arrayVariable.Type.Kind != TypeKind.Array && !arrayVariable.Type.IsKnownType(KnownTypeCode.String))
+			// NetSpy: foreach over Span<T>/ReadOnlySpan<T> compiles to the same loop
+			if (arrayVariable.Type.Kind != TypeKind.Array && !arrayVariable.Type.IsKnownType(KnownTypeCode.String)
+				&& !arrayVariable.Type.IsKnownType(KnownTypeCode.SpanOfT) && !arrayVariable.Type.IsKnownType(KnownTypeCode.ReadOnlySpanOfT))
 				return null;
 			if (!VariableCanBeUsedAsForeachLocal(itemVariable, forStatement))
 				return null;
 			if (indexVariable.StoreCount != 2 || indexVariable.LoadCount != 3 || indexVariable.AddressCount != 0)
+				return null;
+			// NetSpy: the index of a compiled foreach is a compiler temporary; one with a name from the PDB is
+			// the "i" of a for loop the programmer wrote
+			if (!indexVariable.HasGeneratedName)
 				return null;
 			context.Step("Introduce foreach over array", forStatement);
 			var body = new BlockStatement();
@@ -409,6 +415,19 @@ namespace ICSharpCode.Decompiler.CSharp.Transforms
 			foreachStmt.VariableDesignation.AddAnnotation(new ILVariableResolveResult(itemVariable, itemVariable.Type));
 			// TODO : add ForeachAnnotation
 			forStatement.ReplaceWith(foreachStmt);
+			// NetSpy: "T copy = expr; foreach (x in copy)" -> "foreach (x in expr)" when the copy is the compiler's
+			// (foreach evaluates its expression once, before the loop, just like the copy)
+			// (this runs before DeclareVariables: the copy is still an assignment)
+			if (arrayVariable.HasGeneratedName
+				&& foreachStmt.PrevSibling is ExpressionStatement { Expression: AssignmentExpression { Operator: AssignmentOperatorType.Assign, Left: IdentifierExpression target, Right: var source } } copy
+				&& target.GetILVariable() == arrayVariable
+				&& foreachStmt.Parent is BlockStatement block
+				// (the copy's target and the foreach expression: no other use)
+				&& block.Descendants.OfType<IdentifierExpression>().Count(id => id.GetILVariable() == arrayVariable) == 2)
+			{
+				foreachStmt.InExpression = source.Detach();
+				copy.Remove();
+			}
 			context.EndStep(foreachStmt);
 			return foreachStmt;
 		}

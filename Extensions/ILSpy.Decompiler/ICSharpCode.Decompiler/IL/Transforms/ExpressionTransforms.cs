@@ -623,6 +623,45 @@ namespace ICSharpCode.Decompiler.IL.Transforms
 			return inst;
 		}
 
+		/// <summary>
+		/// NetSpy: the returned values have sequence points that no other sequence point contains: they were
+		/// separate "return x;" statements of a switch statement, not the arms of a switch expression.
+		/// </summary>
+		bool WasSwitchStatement(SwitchInstruction switchInst)
+		{
+			if (!context.Settings.SourceLayoutFromPdb || context.DebugInfo is not { } debugInfo)
+				return false;
+			var method = context.Function.MoveNextMethod ?? context.Function.Method;
+			if (method == null || method.MetadataToken.IsNil || method.MetadataToken.Kind != System.Reflection.Metadata.HandleKind.MethodDefinition)
+				return false;
+			List<DebugInfo.SequencePoint> points;
+			try
+			{
+				points = debugInfo.GetSequencePoints((System.Reflection.Metadata.MethodDefinitionHandle)method.MetadataToken).Where(sp => !sp.IsHidden).ToList();
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return false;
+			}
+			int statements = 0;
+			foreach (var section in switchInst.Sections)
+			{
+				if (section.Body is not Branch { TargetBlock.Instructions: [Leave leave] })
+					continue;
+				int offset = leave.Value.StartILOffset;
+				var point = points.FirstOrDefault(sp => sp.Offset <= offset && offset < sp.EndOffset);
+				if (point == null)
+					continue;
+				bool contained = points.Any(other => other != point
+					&& (other.StartLine, other.StartColumn).CompareTo((point.StartLine, point.StartColumn)) <= 0
+					&& (other.EndLine, other.EndColumn).CompareTo((point.EndLine, point.EndColumn)) >= 0);
+				if (contained)
+					return false;
+				statements++;
+			}
+			return statements > 1;
+		}
+
 		private void HandleSwitchExpression(BlockContainer container, SwitchInstruction switchInst)
 		{
 			if (!context.Settings.SwitchExpressions)
@@ -696,6 +735,11 @@ namespace ICSharpCode.Decompiler.IL.Transforms
 						return;
 				}
 			}
+
+			// NetSpy: with a PDB, "case 1: return a;" statements have their own sequence points, while the arms
+			// of a switch expression are inside the expression's one
+			if (leaveTarget != null && WasSwitchStatement(switchInst))
+				return;
 
 			context.Step("Switch Expression", switchInst);
 			switchInst.SetResultType(resultType);
