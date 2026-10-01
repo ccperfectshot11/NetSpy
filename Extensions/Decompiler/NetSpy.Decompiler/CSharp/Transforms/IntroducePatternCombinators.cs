@@ -112,7 +112,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 
 		/// <summary>
 		/// Recognizes a condition on one variable that is the same as "subject is pattern" (the pattern is a new
-		/// node; the subject is a node of the condition). Only "||" chains (with "&&" of a type test and its
+		/// node; the subject is a node of the condition). Only "||" chains (with "&amp;&amp;" of a type test and its
 		/// constant) are folded, so a lone "x == null" stays as it is.
 		/// </summary>
 		static bool TryPattern(Expression expression, out IdentifierExpression? subject, out Expression? pattern)

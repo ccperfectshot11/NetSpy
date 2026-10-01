@@ -267,11 +267,17 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		{
 			public readonly Expression Condition;
 			public readonly bool Negated;
+			/// <summary>
+			/// Known from the arm order (an earlier sibling arm took the other inputs), so it isn't needed in the
+			/// pattern; it only tightens a bound the arm already has ("&gt;= -10" + "not &lt; 10" → "&gt;= 10").
+			/// </summary>
+			public readonly bool Implied;
 
-			public ConditionItem(Expression condition, bool negated)
+			public ConditionItem(Expression condition, bool negated, bool implied = false)
 			{
 				Condition = condition;
 				Negated = negated;
+				Implied = implied;
 			}
 		}
 
@@ -363,7 +369,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						return result;
 					}
 					result.AddRange(Prefix(thenArms, new ConditionItem(condition, negated: false)));
-					result.AddRange(restArms);
+					// NetSpy: REST is only reached when C was false; that can tighten REST's bounds
+					result.AddRange(thenExhaustive ? Prefix(restArms, new ConditionItem(condition, negated: true, implied: true)) : restArms);
 					exhaustive = restExhaustive;
 					return result;
 				}
@@ -533,11 +540,13 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						if (!Bind(binding.Statement))
 							return false;
 					}
-					else if (item is ConditionItem condition)
+					else if (item is ConditionItem { Implied: false } condition)
 					{
 						AddCondition(condition.Condition, condition.Negated);
 					}
 				}
+				foreach (var implied in arm.Path.OfType<ConditionItem>().Where(c => c.Implied))
+					TightenBound(implied.Condition, implied.Negated);
 				// locals used by the result or by the when clause need a designation in the pattern
 				var used = new List<AstNode>();
 				if (arm.Result is not null)
@@ -639,6 +648,69 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					default:
 						return null;
 				}
+			}
+
+			/// <summary>
+			/// An implied relational condition replaces a weaker bound on the same side of the same value
+			/// ("&gt;= -10" and an implied "not &lt; 10" → "&gt;= 10"); it is never added on its own.
+			/// </summary>
+			void TightenBound(Expression condition, bool negated)
+			{
+				if (Convert(condition, negated) is not { } c || Relational(c.Pattern) is not var (op, constant, value))
+					return;
+				bool lower = op is UnaryOperatorType.PatternRelationalGreaterThan or UnaryOperatorType.PatternRelationalGreaterThanOrEqual;
+				for (int i = 0; i < c.Node.Atoms.Count; i++)
+				{
+					if (Relational(c.Node.Atoms[i]) is not var (existingOp, _, existingValue))
+						continue;
+					bool existingLower = existingOp is UnaryOperatorType.PatternRelationalGreaterThan or UnaryOperatorType.PatternRelationalGreaterThanOrEqual;
+					if (existingLower != lower)
+						continue;
+					bool stricter = lower
+						? value > existingValue || (value == existingValue && op == UnaryOperatorType.PatternRelationalGreaterThan)
+						: value < existingValue || (value == existingValue && op == UnaryOperatorType.PatternRelationalLessThan);
+					if (stricter)
+						c.Node.Atoms[i] = new UnaryOperatorExpression(op, constant.Clone());
+					return;
+				}
+			}
+
+			/// <summary>"&lt; K", "&gt;= K"... and "not (&lt; K)" (= "&gt;= K") as (operator, K, value of K).</summary>
+			static (UnaryOperatorType Op, Expression Constant, double Value)? Relational(Expression pattern)
+			{
+				bool not = false;
+				if (pattern is UnaryOperatorExpression { Operator: UnaryOperatorType.PatternNot, Expression: var inner })
+				{
+					not = true;
+					pattern = inner;
+				}
+				if (pattern is not UnaryOperatorExpression { Expression: { } constant } relational
+					|| relational.Operator is not (UnaryOperatorType.PatternRelationalLessThan or UnaryOperatorType.PatternRelationalLessThanOrEqual
+						or UnaryOperatorType.PatternRelationalGreaterThan or UnaryOperatorType.PatternRelationalGreaterThanOrEqual))
+					return null;
+				var constantValue = constant.GetResolveResult()?.ConstantValue ?? (constant as PrimitiveExpression)?.Value;
+				if (constantValue is null or bool or string)
+					return null;
+				double value;
+				try
+				{
+					value = System.Convert.ToDouble(constantValue, System.Globalization.CultureInfo.InvariantCulture);
+				}
+				catch (System.Exception ex) when (ex is System.InvalidCastException or System.FormatException or System.OverflowException)
+				{
+					return null;
+				}
+				var op = relational.Operator;
+				if (not)
+				{
+					op = op switch {
+						UnaryOperatorType.PatternRelationalLessThan => UnaryOperatorType.PatternRelationalGreaterThanOrEqual,
+						UnaryOperatorType.PatternRelationalLessThanOrEqual => UnaryOperatorType.PatternRelationalGreaterThan,
+						UnaryOperatorType.PatternRelationalGreaterThan => UnaryOperatorType.PatternRelationalLessThanOrEqual,
+						_ => UnaryOperatorType.PatternRelationalLessThan
+					};
+				}
+				return (op, constant, value);
 			}
 
 			void AddCondition(Expression condition, bool negated)
@@ -785,7 +857,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 							BinaryOperatorType.GreaterThan => UnaryOperatorType.PatternRelationalGreaterThan,
 							_ => UnaryOperatorType.PatternRelationalGreaterThanOrEqual
 						};
-						pattern = new UnaryOperatorExpression(relational, constant.Clone());
+						pattern = new UnaryOperatorExpression(relational, IntegralLiteral(constant, valueType));
 						break;
 					default:
 						return null;
@@ -794,6 +866,24 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				if (node is null)
 					return null;
 				return (node, Not(pattern, negated));
+			}
+
+			/// <summary>NetSpy: "-10.0" on a double/float value is written "-10", like the source (int converts implicitly).</summary>
+			static Expression IntegralLiteral(Expression constant, IType valueType)
+			{
+				if ((valueType.IsKnownType(KnownTypeCode.Double) || valueType.IsKnownType(KnownTypeCode.Single))
+					&& (constant.GetResolveResult()?.ConstantValue ?? (constant as PrimitiveExpression)?.Value) is { } value
+					&& value is double or float)
+				{
+					double d = System.Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
+					if (d == System.Math.Floor(d) && d >= int.MinValue && d <= int.MaxValue && !(d == 0 && double.IsNegative(d)))
+					{
+						var literal = new PrimitiveExpression((int)d);
+						literal.AddAnnotation(new ConstantResolveResult(valueType, value));
+						return literal;
+					}
+				}
+				return constant.Clone();
 			}
 
 			static Expression Not(Expression pattern, bool negated)
