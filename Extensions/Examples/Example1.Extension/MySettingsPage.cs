@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
-using dnSpy.Contracts.Images;
-using dnSpy.Contracts.Settings.Dialog;
+using NetSpy.Contracts.Images;
+using NetSpy.Contracts.Settings.Dialog;
 
 // Adds an options dialog box page showing settings saved in MySettings
 
 namespace Example1.Extension {
-	// This instance gets called by dnSpy to create the page each time the user opens the options dialog
+	// This instance gets called by NetSpy to create the page each time the user opens the options dialog
 	[Export(typeof(IAppSettingsPageProvider))]	// Tell MEF we're exporting this instance
 	sealed class MyAppSettingsPageProvider : IAppSettingsPageProvider {
 		readonly MySettings mySettings;

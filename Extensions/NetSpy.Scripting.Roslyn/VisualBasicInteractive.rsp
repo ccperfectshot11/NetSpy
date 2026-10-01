@@ -1,0 +1,25 @@
+/R:System
+/R:System.Core
+/R:System.Data
+/R:System.Data.DataSetExtensions
+/R:System.Xml
+/R:System.Xml.Linq
+/Imports:Microsoft.VisualBasic
+/Imports:System
+/Imports:System.Collections
+/Imports:System.Collections.Generic
+#/Imports:System.Console
+/Imports:System.Data
+/Imports:System.Diagnostics
+/Imports:System.Linq
+/Imports:System.Xml.Linq
+
+# Add extra stuff
+/R:System.ValueTuple.dll
+/R:NetSpy.Contracts.Logic.dll
+/R:NetSpy.Contracts.NetSpy.dll
+/R:dnlib.dll
+/Imports:NetSpy.Contracts.Scripting
+/Imports:NetSpy.Contracts.Scripting.Roslyn
+# For TextColor
+/Imports:NetSpy.Contracts.Text

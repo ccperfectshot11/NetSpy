@@ -7,9 +7,9 @@ body:
       value: |
         Before clicking `Submit new issue`, try the latest build [![](https://github.com/dnSpyEx/dnSpy/workflows/GitHub%20CI/badge.svg)](https://github.com/dnSpyEx/dnSpy/actions?query=branch%3Amaster)
   - type: input
-    id: dnspyex-version
+    id: netspyex-version
     attributes:
-      label: dnSpyEx version
+      label: NetSpyEx version
       placeholder: 6.3.0
     validations:
       required: true

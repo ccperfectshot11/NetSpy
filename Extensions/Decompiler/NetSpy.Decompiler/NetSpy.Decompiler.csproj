@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  NetSpy: modern ILSpy decompiler engine, vendored from https://github.com/icsharpcode/ILSpy
+  (see ILSPY_VERSION.txt for the exact commit, LICENSE-ILSpy.txt for the MIT license).
+  Kept as source so NetSpy can patch it. Differences from upstream's project file:
+  - no NuGet packaging / SBOM / SourceLink / version-stamping script (DecompilerVersionInfo.cs is static)
+  - System.Reflection.Metadata / System.Collections.Immutable use NetSpy's $(DotNetPackageVersion)
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\..\NetSpyCommon.props" />
+
+  <PropertyGroup>
+    <!-- Override NetSpyCommon.props: netstandard2.0 is used by net48, net10.0-windows by the .NET build -->
+    <TargetFrameworks>netstandard2.0;net10.0-windows</TargetFrameworks>
+    <Features></Features>
+    <LangVersion>14</LangVersion>
+    <NeutralLanguage>en-US</NeutralLanguage>
+    <Product>NetSpy</Product>
+    <Company>ic#code</Company>
+    <Copyright>Copyright 2011-2026 AlphaSierraPapa</Copyright>
+
+    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <GenerateAssemblyVersionAttribute>False</GenerateAssemblyVersionAttribute>
+    <GenerateAssemblyFileVersionAttribute>False</GenerateAssemblyFileVersionAttribute>
+    <GenerateAssemblyInformationalVersionAttribute>False</GenerateAssemblyInformationalVersionAttribute>
+    <SignAssembly>True</SignAssembly>
+    <AssemblyOriginatorKeyFile>NetSpy.Decompiler.snk</AssemblyOriginatorKeyFile>
+    <NoWarn>$(NoWarn);1701;1702;1591;1573</NoWarn>
+    <WarningsAsErrors>nullable</WarningsAsErrors>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!-- The .NET 10 build: upstream only builds netstandard2.0 -->
+  <PropertyGroup Condition=" '$(TargetFramework)' == 'net10.0-windows' ">
+    <!-- The exceptions keep the netstandard2.0-compatible [Serializable] pattern (same behavior on both builds) -->
+    <NoWarn>$(NoWarn);SYSLIB0050;SYSLIB0051;CS0672</NoWarn>
+  </PropertyGroup>
+  <ItemGroup Condition=" '$(TargetFramework)' == 'net10.0-windows' ">
+    <!-- netstandard2.0 polyfills of types that .NET 10 already has (System.Index, nullable attributes) -->
+    <Compile Remove="Util\Index.cs" />
+    <Compile Remove="NRTAttributes.cs" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <CheckForOverflowUnderflow>True</CheckForOverflowUnderflow>
+    <DefineConstants>$(DefineConstants);STEP</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Collections.Immutable" Version="$(DotNetPackageVersion)" />
+    <PackageReference Include="System.Reflection.Metadata" Version="$(DotNetPackageVersion)" />
+  </ItemGroup>
+
+  <!-- Nullable annotations for the netstandard2.0 reference assemblies (same as upstream) -->
+  <ItemGroup Condition=" '$(TargetFramework)' == 'netstandard2.0' ">
+    <PackageReference Include="TunnelVisionLabs.ReferenceAssemblyAnnotator" Version="1.0.0-alpha.160" PrivateAssets="all" />
+    <PackageDownload Include="Microsoft.NETCore.App.Ref" Version="[8.0.0]" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetSpy.Decompiler.Generators\NetSpy.Decompiler.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Properties\DecompilerVersionInfo.template.cs" />
+    <None Include="NetSpy.Decompiler.snk" />
+    <None Include="LICENSE-MIT.txt" />
+    <None Include="ENGINE_VERSION.txt" />
+    <None Include="Metadata\ILOpCodes.tt" />
+    <None Include="IL\Instructions.tt" />
+    <None Include="Humanizer\LICENSE" />
+  </ItemGroup>
+
+</Project>

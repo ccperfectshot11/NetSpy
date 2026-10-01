@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading;
-using dnSpy.Contracts.Decompiler;
-using dnSpy.Contracts.Documents.Tabs.DocViewer;
-using dnSpy.Contracts.Documents.TreeView;
-using dnSpy.Contracts.Images;
-using dnSpy.Contracts.Text;
-using dnSpy.Contracts.TreeView;
+using NetSpy.Contracts.Decompiler;
+using NetSpy.Contracts.Documents.Tabs.DocViewer;
+using NetSpy.Contracts.Documents.TreeView;
+using NetSpy.Contracts.Images;
+using NetSpy.Contracts.Text;
+using NetSpy.Contracts.TreeView;
 
 // This file contains classes that create new child nodes of IAssemblyFileNode and IModuleFileNode
 
@@ -93,7 +93,7 @@ namespace Example2.Extension {
 
 		protected override void WriteCore(ITextColorWriter output, IDecompiler decompiler, DocumentNodeWriteOptions options) => output.Write(BoxedTextColor.Text, "Module Child");
 
-		// Gets called by dnSpy if there's only one node to decompile. This method gets called in a
+		// Gets called by NetSpy if there's only one node to decompile. This method gets called in a
 		// worker thread. The output is also cached unless you call IDocumentViewerOutput.DisableCaching().
 		public bool Decompile(IDecompileNodeContext context) {
 			// Pretend we actually do something...

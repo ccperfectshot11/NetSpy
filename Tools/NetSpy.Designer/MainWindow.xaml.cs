@@ -117,7 +117,7 @@ namespace NetSpy.Designer
 			var themes = ThemeExporter.FindThemesDirectory();
 			if (themes is null)
 			{
-				MessageBox.Show(this, "Nu am găsit sursa NetSpy (dnSpy.sln) deasupra folderului designerului.", Title);
+				MessageBox.Show(this, "Nu am găsit sursa NetSpy (NetSpy.sln) deasupra folderului designerului.", Title);
 				return;
 			}
 			try

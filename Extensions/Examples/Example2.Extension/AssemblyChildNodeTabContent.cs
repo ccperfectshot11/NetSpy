@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
-using dnSpy.Contracts.Documents.Tabs;
-using dnSpy.Contracts.Documents.TreeView;
-using dnSpy.Contracts.MVVM;
-using dnSpy.Contracts.Settings;
+using NetSpy.Contracts.Documents.Tabs;
+using NetSpy.Contracts.Documents.TreeView;
+using NetSpy.Contracts.MVVM;
+using NetSpy.Contracts.Settings;
 
 // This file adds custom document tab content when the user clicks on our new AssemblyChildNode tree node.
 // This node is created by TreeNodeDataProvider.cs.
@@ -87,7 +87,7 @@ namespace Example2.Extension {
 	sealed class AssemblyChildNodeUIContext : DocumentTabUIContext {
 		// The element inside UIObject that gets the focus when the tool window should be focused.
 		// If it's not as easy as calling FocusedElement.Focus() to focus it, you must implement
-		// dnSpy.Contracts.Controls.IFocusable.
+		// NetSpy.Contracts.Controls.IFocusable.
 		public override IInputElement? FocusedElement => content;
 
 		// The element in UIObject that gets the scale transform. null can be returned to disable scaling.

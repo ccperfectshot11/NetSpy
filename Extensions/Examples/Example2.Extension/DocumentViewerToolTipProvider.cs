@@ -1,5 +1,5 @@
-using dnSpy.Contracts.Documents.Tabs.DocViewer.ToolTips;
-using dnSpy.Contracts.Text;
+using NetSpy.Contracts.Documents.Tabs.DocViewer.ToolTips;
+using NetSpy.Contracts.Text;
 
 namespace Example2.Extension {
 	// This reference is added to the "decompiled" code by ModuleChildNode.Decompile()
@@ -9,7 +9,7 @@ namespace Example2.Extension {
 		public StringInfoReference(string msg) => Message = msg;
 	}
 
-	// Called by dnSpy to create a tooltip when hovering over a reference in the text editor
+	// Called by NetSpy to create a tooltip when hovering over a reference in the text editor
 	[ExportDocumentViewerToolTipProvider]
 	sealed class DocumentViewerToolTipProvider : IDocumentViewerToolTipProvider {
 		public object? Create(IDocumentViewerToolTipProviderContext context, object? @ref) {

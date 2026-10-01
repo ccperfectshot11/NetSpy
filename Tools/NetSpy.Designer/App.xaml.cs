@@ -57,7 +57,7 @@ namespace NetSpy.Designer
 				{
 					var doc = new Model.DesignDocument();
 					doc.Load(e.Args[x + 1]);
-					var themes = Model.ThemeExporter.FindThemesDirectory() ?? throw new DirectoryNotFoundException("Nu am găsit dnSpy.sln deasupra designerului.");
+					var themes = Model.ThemeExporter.FindThemesDirectory() ?? throw new DirectoryNotFoundException("Nu am găsit NetSpy.sln deasupra designerului.");
 					Model.ThemeExporter.Export(doc, themes);
 					Shutdown(0);
 				}
@@ -69,12 +69,12 @@ namespace NetSpy.Designer
 				return;
 			}
 
-			// "--convert-icons": iconițele ILSpy devin iconițele arborelui din NetSpy (dnSpy.Images\Images\*.xaml)
+			// "--convert-icons": iconițele NetSpy devin iconițele arborelui din NetSpy (NetSpy.Images\Images\*.xaml)
 			if (Array.IndexOf(e.Args, "--convert-icons") >= 0)
 			{
 				try
 				{
-					var images = Model.IconConverter.FindImagesDirectory() ?? throw new DirectoryNotFoundException("Nu am găsit dnSpy.sln deasupra designerului.");
+					var images = Model.IconConverter.FindImagesDirectory() ?? throw new DirectoryNotFoundException("Nu am găsit NetSpy.sln deasupra designerului.");
 					int count = Model.IconConverter.Convert(Path.Combine(AppContext.BaseDirectory, "Icons"), images);
 					File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "convert-icons.log"), $"{count} iconițe scrise în {images}");
 					Shutdown(0);

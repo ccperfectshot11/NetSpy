@@ -14,14 +14,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Randează iconițele SVG (ILSpy) în WPF. -->
+    <!-- Randează iconițele SVG (NetSpy) în WPF. -->
     <PackageReference Include="SharpVectors.Wpf" Version="1.8.6" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- Iconițele sunt copiate lângă .exe și citite ca text: așa le putem recolora pentru tema întunecată. -->
     <None Include="Icons\*.svg" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="Icons\LICENSE-ILSpy.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Icons\LICENSE-MIT.txt" CopyToOutputDirectory="PreserveNewest" />
     <Resource Include="Assets\NetSpy.ico" />
   </ItemGroup>
 

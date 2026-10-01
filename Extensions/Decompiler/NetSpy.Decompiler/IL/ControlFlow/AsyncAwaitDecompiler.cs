@@ -1,0 +1,2318 @@
+// Copyright (c) 2017 Daniel Grunwald
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal in the Software
+// without restriction, including without limitation the rights to use, copy, modify, merge,
+// publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+// to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or
+// substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
+
+using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Diagnostics;
+using System.Linq;
+using System.Reflection.Metadata;
+
+using NetSpy.Decompiler.CSharp;
+using NetSpy.Decompiler.DebugInfo;
+using NetSpy.Decompiler.Disassembler;
+using NetSpy.Decompiler.IL.Transforms;
+using NetSpy.Decompiler.Metadata;
+using NetSpy.Decompiler.TypeSystem;
+using NetSpy.Decompiler.TypeSystem.Implementation;
+using NetSpy.Decompiler.Util;
+
+namespace NetSpy.Decompiler.IL.ControlFlow
+{
+	/// <summary>
+	/// Decompiler step for C# 5 async/await.
+	/// </summary>
+	public class AsyncAwaitDecompiler : IILTransform
+	{
+		internal static bool IsCompilerGeneratedStateMachine(TypeDefinitionHandle type, MetadataReader metadata)
+		{
+			TypeDefinition td;
+			if (type.IsNil || (td = metadata.GetTypeDefinition(type)).GetDeclaringType().IsNil)
+				return false;
+			if (!(type.IsCompilerGenerated(metadata) || td.GetDeclaringType().IsCompilerGenerated(metadata)))
+				return false;
+			foreach (var i in td.GetInterfaceImplementations())
+			{
+				var tr = metadata.GetInterfaceImplementation(i).Interface.GetFullTypeName(metadata);
+				if (!tr.IsNested && tr.TopLevelTypeName.Namespace == "System.Runtime.CompilerServices" && tr.TopLevelTypeName.Name == "IAsyncStateMachine")
+					return true;
+			}
+			return false;
+		}
+
+		internal static bool IsCompilerGeneratedMainMethod(MetadataFile module, MethodDefinitionHandle method)
+		{
+			var metadata = module.Metadata;
+			var definition = metadata.GetMethodDefinition(method);
+			var entrypoint = System.Reflection.Metadata.Ecma335.MetadataTokens.MethodDefinitionHandle(module.CorHeader?.EntryPointTokenOrRelativeVirtualAddress ?? 0);
+			return method == entrypoint && metadata.GetString(definition.Name).Equals("<Main>", StringComparison.Ordinal);
+		}
+
+		static bool IsCalledByEntryPoint(MetadataFile module, MethodDefinitionHandle method)
+		{
+			var entrypoint = System.Reflection.Metadata.Ecma335.MetadataTokens.MethodDefinitionHandle(module.CorHeader?.EntryPointTokenOrRelativeVirtualAddress ?? 0);
+			if (entrypoint.IsNil || !IsCompilerGeneratedMainMethod(module, entrypoint))
+				return false;
+			var shim = module.Metadata.GetMethodDefinition(entrypoint);
+			if (shim.RelativeVirtualAddress == 0)
+				return false;
+			var blob = module.GetMethodBody(shim.RelativeVirtualAddress).GetILReader();
+			while (blob.RemainingBytes > 0)
+			{
+				var code = blob.DecodeOpCode();
+				if (code != ILOpCode.Call)
+				{
+					blob.SkipOperand(code);
+					continue;
+				}
+				if (MetadataTokenHelpers.EntityHandleOrNil(blob.ReadInt32()) == method)
+					return true;
+			}
+			return false;
+		}
+
+		enum AsyncMethodType
+		{
+			Void,
+			Task,
+			TaskOfT,
+			AsyncEnumerator,
+			AsyncEnumerable
+		}
+
+		ILTransformContext context;
+
+		// These fields are set by MatchTaskCreationPattern() or MatchEnumeratorCreationNewObj()
+		IType taskType; // return type of the async method; or IAsyncEnumerable{T}/IAsyncEnumerator{T}
+		IType underlyingReturnType; // return type of the method (only the "T" for Task{T}), for async enumerators this is the type being yielded
+		AsyncMethodType methodType;
+		ITypeDefinition stateMachineType;
+		IType builderType;
+		IField builderField;
+		IField stateField;
+		int initialState;
+		Dictionary<IField, ILVariable> fieldToParameterMap = new Dictionary<IField, ILVariable>();
+		Dictionary<ILVariable, ILVariable> cachedFieldToParameterMap = new Dictionary<ILVariable, ILVariable>();
+		IField disposeModeField; // 'disposeMode' field (IAsyncEnumerable/IAsyncEnumerator only)
+
+		// These fields are set by AnalyzeMoveNext():
+		ILFunction moveNextFunction;
+		ILVariable cachedStateVar; // variable in MoveNext that caches the stateField.
+		TryCatch mainTryCatch;
+		Block setResultReturnBlock; // block that is jumped to for return statements
+									// Note: for async enumerators, a jump to setResultReturnBlock is a 'yield break;'
+		int finalState;       // final state after the setResultAndExitBlock
+		bool finalStateKnown;
+		ILVariable resultVar; // the variable that gets returned by the setResultAndExitBlock
+		Block setResultYieldBlock; // block that is jumped to for 'yield return' statements
+		ILVariable doFinallyBodies;
+
+		// These fields are set by AnalyzeStateMachine():
+		int smallestAwaiterVarIndex;
+		HashSet<Leave> moveNextLeaves = new HashSet<Leave>();
+
+		// For each block containing an 'await', stores the awaiter variable, and the field storing the awaiter
+		// across the yield point.
+		Dictionary<Block, (ILVariable awaiterVar, IField awaiterField)> awaitBlocks = new Dictionary<Block, (ILVariable awaiterVar, IField awaiterField)>();
+
+		bool isVisualBasicStateMachine;
+
+		int catchHandlerOffset;
+		List<AsyncDebugInfo.Await> awaitDebugInfos = new List<AsyncDebugInfo.Await>();
+
+		public void Run(ILFunction function, ILTransformContext context)
+		{
+			if (!context.Settings.AsyncAwait)
+				return; // abort if async/await decompilation is disabled
+			this.context = context;
+			catchHandlerOffset = -1;
+			fieldToParameterMap.Clear();
+			cachedFieldToParameterMap.Clear();
+			awaitBlocks.Clear();
+			awaitDebugInfos.Clear();
+			moveNextLeaves.Clear();
+			if (!MatchTaskCreationPattern(function) && !MatchAsyncEnumeratorCreationPattern(function))
+			{
+				if (function.IsAsync)
+				{
+					TranslateThisCopyAccess(function);
+					RuntimeAsyncManualAwaitTransform.Run(function, context);
+					RuntimeAsyncExceptionRewriteTransform.Run(function, context);
+				}
+				return;
+			}
+			try
+			{
+				AnalyzeMoveNext();
+				ValidateCatchBlock();
+				AnalyzeDisposeAsync();
+			}
+			catch (SymbolicAnalysisFailedException)
+			{
+				return;
+			}
+
+			InlineBodyOfMoveNext(function);
+			function.CheckInvariant(ILPhase.InAsyncAwait, context.TypeSystem);
+			CleanUpBodyOfMoveNext(function);
+			function.CheckInvariant(ILPhase.InAsyncAwait, context.TypeSystem);
+
+			AnalyzeStateMachine(function);
+			DetectAwaitPattern(function);
+			CleanDoFinallyBodies(function);
+
+			context.Step("Translate fields to local accesses", function);
+			YieldReturnDecompiler.TranslateFieldsToLocalAccess(function, function, fieldToParameterMap);
+			TranslateCachedFieldsToLocals();
+
+			FinalizeInlineMoveNext(function);
+			if (methodType == AsyncMethodType.AsyncEnumerable || methodType == AsyncMethodType.AsyncEnumerator)
+			{
+				((BlockContainer)function.Body).ExpectedResultType = context.TypeSystem.FindType(KnownTypeCode.Void);
+			}
+			else
+			{
+				((BlockContainer)function.Body).ExpectedResultType = underlyingReturnType;
+			}
+
+			// Re-run control flow simplification over the newly constructed set of gotos,
+			// and inlining because TranslateFieldsToLocalAccess() might have opened up new inlining opportunities.
+			function.RunTransforms(CSharpDecompiler.EarlyILTransforms(), context);
+
+			if (!isVisualBasicStateMachine)
+			{
+				context.StepStartGroup("AwaitInCatchTransform");
+				AwaitInCatchTransform.Run(function, context);
+				context.StepEndGroup();
+				context.StepStartGroup("AwaitInFinallyTransform");
+				AwaitInFinallyTransform.Run(function, context);
+				context.StepEndGroup();
+			}
+
+			awaitDebugInfos.SortBy(row => row.YieldOffset);
+			// The catchHandlerOffset marks the compiler-generated catch block. We need to distinguish
+			// a few cases:
+			// 1) async void methods always record the offset
+			// 2) the kickoff method of the async Main entry point always records the offset
+			// 3) in all the other cases nothing (-1) is emitted by csc.
+			var kickoff = function.Method?.MetadataToken ?? default;
+			bool recordCatchHandler = methodType == AsyncMethodType.Void
+				|| (kickoff.Kind == HandleKind.MethodDefinition
+					&& IsCalledByEntryPoint(context.PEFile, (MethodDefinitionHandle)kickoff));
+			function.AsyncDebugInfo = new AsyncDebugInfo(recordCatchHandler ? catchHandlerOffset : -1,
+				awaitDebugInfos.ToImmutableArray());
+		}
+
+		// Runtime-async analog of fieldToParameterMap's `<>4__this` capture: in a struct method,
+		// Roslyn lowers `this` references to a single ldobj at function entry stored into a local.
+		// Match the entry instruction `stloc V_X(ldobj T(ldloc this))` and rewrite every later
+		// `ldloc V_X` / `ldloca V_X` to go through the `this` parameter again, so AST emission
+		// renders accesses as plain `this.field` / `field` rather than `<copy>.field`.
+		static bool TranslateThisCopyAccess(ILFunction function)
+		{
+			// Only applies to struct methods — that's the only shape where Roslyn copies *this
+			// at entry to keep the managed ref off the async resume path.
+			if (function.Method?.DeclaringTypeDefinition?.Kind != TypeKind.Struct)
+				return false;
+			var thisParam = function.Variables.FirstOrDefault(v => v.Kind == VariableKind.Parameter && v.Index == -1);
+			if (thisParam == null)
+				return false;
+			if (thisParam.Type is not ByReferenceType thisRef)
+				return false;
+			if (function.Body is not BlockContainer body || body.Blocks.Count == 0)
+				return false;
+			var entry = body.EntryPoint;
+			if (entry.Instructions.Count == 0)
+				return false;
+			if (!entry.Instructions[0].MatchStLoc(out var copyVar, out var copyValue))
+				return false;
+			if (copyVar.Kind != VariableKind.Local)
+				return false;
+			if (copyVar.StoreInstructions.Count != 1)
+				return false;
+			if (copyValue is not LdObj ldobj)
+				return false;
+			if (!ldobj.Target.MatchLdLoc(thisParam))
+				return false;
+			if (!copyVar.Type.Equals(ldobj.Type) || !thisRef.ElementType.Equals(ldobj.Type))
+				return false;
+
+			foreach (var ldloc in function.Descendants.OfType<LdLoc>().ToArray())
+			{
+				if (ldloc.Variable != copyVar)
+					continue;
+				ldloc.ReplaceWith(new LdObj(new LdLoc(thisParam), ldobj.Type).WithILRange(ldloc));
+			}
+			foreach (var ldloca in function.Descendants.OfType<LdLoca>().ToArray())
+			{
+				if (ldloca.Variable != copyVar)
+					continue;
+				ldloca.ReplaceWith(new LdLoc(thisParam).WithILRange(ldloca));
+			}
+
+			entry.Instructions.RemoveAt(0);
+			return true;
+		}
+
+		private void CleanUpBodyOfMoveNext(ILFunction function)
+		{
+			context.StepStartGroup("CleanUpBodyOfMoveNext", function);
+			// Copy-propagate stack slots holding an 'ldloca':
+			foreach (var stloc in function.Descendants.OfType<StLoc>().Where(s => s.Variable.Kind == VariableKind.StackSlot && s.Variable.IsSingleDefinition && s.Value is LdLoca).ToList())
+			{
+				CopyPropagation.Propagate(stloc, context);
+			}
+
+			// Simplify stobj(ldloca) -> stloc
+			foreach (var stobj in function.Descendants.OfType<StObj>())
+			{
+				EarlyExpressionTransforms.StObjToStLoc(stobj, context);
+			}
+
+			if (isVisualBasicStateMachine)
+			{
+				// Visual Basic state machines often contain stack slots for ldflda instruction for the builder field.
+				// This messes up the matching code in AnalyzeAwaitBlock() and causes it to fail.
+				// Propagating these stack stores makes the matching code work without the need for a lot of
+				// additional matching code to handle these stack slots.
+				foreach (var stloc in function.Descendants.OfType<StLoc>().Where(s => s.Variable.Kind == VariableKind.StackSlot && s.Variable.IsSingleDefinition
+							&& s.Value.MatchLdFlda(out var target, out var field) && field.Equals(builderField) && target.MatchLdThis()).ToList())
+				{
+					CopyPropagation.Propagate(stloc, context);
+				}
+
+				// Remove lone 'ldc.i4', present in older Roslyn VB compiler output
+				foreach (var block in function.Descendants.OfType<Block>())
+					block.Instructions.RemoveAll(inst => inst.OpCode == OpCode.LdcI4);
+			}
+
+			// Copy-propagate temporaries holding a copy of 'this'.
+			foreach (var stloc in function.Descendants.OfType<StLoc>().Where(s => s.Variable.IsSingleDefinition && s.Value.MatchLdThis()).ToList())
+			{
+				CopyPropagation.Propagate(stloc, context);
+			}
+			new RemoveDeadVariableInit().Run(function, context);
+			foreach (var block in function.Descendants.OfType<Block>())
+			{
+				// Run inlining, but don't remove dead variables (they might get revived by TranslateFieldsToLocalAccess)
+				ILInlining.InlineAllInBlock(function, block, InliningOptions.None, context);
+				if (IsAsyncEnumerator)
+				{
+					// Remove lone 'ldc.i4', those are sometimes left over after C# compiler
+					// optimizes out stores to the state variable.
+					block.Instructions.RemoveAll(inst => inst.OpCode == OpCode.LdcI4);
+				}
+			}
+			context.StepEndGroup();
+		}
+
+		#region MatchTaskCreationPattern
+		bool MatchTaskCreationPattern(ILFunction function)
+		{
+			if (!(function.Body is BlockContainer blockContainer))
+				return false;
+			if (blockContainer.Blocks.Count != 1)
+				return false;
+			var body = blockContainer.EntryPoint.Instructions;
+			if (body.Count < 4)
+				return false;
+			/* Example:
+				V_0 is an instance of the compiler-generated struct/class,
+				V_1 is an instance of the builder struct/class
+				Block IL_0000 (incoming: 1)  {
+					...
+					stobj AsyncVoidMethodBuilder(ldflda [Field Async+<AwaitYield>d__3.<>t__builder](ldloca V_0), call Create())
+					stobj System.Int32(ldflda [Field Async+<AwaitYield>d__3.<>1__state](ldloca V_0), ldc.i4 -1)
+					stloc V_1(ldobj System.Runtime.CompilerServices.AsyncVoidMethodBuilder(ldflda [Field Async+<AwaitYield>d__3.<>t__builder](ldloc V_0)))
+					call Start(ldloca V_1, ldloca V_0)
+					leave IL_0000 (or ret for non-void async methods)
+				}
+				With custom task types, it's possible that the builder is a reference type.
+				In that case, the variable V_1 may be inlined.
+			*/
+
+			// Check the second-to-last instruction (the start call) first, as we can get the most information from that
+			int pos = body.Count - 2;
+			if (!(body[pos] is CallInstruction startCall))
+				return false;
+			if (startCall.Method.Name != "Start")
+				return false;
+			taskType = function.Method.ReturnType;
+			builderType = startCall.Method.DeclaringType;
+			FullTypeName builderTypeName;
+			if (builderType?.GetDefinitionOrUnknown() is { } builderTypeDef)
+			{
+				builderTypeName = builderTypeDef.FullTypeName;
+			}
+			else
+			{
+				return false;
+			}
+			if (taskType.IsKnownType(KnownTypeCode.Void))
+			{
+				methodType = AsyncMethodType.Void;
+				underlyingReturnType = taskType;
+				if (builderTypeName != new TopLevelTypeName("System.Runtime.CompilerServices", "AsyncVoidMethodBuilder"))
+					return false;
+			}
+			else if (TaskType.IsNonGenericTaskType(taskType, out var builderTypeNameFromTask))
+			{
+				methodType = AsyncMethodType.Task;
+				underlyingReturnType = context.TypeSystem.FindType(KnownTypeCode.Void);
+				if (builderTypeNameFromTask != builderTypeName)
+					return false;
+			}
+			else if (TaskType.IsGenericTaskType(taskType, out builderTypeNameFromTask))
+			{
+				methodType = AsyncMethodType.TaskOfT;
+				if (taskType.IsKnownType(KnownTypeCode.TaskOfT))
+					underlyingReturnType = TaskType.UnpackTask(context.TypeSystem, taskType);
+				else
+					underlyingReturnType = startCall.Method.DeclaringType.TypeArguments[0];
+				if (builderTypeNameFromTask != builderTypeName)
+					return false;
+			}
+			else
+			{
+				return false;
+			}
+			if (startCall.Arguments.Count != 2)
+				return false;
+			ILInstruction loadBuilderExpr = startCall.Arguments[0];
+			if (!startCall.Arguments[1].MatchLdLoca(out ILVariable stateMachineVar))
+				return false;
+			stateMachineType = stateMachineVar.Type.GetDefinition();
+			if (stateMachineType == null)
+				return false;
+			pos--;
+
+			if (loadBuilderExpr.MatchLdLocRef(out ILVariable builderVar))
+			{
+				// Check third-to-last instruction (copy of builder)
+				// stloc builder(ldfld StateMachine::<>t__builder(ldloc stateMachine))
+				if (!body[pos].MatchStLoc(builderVar, out loadBuilderExpr))
+					return false;
+				pos--;
+			}
+			if (loadBuilderExpr.MatchLdFld(out var loadStateMachineForBuilderExpr, out builderField))
+			{
+				// OK, calling Start on copy of stateMachine.<>t__builder
+			}
+			else if (loadBuilderExpr.MatchLdFlda(out loadStateMachineForBuilderExpr, out builderField))
+			{
+				// OK, Roslyn 3.6 started directly calling Start without making a copy
+			}
+			else
+			{
+				return false;
+			}
+			builderField = (IField)builderField.MemberDefinition;
+			if (!(loadStateMachineForBuilderExpr.MatchLdLocRef(stateMachineVar) || loadStateMachineForBuilderExpr.MatchLdLoc(stateMachineVar)))
+				return false;
+
+			// Check the last instruction (ret)
+			if (methodType == AsyncMethodType.Void)
+			{
+				if (!body.Last().MatchLeave(blockContainer))
+					return false;
+			}
+			else
+			{
+				// ret(call(AsyncTaskMethodBuilder::get_Task, ldflda(StateMachine::<>t__builder, ldloca(stateMachine))))
+				if (!body.Last().MatchReturn(out var returnValue))
+					return false;
+				if (!MatchCall(returnValue, "get_Task", out var getTaskArgs) || getTaskArgs.Count != 1)
+					return false;
+				ILInstruction target;
+				IField builderField2;
+				if (builderType.IsReferenceType == true)
+				{
+					if (!getTaskArgs[0].MatchLdFld(out target, out builderField2))
+						return false;
+				}
+				else
+				{
+					if (!getTaskArgs[0].MatchLdFlda(out target, out builderField2))
+						return false;
+				}
+				if (builderField2.MemberDefinition != builderField)
+					return false;
+				if (!(target.MatchLdLoc(stateMachineVar) || target.MatchLdLoca(stateMachineVar)))
+					return false;
+			}
+
+			if (IsPotentialVisualBasicStateMachineInitialiation(body[0], stateMachineVar))
+			{
+				// Visual Basic compiler uses a different order of field assignements
+				if (MatchVisualBasicStateMachineFieldAssignements(body, stateMachineVar))
+				{
+					isVisualBasicStateMachine = true;
+					return true;
+				}
+				// If the Visual Basic matching code failed, reset the map in case it
+				// was partially populated and try matching the C# state machine initialization.
+				fieldToParameterMap.Clear();
+			}
+
+			// Check the last field assignment - this should be the state field
+			// stfld <>1__state(ldloca stateField, ldc.i4 -1)
+			if (!MatchStFld(body[pos], stateMachineVar, out stateField, out var initialStateExpr))
+				return false;
+			if (!initialStateExpr.MatchLdcI4(out initialState))
+				return false;
+			if (initialState != -1)
+				return false;
+
+			int stopPos = pos;
+			pos = 0;
+			if (stateMachineType.Kind == TypeKind.Class)
+			{
+				// If state machine is a class, the first instruction creates an instance:
+				// stloc stateMachine(newobj StateMachine.ctor())
+				if (!body[pos].MatchStLoc(stateMachineVar, out var init))
+					return false;
+				if (!(init is NewObj newobj && newobj.Arguments.Count == 0 && newobj.Method.DeclaringTypeDefinition == stateMachineType))
+					return false;
+				pos++;
+			}
+			bool builderFieldIsInitialized = false;
+			for (; pos < stopPos; pos++)
+			{
+				// stfld StateMachine.field(ldloca stateMachine, ldvar(param))
+				if (!MatchStFld(body[pos], stateMachineVar, out var field, out var fieldInit))
+					return false;
+				if (field == builderField)
+				{
+					// stfld StateMachine.builder(ldloca stateMachine, call Create())
+					if (!(fieldInit is Call { Method: { Name: "Create" }, Arguments: { Count: 0 } }))
+						return false;
+					builderFieldIsInitialized = true;
+				}
+				else if (fieldInit.MatchLdLoc(out var v) && v.Kind == VariableKind.Parameter)
+				{
+					// OK, copies parameter into state machine
+					fieldToParameterMap[field] = v;
+				}
+				else if (fieldInit is LdObj ldobj && ldobj.Target.MatchLdThis())
+				{
+					// stfld <>4__this(ldloc stateMachine, ldobj AsyncInStruct(ldloc this))
+					fieldToParameterMap[field] = ((LdLoc)ldobj.Target).Variable;
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			return builderFieldIsInitialized;
+		}
+
+		bool IsPotentialVisualBasicStateMachineInitialiation(ILInstruction inst, ILVariable stateMachineVar)
+		{
+			// stobj VB$StateMachine(ldloca stateMachine, default.value VB$StateMachine)
+			// Used by VBC (Debug and Release) and Roslyn VB (Release) builds
+			if (inst.MatchStObj(out var target, out var val, out var type1) && target.MatchLdLoca(stateMachineVar) &&
+				val.MatchDefaultValue(out var type2) && type1.Equals(type2))
+				return true;
+			// stloc stateMachine(newobj VB$StateMachine..ctor())
+			// Used by Roslyn VB (Debug) builds
+			if (inst.MatchStLoc(stateMachineVar, out var init) && init is NewObj newObj && newObj.Arguments.Count == 0 &&
+				stateMachineType.Equals(newObj.Method.DeclaringTypeDefinition))
+				return true;
+			return false;
+		}
+
+		bool MatchVisualBasicStateMachineFieldAssignements(IList<ILInstruction> body, ILVariable stateMachineVar)
+		{
+			// stfld $State(ldloca stateField, ldc.i4 -1)
+			if (!MatchStFld(body[body.Count - 4], stateMachineVar, out stateField, out var initialStateExpr))
+				return false;
+			if (!initialStateExpr.MatchLdcI4(out initialState))
+				return false;
+			if (initialState != -1)
+				return false;
+
+			// stfld $Builder(ldloca stateMachine, call Create())
+			if (!MatchStFld(body[body.Count - 3], stateMachineVar, out var builderField2, out var fieldInit))
+				return false;
+			if (!builderField.Equals(builderField2))
+				return false;
+			if (fieldInit is not Call { Method: { Name: "Create" }, Arguments: { Count: 0 } })
+				return false;
+
+			for (int i = 1; i < body.Count - 4; i++)
+			{
+				if (!MatchStFld(body[i], stateMachineVar, out var field, out fieldInit))
+					return false;
+				// Legacy Visual Basic compiler can emit a call to RuntimeHelpers.GetObjectValue here
+				if (fieldInit is Call call && call.Arguments.Count == 1 && call.Method.IsStatic && call.Method.Name == "GetObjectValue")
+					fieldInit = call.Arguments[0];
+				if (fieldInit.MatchLdLoc(out var v) && v.Kind == VariableKind.Parameter)
+				{
+					// OK, copies parameter into state machine
+					fieldToParameterMap[field] = v;
+				}
+				else if (fieldInit is LdObj ldobj && ldobj.Target.MatchLdThis())
+				{
+					// stfld <>4__this(ldloc stateMachine, ldobj AsyncInStruct(ldloc this))
+					fieldToParameterMap[field] = ((LdLoc)ldobj.Target).Variable;
+				}
+				else
+					return false;
+			}
+			return true;
+		}
+
+		/// <summary>
+		/// Matches a (potentially virtual) instance method call.
+		/// </summary>
+		static bool MatchCall(ILInstruction inst, string name, out InstructionCollection<ILInstruction> args)
+		{
+			if (inst is CallInstruction call && (call.OpCode == OpCode.Call || call.OpCode == OpCode.CallVirt)
+				&& call.Method.Name == name && !call.Method.IsStatic)
+			{
+				args = call.Arguments;
+				return args.Count > 0;
+			}
+			args = null;
+			return false;
+		}
+
+		/// <summary>
+		/// Matches a store to the state machine.
+		/// </summary>
+		static bool MatchStFld(ILInstruction stfld, ILVariable stateMachineVar, out IField field, out ILInstruction value)
+		{
+			if (!stfld.MatchStFld(out var target, out field, out value))
+				return false;
+			field = field.MemberDefinition as IField;
+			return field != null && target.MatchLdLocRef(stateMachineVar);
+		}
+		#endregion
+
+		#region MatchAsyncEnumeratorCreationPattern
+		private bool MatchAsyncEnumeratorCreationPattern(ILFunction function)
+		{
+			if (!context.Settings.AsyncEnumerator)
+				return false;
+			taskType = function.ReturnType;
+			if (taskType.IsKnownType(KnownTypeCode.IAsyncEnumeratorOfT))
+			{
+				methodType = AsyncMethodType.AsyncEnumerator;
+			}
+			else if (taskType.IsKnownType(KnownTypeCode.IAsyncEnumerableOfT))
+			{
+				methodType = AsyncMethodType.AsyncEnumerable;
+			}
+			else
+			{
+				return false;
+			}
+			underlyingReturnType = taskType.TypeArguments.Single();
+			if (!(function.Body is BlockContainer blockContainer))
+				return false;
+			if (blockContainer.Blocks.Count != 1)
+				return false;
+			var body = blockContainer.EntryPoint;
+			if (body.Instructions.Count == 1)
+			{
+				// No parameters passed to enumerator (not even 'this'):
+				// ret(newobj(...))
+				if (!body.Instructions[0].MatchReturn(out var newObj))
+					return false;
+				if (MatchEnumeratorCreationNewObj(newObj, context, out initialState, out stateMachineType))
+				{
+					// HACK: the normal async/await logic expects 'initialState' to be the 'in progress' state
+					initialState = -1;
+					try
+					{
+						AnalyzeEnumeratorCtor(((NewObj)newObj).Method, context, out builderField, out builderType, out stateField);
+					}
+					catch (SymbolicAnalysisFailedException)
+					{
+						return false;
+					}
+					return true;
+				}
+				else
+				{
+					return false;
+				}
+			}
+			else
+			{
+
+				// stloc v(newobj<CountUpSlowly> d__0..ctor(ldc.i4 - 2))
+				// stfld <>4__this(ldloc v, ldloc this)
+				// stfld <>3__otherParam(ldloc v, ldloc otherParam)
+				// leave IL_0000(ldloc v)
+				int pos = 0;
+				if (!body.Instructions[pos].MatchStLoc(out var v, out var newObj))
+					return false;
+				if (!MatchEnumeratorCreationNewObj(newObj, context, out initialState, out stateMachineType))
+					return false;
+				pos++;
+
+				while (MatchStFld(body.Instructions[pos], v, out var field, out var value))
+				{
+					if (value.MatchLdLoc(out var p) && p.Kind == VariableKind.Parameter)
+					{
+						fieldToParameterMap[field] = p;
+					}
+					else if (value is LdObj ldobj && ldobj.Target.MatchLdThis())
+					{
+						fieldToParameterMap[field] = ((LdLoc)ldobj.Target).Variable;
+					}
+					else
+					{
+						return false;
+					}
+					pos++;
+				}
+				if (!body.Instructions[pos].MatchReturn(out var returnValue))
+					return false;
+				if (!returnValue.MatchLdLoc(v))
+					return false;
+
+				// HACK: the normal async/await logic expects 'initialState' to be the 'in progress' state
+				initialState = -1;
+				try
+				{
+					AnalyzeEnumeratorCtor(((NewObj)newObj).Method, context, out builderField, out builderType, out stateField);
+					if (methodType == AsyncMethodType.AsyncEnumerable)
+					{
+						ResolveIEnumerableIEnumeratorFieldMapping();
+					}
+				}
+				catch (SymbolicAnalysisFailedException)
+				{
+					return false;
+				}
+				return true;
+			}
+		}
+
+		static bool MatchEnumeratorCreationNewObj(ILInstruction inst, ILTransformContext context,
+			out int initialState, out ITypeDefinition stateMachineType)
+		{
+			initialState = default;
+			stateMachineType = default;
+			// newobj(CurrentType/...::.ctor, ldc.i4(-2))
+			if (!(inst is NewObj newObj))
+				return false;
+			if (newObj.Arguments.Count != 1)
+				return false;
+			if (!newObj.Arguments[0].MatchLdcI4(out initialState))
+				return false;
+			stateMachineType = newObj.Method.DeclaringTypeDefinition;
+			if (stateMachineType == null)
+				return false;
+			if (stateMachineType.DeclaringTypeDefinition != context.Function.Method.DeclaringTypeDefinition)
+				return false;
+			return IsCompilerGeneratorAsyncEnumerator(
+				(TypeDefinitionHandle)stateMachineType.MetadataToken,
+				context.TypeSystem.MainModule.metadata);
+		}
+
+		public static bool IsCompilerGeneratorAsyncEnumerator(TypeDefinitionHandle type, MetadataReader metadata)
+		{
+			TypeDefinition td;
+			if (type.IsNil || !type.IsCompilerGeneratedOrIsInCompilerGeneratedClass(metadata) || (td = metadata.GetTypeDefinition(type)).GetDeclaringType().IsNil)
+				return false;
+			foreach (var i in td.GetInterfaceImplementations())
+			{
+				var tr = metadata.GetInterfaceImplementation(i).Interface.GetFullTypeName(metadata);
+				if (!tr.IsNested && tr.TopLevelTypeName.Namespace == "System.Collections.Generic" && tr.TopLevelTypeName.Name == "IAsyncEnumerator" && tr.TopLevelTypeName.TypeParameterCount == 1)
+					return true;
+			}
+			return false;
+		}
+
+		static void AnalyzeEnumeratorCtor(IMethod ctor, ILTransformContext context, out IField builderField, out IType builderType, out IField stateField)
+		{
+			builderField = null;
+			stateField = null;
+
+			var ctorHandle = (MethodDefinitionHandle)ctor.MetadataToken;
+			Block body = YieldReturnDecompiler.SingleBlock(YieldReturnDecompiler.CreateILAst(ctorHandle, context).Body);
+			if (body == null)
+				throw new SymbolicAnalysisFailedException("Missing enumeratorCtor.Body");
+			// Block IL_0000 (incoming: 1) {
+			//   call Object..ctor(ldloc this)
+			// 	 stfld <>1__state(ldloc this, ldloc <>1__state)
+			// 	 stfld <>t__builder(ldloc this, call Create())
+			// 	 leave IL_0000 (nop)
+			// }
+			foreach (var inst in body.Instructions)
+			{
+				if (inst.MatchStFld(out var target, out var field, out var value)
+				&& target.MatchLdThis()
+				&& value.MatchLdLoc(out var arg)
+				&& arg.Kind == VariableKind.Parameter && arg.Index == 0)
+				{
+					stateField = (IField)field.MemberDefinition;
+				}
+				if (inst.MatchStFld(out target, out field, out value)
+					&& target.MatchLdThis()
+					&& value is Call call && call.Method.Name == "Create")
+				{
+					builderField = (IField)field.MemberDefinition;
+				}
+			}
+			if (stateField == null || builderField == null)
+				throw new SymbolicAnalysisFailedException();
+
+			builderType = builderField.Type;
+			if (builderType == null)
+				throw new SymbolicAnalysisFailedException();
+		}
+
+		private void ResolveIEnumerableIEnumeratorFieldMapping()
+		{
+			var getAsyncEnumerator = stateMachineType.Methods.FirstOrDefault(m => m.Name.EndsWith(".GetAsyncEnumerator", StringComparison.Ordinal));
+			if (getAsyncEnumerator == null)
+				throw new SymbolicAnalysisFailedException();
+			YieldReturnDecompiler.ResolveIEnumerableIEnumeratorFieldMapping((MethodDefinitionHandle)getAsyncEnumerator.MetadataToken, context, fieldToParameterMap);
+		}
+		#endregion
+
+		#region AnalyzeMoveNext
+		/// <summary>
+		/// First peek into MoveNext(); analyzes everything outside the big try-catch.
+		/// </summary>
+		void AnalyzeMoveNext()
+		{
+			if (stateMachineType.MetadataToken.IsNil)
+				throw new SymbolicAnalysisFailedException();
+			var metadata = context.PEFile.Metadata;
+			var moveNextMethod = metadata.GetTypeDefinition((TypeDefinitionHandle)stateMachineType.MetadataToken)
+				.GetMethods().FirstOrDefault(f => metadata.GetString(metadata.GetMethodDefinition(f).Name) == "MoveNext");
+			// NetSpy: a handle is a struct, 'FirstOrDefault()' returns a nil handle, never null
+			if (moveNextMethod.IsNil)
+				throw new SymbolicAnalysisFailedException();
+			moveNextFunction = YieldReturnDecompiler.CreateILAst(moveNextMethod, context);
+			if (!(moveNextFunction.Body is BlockContainer blockContainer))
+				throw new SymbolicAnalysisFailedException();
+			if (blockContainer.EntryPoint.IncomingEdgeCount != 1)
+				throw new SymbolicAnalysisFailedException();
+			bool[] blocksAnalyzed = new bool[blockContainer.Blocks.Count];
+			cachedStateVar = null;
+			int pos = 0;
+			// Visual Basic state machines initialize doFinallyBodies at the start of MoveNext()
+			// stloc doFinallyBodies(ldc.i4 1)
+			if (isVisualBasicStateMachine && blockContainer.EntryPoint.Instructions[pos].MatchStLoc(out var v, out var ldci4) &&
+				ldci4.MatchLdcI4(1))
+			{
+				doFinallyBodies = v;
+				pos++;
+			}
+			while (blockContainer.EntryPoint.Instructions[pos] is StLoc stloc)
+			{
+				// stloc V_1(ldfld <>4__this(ldloc this))
+				if (!stloc.Value.MatchLdFld(out var target, out var field))
+					throw new SymbolicAnalysisFailedException();
+				if (!target.MatchLdThis())
+					throw new SymbolicAnalysisFailedException();
+				if (field.MemberDefinition == stateField && cachedStateVar == null)
+				{
+					// stloc(cachedState, ldfld(valuetype StateMachineStruct::<>1__state, ldloc(this)))
+					cachedStateVar = stloc.Variable;
+				}
+				else if (fieldToParameterMap.TryGetValue((IField)field.MemberDefinition, out var param))
+				{
+					if (!stloc.Variable.IsSingleDefinition)
+						throw new SymbolicAnalysisFailedException();
+					cachedFieldToParameterMap[stloc.Variable] = param;
+				}
+				else
+				{
+					throw new SymbolicAnalysisFailedException();
+				}
+				pos++;
+			}
+			mainTryCatch = blockContainer.EntryPoint.Instructions[pos] as TryCatch;
+			if (mainTryCatch == null)
+				throw new SymbolicAnalysisFailedException();
+			// CatchHandler will be validated in ValidateCatchBlock()
+
+			// stloc doFinallyBodies(ldc.i4 1)
+			if (((BlockContainer)mainTryCatch.TryBlock).EntryPoint.Instructions[0] is StLoc initDoFinallyBodies
+				&& initDoFinallyBodies.Variable.Kind == VariableKind.Local
+				&& initDoFinallyBodies.Variable.Type.IsKnownType(KnownTypeCode.Boolean)
+				&& initDoFinallyBodies.Value.MatchLdcI4(1))
+			{
+				doFinallyBodies = initDoFinallyBodies.Variable;
+			}
+
+			Debug.Assert(blockContainer.Blocks[0] == blockContainer.EntryPoint); // already checked this block
+			blocksAnalyzed[0] = true;
+			pos = 1;
+			if (MatchYieldBlock(blockContainer, pos))
+			{
+				setResultYieldBlock = blockContainer.Blocks[pos];
+				blocksAnalyzed[pos] = true;
+				pos++;
+			}
+			else
+			{
+				setResultYieldBlock = null;
+			}
+
+			setResultReturnBlock = CheckSetResultReturnBlock(blockContainer, pos, blocksAnalyzed);
+
+			if (!blocksAnalyzed.All(b => b))
+				throw new SymbolicAnalysisFailedException("too many blocks");
+		}
+
+		private bool IsAsyncEnumerator => methodType == AsyncMethodType.AsyncEnumerable || methodType == AsyncMethodType.AsyncEnumerator;
+
+		bool MatchYieldBlock(BlockContainer blockContainer, int pos)
+		{
+			if (!IsAsyncEnumerator)
+				return false;
+			var block = blockContainer.Blocks.ElementAtOrDefault(pos);
+			if (block == null)
+				return false;
+			// call SetResult(ldflda <>v__promiseOfValueOrEnd(ldloc this), ldc.i4 1)
+			// leave IL_0000(nop)
+			if (block.Instructions.Count != 2)
+				return false;
+			if (!MatchCall(block.Instructions[0], "SetResult", out var args))
+				return false;
+			if (args.Count != 2)
+				return false;
+			if (!IsBuilderOrPromiseFieldOnThis(args[0]))
+				return false;
+			if (!args[1].MatchLdcI4(1))
+				return false;
+			return block.Instructions[1].MatchLeave(blockContainer);
+		}
+
+		private Block CheckSetResultReturnBlock(BlockContainer blockContainer, int setResultReturnBlockIndex, bool[] blocksAnalyzed)
+		{
+			if (setResultReturnBlockIndex >= blockContainer.Blocks.Count)
+			{
+				// This block can be absent if the function never exits normally,
+				// but always throws an exception/loops infinitely.
+				resultVar = null;
+				finalStateKnown = false; // final state will be detected in ValidateCatchBlock() instead
+				return null;
+			}
+
+			var block = blockContainer.Blocks[setResultReturnBlockIndex];
+
+			int pos = 0;
+			// [vb-only] stloc S_10(ldloc this)
+			if (block.Instructions[pos] is StLoc stlocThisCache && stlocThisCache.Value.MatchLdThis() &&
+				stlocThisCache.Variable.Kind == VariableKind.StackSlot)
+			{
+				pos++;
+			}
+			// [vb-only] stloc S_11(ldc.i4 -2)
+			ILVariable finalStateSlot = null;
+			int? finalStateSlotValue = null;
+			if (block.Instructions[pos] is StLoc stlocFinalState && stlocFinalState.Value is LdcI4 ldcI4 &&
+				stlocFinalState.Variable.Kind == VariableKind.StackSlot)
+			{
+				finalStateSlot = stlocFinalState.Variable;
+				finalStateSlotValue = ldcI4.Value;
+				pos++;
+			}
+			// [vb-only] stloc cachedStateVar(ldloc S_11)
+			if (block.Instructions[pos] is StLoc stlocCachedState && stlocCachedState.Variable.Kind == VariableKind.Local &&
+				stlocCachedState.Variable.Index == cachedStateVar?.Index && stlocCachedState.Value.MatchLdLoc(finalStateSlot))
+			{
+				pos++;
+			}
+
+			// stfld <>1__state(ldloc this, ldc.i4 -2)
+			if (!MatchStateAssignment(block.Instructions[pos], out finalState))
+				throw new SymbolicAnalysisFailedException();
+			if (finalStateSlotValue is not null && finalState != finalStateSlotValue.Value)
+				throw new SymbolicAnalysisFailedException();
+			finalStateKnown = true;
+			pos++;
+
+			// [optional] stfld <>u__N(ldloc this, ldnull)
+			// The hoisted-local cleanup may appear either before or after the combined-tokens disposal
+			// (the latter is present for async iterators with an [EnumeratorCancellation] token).
+			MatchHoistedLocalCleanup(block, ref pos);
+
+			if (pos + 2 == block.Instructions.Count && block.MatchIfAtEndOfBlock(out var condition, out var trueInst, out var falseInst))
+			{
+				if (MatchDisposeCombinedTokens(blockContainer, condition, trueInst, falseInst, blocksAnalyzed, out var setResultAndExitBlock))
+				{
+					blocksAnalyzed[block.ChildIndex] = true;
+					block = setResultAndExitBlock;
+					pos = 0;
+				}
+				else
+				{
+					throw new SymbolicAnalysisFailedException();
+				}
+			}
+
+			// [optional] stfld <>u__N(ldloc this, ldnull)
+			MatchHoistedLocalCleanup(block, ref pos);
+			CheckSetResultAndExit(blockContainer, block, ref pos);
+			blocksAnalyzed[block.ChildIndex] = true;
+			return blockContainer.Blocks[setResultReturnBlockIndex];
+		}
+
+		private bool MatchDisposeCombinedTokens(BlockContainer blockContainer, ILInstruction condition, ILInstruction trueInst, ILInstruction falseInst, bool[] blocksAnalyzed, out Block setResultAndExitBlock)
+		{
+			setResultAndExitBlock = null;
+			// 	...
+			// 	if (comp.o(ldfld <>x__combinedTokens(ldloc this) == ldnull)) br setResultAndExit
+			// 	br disposeCombinedTokens
+			// }
+			// 
+			// Block disposeCombinedTokens (incoming: 1) {
+			// 	callvirt Dispose(ldfld <>x__combinedTokens(ldloc this))
+			// 	stfld <>x__combinedTokens(ldloc this, ldnull)
+			// 	br setResultAndExit
+			// }
+			if (!condition.MatchCompEqualsNull(out var testedInst))
+				return false;
+			if (!testedInst.MatchLdFld(out var target, out var ctsField))
+				return false;
+			if (!target.MatchLdThis())
+				return false;
+			if (!(ctsField.Type is ITypeDefinition { FullTypeName: { IsNested: false, TopLevelTypeName: { Name: "CancellationTokenSource", Namespace: "System.Threading" } } }))
+				return false;
+			if (!(trueInst.MatchBranch(out setResultAndExitBlock) && falseInst.MatchBranch(out var disposedCombinedTokensBlock)))
+				return false;
+			if (!(setResultAndExitBlock.Parent == blockContainer && disposedCombinedTokensBlock.Parent == blockContainer))
+				return false;
+
+			var block = disposedCombinedTokensBlock;
+			int pos = 0;
+			// callvirt Dispose(ldfld <>x__combinedTokens(ldloc this))
+			if (!(block.Instructions[pos] is CallVirt { Method: { Name: "Dispose" } } disposeCall))
+				return false;
+			if (disposeCall.Arguments.Count != 1)
+				return false;
+			if (!disposeCall.Arguments[0].MatchLdFld(out var target2, out var ctsField2))
+				return false;
+			if (!(target2.MatchLdThis() && ctsField2.Equals(ctsField)))
+				return false;
+			pos++;
+			// stfld <>x__combinedTokens(ldloc this, ldnull)
+			if (!block.Instructions[pos].MatchStFld(out var target3, out var ctsField3, out var storedValue))
+				return false;
+			if (!(target3.MatchLdThis() && ctsField3.Equals(ctsField)))
+				return false;
+			if (!storedValue.MatchLdNull())
+				return false;
+			pos++;
+			// br setResultAndExit
+			if (!block.Instructions[pos].MatchBranch(setResultAndExitBlock))
+				return false;
+			blocksAnalyzed[block.ChildIndex] = true;
+
+			return true;
+		}
+
+		private void MatchHoistedLocalCleanup(Block block, ref int pos)
+		{
+			while (block.Instructions[pos].MatchStFld(out var target, out _, out var value))
+			{
+				// https://github.com/dotnet/roslyn/pull/39735 hoisted local cleanup
+				if (!target.MatchLdThis())
+					throw new SymbolicAnalysisFailedException();
+				if (!value.MatchDefaultOrNullOrZero())
+					throw new SymbolicAnalysisFailedException();
+				pos++;
+			}
+		}
+
+		void CheckSetResultAndExit(BlockContainer blockContainer, Block block, ref int pos)
+		{
+			// [optional] call Complete(ldflda <>t__builder(ldloc this)) (Roslyn >=3.9)
+			// call SetResult(ldflda <>t__builder(ldloc this), ldloc result)
+			// [optional] call Complete(ldflda <>t__builder(ldloc this))
+			// leave IL_0000
+			MatchCompleteCall(block, ref pos);
+			if (!MatchCall(block.Instructions[pos], "SetResult", out var args))
+				throw new SymbolicAnalysisFailedException();
+			if (!IsBuilderOrPromiseFieldOnThis(args[0]))
+				throw new SymbolicAnalysisFailedException();
+			switch (methodType)
+			{
+				case AsyncMethodType.TaskOfT:
+					if (args.Count != 2)
+						throw new SymbolicAnalysisFailedException();
+					if (!args[1].MatchLdLoc(out resultVar))
+						throw new SymbolicAnalysisFailedException();
+					break;
+				case AsyncMethodType.Task:
+				case AsyncMethodType.Void:
+					resultVar = null;
+					if (args.Count != 1)
+						throw new SymbolicAnalysisFailedException();
+					break;
+				case AsyncMethodType.AsyncEnumerable:
+				case AsyncMethodType.AsyncEnumerator:
+					resultVar = null;
+					if (args.Count != 2)
+						throw new SymbolicAnalysisFailedException();
+					if (!args[1].MatchLdcI4(0))
+						throw new SymbolicAnalysisFailedException();
+					break;
+			}
+			pos++;
+			MatchCompleteCall(block, ref pos);
+			if (!block.Instructions[pos].MatchLeave(blockContainer))
+				throw new SymbolicAnalysisFailedException();
+		}
+
+		void ValidateCatchBlock()
+		{
+			// catch E_143 : System.Exception if (ldc.i4 1) BlockContainer {
+			// 	Block IL_008f (incoming: 1)  {
+			// 		stloc exception(ldloc E_143)
+			// 		stfld <>1__state(ldloc this, ldc.i4 -2)
+			//      [optional] stfld <>u__N(ldloc this, ldnull)
+			// 		call SetException(ldfld <>t__builder(ldloc this), ldloc exception)
+			//      [optional] call Complete(ldfld <>t__builder(ldloc this))
+			// 		leave IL_0000
+			// 	}
+			// }
+			if (mainTryCatch?.Handlers.Count != 1)
+				throw new SymbolicAnalysisFailedException();
+			var handler = mainTryCatch.Handlers[0];
+			if (!handler.Variable.Type.IsKnownType(KnownTypeCode.Exception))
+				throw new SymbolicAnalysisFailedException();
+			if (!handler.Filter.MatchLdcI4(1))
+				throw new SymbolicAnalysisFailedException();
+			if (!(handler.Body is BlockContainer handlerContainer))
+				throw new SymbolicAnalysisFailedException();
+			bool[] blocksAnalyzed = new bool[handlerContainer.Blocks.Count];
+			var catchBlock = handlerContainer.EntryPoint;
+			catchHandlerOffset = catchBlock.StartILOffset;
+			int pos = 0;
+			// [vb-only] call SetProjectError(ldloc E_143)
+			if (isVisualBasicStateMachine && catchBlock.Instructions[pos] is Call call && call.Method.Name == "SetProjectError" &&
+				call.Arguments.Count == 1 && call.Arguments[0].MatchLdLoc(handler.Variable))
+			{
+				pos++;
+			}
+			// stloc exception(ldloc E_143)
+			if (!(catchBlock.Instructions[pos++] is StLoc stloc))
+				throw new SymbolicAnalysisFailedException();
+			if (!stloc.Value.MatchLdLoc(handler.Variable))
+				throw new SymbolicAnalysisFailedException();
+			// stfld <>1__state(ldloc this, ldc.i4 -2)
+			if (!MatchStateAssignment(catchBlock.Instructions[pos++], out int newState))
+				throw new SymbolicAnalysisFailedException();
+			if (finalStateKnown)
+			{
+				if (newState != finalState)
+					throw new SymbolicAnalysisFailedException();
+			}
+			else
+			{
+				finalState = newState;
+				finalStateKnown = true;
+			}
+
+			// [optional] stfld <>u__N(ldloc this, ldnull)
+			// The hoisted-local cleanup may appear either before or after the combined-tokens disposal
+			// (the latter is present for async iterators with an [EnumeratorCancellation] token).
+			MatchHoistedLocalCleanup(catchBlock, ref pos);
+
+			if (pos + 2 == catchBlock.Instructions.Count && catchBlock.MatchIfAtEndOfBlock(out var condition, out var trueInst, out var falseInst))
+			{
+				if (MatchDisposeCombinedTokens(handlerContainer, condition, trueInst, falseInst, blocksAnalyzed, out var setResultAndExitBlock))
+				{
+					blocksAnalyzed[catchBlock.ChildIndex] = true;
+					catchBlock = setResultAndExitBlock;
+					pos = 0;
+				}
+				else
+				{
+					throw new SymbolicAnalysisFailedException();
+				}
+			}
+			MatchHoistedLocalCleanup(catchBlock, ref pos);
+			// [optional] call Complete(ldfld <>t__builder(ldloc this))
+			MatchCompleteCall(catchBlock, ref pos);
+
+			// call SetException(ldfld <>t__builder(ldloc this), ldloc exception)
+			if (!MatchCall(catchBlock.Instructions[pos], "SetException", out var args))
+				throw new SymbolicAnalysisFailedException();
+			if (args.Count != 2)
+				throw new SymbolicAnalysisFailedException();
+			if (!IsBuilderOrPromiseFieldOnThis(args[0]))
+				throw new SymbolicAnalysisFailedException();
+			if (!args[1].MatchLdLoc(stloc.Variable))
+				throw new SymbolicAnalysisFailedException();
+
+			pos++;
+			// [optional] call Complete(ldfld <>t__builder(ldloc this))
+			MatchCompleteCall(catchBlock, ref pos);
+
+			// [vb-only] call ClearProjectError()
+			if (isVisualBasicStateMachine && catchBlock.Instructions[pos] is Call call2 &&
+				call2.Method.Name == "ClearProjectError" && call2.Arguments.Count == 0)
+			{
+				pos++;
+			}
+
+			// leave IL_0000
+			if (!catchBlock.Instructions[pos].MatchLeave((BlockContainer)moveNextFunction.Body))
+				throw new SymbolicAnalysisFailedException();
+			blocksAnalyzed[catchBlock.ChildIndex] = true;
+			if (!blocksAnalyzed.All(b => b))
+				throw new SymbolicAnalysisFailedException();
+		}
+
+		private void MatchCompleteCall(Block block, ref int pos)
+		{
+			if (MatchCall(block.Instructions[pos], "Complete", out var args))
+			{
+				if (!(args.Count == 1 && IsBuilderFieldOnThis(args[0])))
+					throw new SymbolicAnalysisFailedException();
+				pos++;
+			}
+		}
+
+		bool IsBuilderFieldOnThis(ILInstruction inst)
+		{
+			IField field;
+			ILInstruction target;
+			if (builderType.IsReferenceType == true)
+			{
+				// ldfld(StateMachine::<>t__builder, ldloc(this))
+				if (!inst.MatchLdFld(out target, out field))
+					return false;
+			}
+			else
+			{
+				// ldflda(StateMachine::<>t__builder, ldloc(this))
+				if (!inst.MatchLdFlda(out target, out field))
+					return false;
+			}
+			return target.MatchLdThis() && field.MemberDefinition == builderField;
+		}
+
+		bool IsBuilderOrPromiseFieldOnThis(ILInstruction inst)
+		{
+			if (methodType == AsyncMethodType.AsyncEnumerable || methodType == AsyncMethodType.AsyncEnumerator)
+			{
+				return true; // TODO: check against uses of promise fields in other methods?
+			}
+			else
+			{
+				return IsBuilderFieldOnThis(inst);
+			}
+		}
+
+		bool MatchStateAssignment(ILInstruction inst, out int newState)
+		{
+			// stfld(StateMachine::<>1__state, ldloc(this), ldc.i4(stateId))
+			if (inst.MatchStFld(out var target, out var field, out var value)
+				&& StackSlotValue(target).MatchLdThis()
+				&& field.MemberDefinition == stateField
+				&& StackSlotValue(value).MatchLdcI4(out newState))
+			{
+				return true;
+			}
+			newState = 0;
+			return false;
+		}
+
+		/// <summary>
+		/// Analyse the DisposeAsync() method in order to find the disposeModeField.
+		/// </summary>
+		private void AnalyzeDisposeAsync()
+		{
+			disposeModeField = null;
+			if (!IsAsyncEnumerator)
+			{
+				return;
+			}
+			var disposeAsync = stateMachineType.Methods.FirstOrDefault(m => m.Name.EndsWith(".DisposeAsync", StringComparison.Ordinal));
+			if (disposeAsync == null)
+				throw new SymbolicAnalysisFailedException("Could not find DisposeAsync()");
+			var disposeAsyncHandle = (MethodDefinitionHandle)disposeAsync.MetadataToken;
+			var function = YieldReturnDecompiler.CreateILAst(disposeAsyncHandle, context);
+			foreach (var store in function.Descendants)
+			{
+				if (!store.MatchStFld(out var target, out var field, out var value))
+					continue;
+				if (!target.MatchLdThis())
+					continue;
+				if (!value.MatchLdcI4(1))
+					throw new SymbolicAnalysisFailedException();
+				if (disposeModeField != null)
+					throw new SymbolicAnalysisFailedException("Multiple stores to disposeMode in DisposeAsync()");
+				disposeModeField = (IField)field.MemberDefinition;
+			}
+		}
+		#endregion
+
+		#region InlineBodyOfMoveNext
+		void InlineBodyOfMoveNext(ILFunction function)
+		{
+			context.Step("Inline body of MoveNext()", function);
+			function.Body = mainTryCatch.TryBlock;
+			function.AsyncReturnType = underlyingReturnType;
+			function.MoveNextMethod = moveNextFunction.Method;
+			function.SequencePointCandidates = moveNextFunction.SequencePointCandidates;
+			function.CodeSize = moveNextFunction.CodeSize;
+			function.LocalVariableSignatureLength = moveNextFunction.LocalVariableSignatureLength;
+			function.IsIterator = IsAsyncEnumerator;
+			moveNextFunction.Variables.Clear();
+			moveNextFunction.ReleaseRef();
+			foreach (var branch in function.Descendants.OfType<Branch>())
+			{
+				if (branch.TargetBlock == setResultReturnBlock)
+				{
+					branch.ReplaceWith(new Leave((BlockContainer)function.Body, resultVar == null ? null : new LdLoc(resultVar)).WithILRange(branch));
+				}
+			}
+			if (setResultYieldBlock != null)
+			{
+				// We still might have branches to this block; and we can't quite yet get rid of it.
+				((BlockContainer)function.Body).Blocks.Add(setResultYieldBlock);
+			}
+			foreach (var leave in function.Descendants.OfType<Leave>())
+			{
+				if (leave.TargetContainer == moveNextFunction.Body)
+				{
+					leave.TargetContainer = (BlockContainer)function.Body;
+					moveNextLeaves.Add(leave);
+				}
+			}
+			function.Variables.AddRange(function.Descendants.OfType<IInstructionWithVariableOperand>().Select(inst => inst.Variable).Distinct());
+			function.Variables.RemoveDead();
+			function.Variables.AddRange(fieldToParameterMap.Values);
+		}
+
+		void FinalizeInlineMoveNext(ILFunction function)
+		{
+			context.Step("FinalizeInlineMoveNext()", function);
+			foreach (var leave in function.Descendants.OfType<Leave>())
+			{
+				if (moveNextLeaves.Contains(leave))
+				{
+					leave.ReplaceWith(new InvalidBranch {
+						Message = "leave MoveNext - await not detected correctly"
+					}.WithILRange(leave));
+				}
+			}
+			// Delete dead loads of the state cache variable:
+			foreach (var block in function.Descendants.OfType<Block>())
+			{
+				for (int i = block.Instructions.Count - 1; i >= 0; i--)
+				{
+					if (block.Instructions[i].MatchStLoc(out var v, out var value)
+						&& v.IsSingleDefinition && v.LoadCount == 0
+						&& value.MatchLdLoc(cachedStateVar))
+					{
+						block.Instructions.RemoveAt(i);
+					}
+				}
+			}
+		}
+		#endregion
+
+		#region AnalyzeStateMachine
+
+		/// <summary>
+		/// Analyze the the state machine; and replace 'leave IL_0000' with await+jump to block that gets
+		/// entered on the next MoveNext() call.
+		/// </summary>
+		void AnalyzeStateMachine(ILFunction function)
+		{
+			context.StepStartGroup("AnalyzeStateMachine()", function);
+			smallestAwaiterVarIndex = int.MaxValue;
+			foreach (var container in function.Descendants.OfType<BlockContainer>())
+			{
+				foreach (var block in container.Blocks)
+					InlineAwaiterCopies(block);
+				// Fold the runtime ICriticalNotifyCompletion type-check that the compiler emits when the
+				// awaiter's static type is not known to implement it (dynamic awaiters, some generic awaiters)
+				// into the canonical single-call form that AnalyzeAwaitBlock recognizes.
+				foreach (var block in container.Blocks)
+					NormalizeAwaitOnCompletedDualBranch(block);
+
+				// Use a separate state range analysis per container.
+				var sra = new StateRangeAnalysis(StateRangeAnalysisMode.AsyncMoveNext, stateField, cachedStateVar);
+				sra.CancellationToken = context.CancellationToken;
+				sra.doFinallyBodies = doFinallyBodies;
+				sra.AssignStateRanges(container, LongSet.Universe);
+				var stateToBlockMap = sra.GetBlockStateSetMapping(container);
+
+				foreach (var block in container.Blocks)
+				{
+					context.CancellationToken.ThrowIfCancellationRequested();
+					DynamicCallSiteTransform.RunOnBasicBlock(block, context);
+					if (block.Instructions.Last() is Leave leave && moveNextLeaves.Contains(leave))
+					{
+						// This is likely an 'await' block
+						context.Step($"AnalyzeAwaitBlock({block.StartILOffset:x4})", block);
+						if (AnalyzeAwaitBlock(block, out var awaiterVar, out var awaiterField, out int state, out int yieldOffset))
+						{
+							block.Instructions.Add(new Await(new LdLoca(awaiterVar)));
+							Block targetBlock = stateToBlockMap.GetOrDefault(state);
+							if (targetBlock != null)
+							{
+								awaitDebugInfos.Add(new AsyncDebugInfo.Await(yieldOffset, targetBlock.StartILOffset));
+								block.Instructions.Add(new Branch(targetBlock));
+							}
+							else
+							{
+								block.Instructions.Add(new InvalidBranch("Could not find block for state " + state));
+							}
+							awaitBlocks.Add(block, (awaiterVar, awaiterField));
+							if (awaiterVar.Index < smallestAwaiterVarIndex)
+							{
+								smallestAwaiterVarIndex = awaiterVar.Index.Value;
+							}
+						}
+					}
+					else if (block.Instructions.Last().MatchBranch(setResultYieldBlock))
+					{
+						// This is a 'yield return' in an async enumerator.
+						context.Step($"AnalyzeYieldReturn({block.StartILOffset:x4})", block);
+						if (AnalyzeYieldReturn(block, out var yieldValue, out int state))
+						{
+							block.Instructions.Add(new YieldReturn(yieldValue));
+							Block targetBlock = stateToBlockMap.GetOrDefault(state);
+							if (targetBlock != null)
+							{
+								block.Instructions.Add(new Branch(targetBlock));
+							}
+							else
+							{
+								block.Instructions.Add(new InvalidBranch("Could not find block for state " + state));
+							}
+						}
+						else
+						{
+							block.Instructions.Add(new InvalidBranch("Could not detect 'yield return'"));
+						}
+					}
+					TransformYieldBreak(block);
+				}
+				foreach (var block in container.Blocks)
+				{
+					SimplifyIfDisposeMode(block);
+				}
+				// Skip the state dispatcher and directly jump to the initial state
+				var entryPoint = stateToBlockMap.GetOrDefault(initialState);
+				if (entryPoint != null)
+				{
+					container.Blocks.Insert(0, new Block {
+						Instructions = {
+							new Branch(entryPoint)
+						}
+					});
+				}
+				container.SortBlocks(deleteUnreachableBlocks: true);
+				// Collapsing the dynamic awaiter callsites left each await's GetAwaiter/IsCompleted/GetResult spread
+				// across branch-joined blocks; the SortBlocks above removed the unreachable init blocks, so re-join
+				// the chains into single blocks for DetectAwaitPattern.
+				CoalesceDynamicAwaiterBlocks(container, context);
+				container.SortBlocks(deleteUnreachableBlocks: true);
+			}
+			context.StepEndGroup();
+		}
+
+		private bool TransformYieldBreak(Block block)
+		{
+			// stfld disposeMode(ldloc this, ldc.i4 1)
+			// br nextBlock
+			if (block.Instructions.Count < 2)
+				return false;
+			if (!(block.Instructions.Last() is Branch branch))
+				return false;
+			if (!block.Instructions[block.Instructions.Count - 2].MatchStFld(out var target, out var field, out var value))
+				return false;
+			if (!target.MatchLdThis())
+				return false;
+			if (field.MemberDefinition != disposeModeField)
+				return false;
+			if (!value.MatchLdcI4(1))
+				return false;
+
+			// Detected a 'yield break;'
+			context.Step($"TransformYieldBreak({block.StartILOffset:x4})", block);
+			var breakTarget = FindYieldBreakTarget(branch.TargetBlock);
+			if (breakTarget is Block targetBlock)
+			{
+				branch.TargetBlock = targetBlock;
+			}
+			else
+			{
+				Debug.Assert(breakTarget is BlockContainer);
+				branch.ReplaceWith(new Leave((BlockContainer)breakTarget).WithILRange(branch));
+			}
+			return true;
+		}
+
+		ILInstruction FindYieldBreakTarget(Block block)
+		{
+			// We'll follow the branch and evaluate the following instructions
+			// under the assumption that disposeModeField==1, which lets us follow a series of jumps
+			// to determine the final target.
+			var visited = new HashSet<Block>();
+			var evalContext = new SymbolicEvaluationContext(disposeModeField);
+			while (true)
+			{
+				for (int i = 0; i < block.Instructions.Count; i++)
+				{
+					ILInstruction inst = block.Instructions[i];
+					while (inst.MatchIfInstruction(out var condition, out var trueInst, out var falseInst))
+					{
+						var condVal = evalContext.Eval(condition).AsBool();
+						if (condVal.Type == SymbolicValueType.IntegerConstant)
+						{
+							inst = condVal.Constant != 0 ? trueInst : falseInst;
+						}
+						else if (condVal.Type == SymbolicValueType.StateInSet)
+						{
+							inst = condVal.ValueSet.Contains(1) ? trueInst : falseInst;
+						}
+						else
+						{
+							return block;
+						}
+					}
+					if (inst.MatchBranch(out var targetBlock))
+					{
+						if (visited.Add(block))
+						{
+							block = targetBlock;
+							break; // continue with next block
+						}
+						else
+						{
+							return block; // infinite loop detected
+						}
+					}
+					else if (inst is Leave leave && leave.Value.OpCode == OpCode.Nop)
+					{
+						return leave.TargetContainer;
+					}
+					else if (inst.OpCode == OpCode.Nop)
+					{
+						continue; // continue with next instruction in this block
+					}
+					else
+					{
+						return block;
+					}
+				}
+			}
+		}
+
+		private bool SimplifyIfDisposeMode(Block block)
+		{
+			// Occasionally Roslyn optimizes out an "if (disposeMode)", but keeps the
+			// disposeMode field access. Get rid of those field accesses:
+			block.Instructions.RemoveAll(MatchLdDisposeMode);
+
+			// if (logic.not(ldfld disposeMode(ldloc this))) br falseInst
+			// br trueInst
+			if (!block.MatchIfAtEndOfBlock(out var condition, out _, out var falseInst))
+				return false;
+			if (!MatchLdDisposeMode(condition))
+				return false;
+			context.Step($"SimplifyIfDisposeMode({block.StartILOffset:x4})", block);
+			block.Instructions[block.Instructions.Count - 2] = falseInst;
+			block.Instructions.RemoveAt(block.Instructions.Count - 1);
+			return true;
+
+			bool MatchLdDisposeMode(ILInstruction inst)
+			{
+				if (!inst.MatchLdFld(out var target, out var field))
+					return false;
+				return target.MatchLdThis() && field.MemberDefinition == disposeModeField;
+			}
+		}
+
+		/// <summary>
+		/// When the awaiter's static type is not known to implement ICriticalNotifyCompletion (dynamic
+		/// awaiters, and some generic awaiters), the C# compiler picks between AwaitOnCompleted and
+		/// AwaitUnsafeOnCompleted at runtime:
+		///   stloc criticalVar(isinst ICriticalNotifyCompletion(ldloc awaiterVar))
+		///   [stloc smVar(ldloc this)]                                      // class state machine only
+		///   if (comp.o(ldloc criticalVar != ldnull)) br unsafeOnCompletedBlock
+		///   br onCompletedBlock
+		/// unsafeOnCompletedBlock:
+		///   call AwaitUnsafeOnCompleted(ldflda builder(this), ldloca criticalVar, ldloca smVar); br mergeBlock
+		/// onCompletedBlock:
+		///   stloc notifyVar(castclass INotifyCompletion(ldloc awaiterVar))
+		///   call AwaitOnCompleted(ldflda builder(this), ldloca notifyVar, ldloca smVar); br mergeBlock
+		/// mergeBlock:
+		///   leave
+		/// Both branches await the same awaiter, so this folds the whole diamond into the single-call form
+		/// AnalyzeAwaitBlock recognizes, awaiting the awaiter variable directly.
+		/// </summary>
+		bool NormalizeAwaitOnCompletedDualBranch(Block block)
+		{
+			int count = block.Instructions.Count;
+			if (count < 3)
+				return false;
+			if (!block.Instructions[count - 1].MatchBranch(out var onCompletedBlock))
+				return false;
+			if (!block.Instructions[count - 2].MatchIfInstruction(out var condition, out var trueBranch))
+				return false;
+			if (!trueBranch.MatchBranch(out var unsafeOnCompletedBlock))
+				return false;
+			if (!condition.MatchCompNotEqualsNull(out var criticalTest) || !criticalTest.MatchLdLoc(out var criticalVar))
+				return false;
+
+			int isInstPos = count - 3;
+			ILVariable smVar = null;
+			if (isInstPos >= 0 && block.Instructions[isInstPos].MatchStLoc(out var smCandidate, out var smValue) && smValue.MatchLdThis())
+			{
+				smVar = smCandidate;
+				isInstPos--;
+			}
+			if (isInstPos < 0 || !block.Instructions[isInstPos].MatchStLoc(criticalVar, out var criticalValue))
+				return false;
+			if (!(criticalValue is IsInst isInst)
+				|| isInst.Type.FullName != "System.Runtime.CompilerServices.ICriticalNotifyCompletion"
+				|| !isInst.Argument.MatchLdLoc(out var awaiterVar))
+			{
+				return false;
+			}
+
+			bool MatchStateMachineArg(ILInstruction arg) => smVar != null ? (arg.MatchLdLoca(out var v) && v == smVar) : arg.MatchLdThis();
+
+			// unsafeOnCompletedBlock: call AwaitUnsafeOnCompleted(builder, ldloca criticalVar, smArg); br mergeBlock
+			if (unsafeOnCompletedBlock.Instructions.Count != 2)
+				return false;
+			if (!MatchCall(unsafeOnCompletedBlock.Instructions[0], "AwaitUnsafeOnCompleted", out var unsafeArgs)
+				|| unsafeArgs.Count != 3 || !IsBuilderFieldOnThis(unsafeArgs[0])
+				|| !unsafeArgs[1].MatchLdLoca(out var unsafeAwaiter) || unsafeAwaiter != criticalVar
+				|| !MatchStateMachineArg(unsafeArgs[2]))
+			{
+				return false;
+			}
+			if (!unsafeOnCompletedBlock.Instructions[1].MatchBranch(out var mergeBlock))
+				return false;
+
+			// onCompletedBlock: stloc notifyVar(castclass INotifyCompletion(ldloc awaiterVar)); call AwaitOnCompleted(builder, ldloca notifyVar, smArg); br mergeBlock
+			if (onCompletedBlock.Instructions.Count != 3)
+				return false;
+			if (!onCompletedBlock.Instructions[0].MatchStLoc(out var notifyVar, out var notifyValue)
+				|| !(notifyValue is CastClass castClass)
+				|| castClass.Type.FullName != "System.Runtime.CompilerServices.INotifyCompletion"
+				|| !castClass.Argument.MatchLdLoc(out var castAwaiter) || castAwaiter != awaiterVar)
+			{
+				return false;
+			}
+			if (!MatchCall(onCompletedBlock.Instructions[1], "AwaitOnCompleted", out var safeArgs)
+				|| safeArgs.Count != 3 || !IsBuilderFieldOnThis(safeArgs[0])
+				|| !safeArgs[1].MatchLdLoca(out var safeAwaiter) || safeAwaiter != notifyVar
+				|| !MatchStateMachineArg(safeArgs[2]))
+			{
+				return false;
+			}
+			if (!onCompletedBlock.Instructions[2].MatchBranch(out var mergeBlock2) || mergeBlock2 != mergeBlock)
+				return false;
+
+			// The pre-Roslyn compiler clears doFinallyBodies right before leaving MoveNext;
+			// AnalyzeAwaitBlock expects that store directly in front of the leave.
+			int leavePos = MatchStoreDoFinallyBodies(mergeBlock.Instructions.FirstOrDefault()) ? 1 : 0;
+			if (mergeBlock.Instructions.Count != leavePos + 1 || !(mergeBlock.Instructions[leavePos] is Leave mergeLeave))
+				return false;
+
+			// Rewrite `block` into the canonical single-call form.
+			context.Step("Normalize dynamic AwaitOnCompleted", block);
+			var awaitCall = (CallInstruction)unsafeOnCompletedBlock.Instructions[0];
+			unsafeOnCompletedBlock.Instructions.RemoveAt(0);
+			awaitCall.Arguments[1].ReplaceWith(new LdLoca(awaiterVar));
+			// Remove the isinst test, the if, and the branch; keep the state/awaiter-field stores (and smVar store).
+			block.Instructions.RemoveRange(count - 2, 2); // if + br
+			block.Instructions.RemoveAt(isInstPos); // isinst store
+			block.Instructions.Add(awaitCall);
+			if (leavePos > 0)
+			{
+				block.Instructions.Add(mergeBlock.Instructions[0].Clone());
+			}
+			var newLeave = (Leave)mergeLeave.Clone();
+			moveNextLeaves.Add(newLeave);
+			block.Instructions.Add(newLeave);
+			return true;
+		}
+
+		/// <summary>
+		/// Matches the 'stloc doFinallyBodies(ldc.i4 0)' the pre-Roslyn compiler emits before leaving MoveNext.
+		/// </summary>
+		bool MatchStoreDoFinallyBodies(ILInstruction inst)
+		{
+			if (doFinallyBodies == null || inst == null)
+				return false;
+			return inst.MatchStLoc(out var v, out var value)
+				&& v.Kind == VariableKind.Local
+				&& v.Type.IsKnownType(KnownTypeCode.Boolean)
+				&& v.Index == doFinallyBodies.Index
+				&& value.MatchLdcI4(0);
+		}
+
+		/// <summary>
+		/// The pre-Roslyn compiler copies the awaiter into a fresh local right before each dynamic call site
+		/// and each completion-interface type test on it. The await matchers identify an await by its awaiter
+		/// variable, so inline those copies.
+		/// </summary>
+		void InlineAwaiterCopies(Block block)
+		{
+			for (int i = block.Instructions.Count - 1; i >= 0; i--)
+			{
+				if (block.Instructions[i] is StLoc { Variable: { Kind: VariableKind.Local, IsSingleDefinition: true, LoadCount: 1 } copy, Value: LdLoc } store
+					&& IsAwaiterAccess(copy.LoadInstructions[0].Parent))
+				{
+					ILInlining.InlineOne(store, InliningOptions.Aggressive, context);
+				}
+			}
+
+			static bool IsAwaiterAccess(ILInstruction inst)
+			{
+				if (inst is DynamicGetMemberInstruction { Name: "IsCompleted" } or DynamicInvokeMemberInstruction { Name: "GetResult" })
+					return true;
+				if (!inst.MatchIsInst(out _, out var type) && !inst.MatchCastClass(out _, out type))
+					return false;
+				return type.FullName is "System.Runtime.CompilerServices.ICriticalNotifyCompletion"
+					or "System.Runtime.CompilerServices.INotifyCompletion";
+			}
+		}
+
+		bool AnalyzeAwaitBlock(Block block, out ILVariable awaiter, out IField awaiterField, out int state, out int yieldOffset)
+		{
+			awaiter = null;
+			awaiterField = null;
+			state = 0;
+			yieldOffset = -1;
+			int pos = block.Instructions.Count - 2;
+			if (pos >= 0 && doFinallyBodies != null && block.Instructions[pos] is StLoc)
+			{
+				if (!MatchStoreDoFinallyBodies(block.Instructions[pos]))
+					return false;
+				pos--;
+			}
+
+			if (pos >= 0 && MatchCall(block.Instructions[pos], "AwaitUnsafeOnCompleted", out var callArgs))
+			{
+				// call AwaitUnsafeOnCompleted(ldflda <>t__builder(ldloc this), ldloca awaiter, ldloc this)
+			}
+			else if (pos >= 0 && MatchCall(block.Instructions[pos], "AwaitOnCompleted", out callArgs))
+			{
+				// call AwaitOnCompleted(ldflda <>t__builder(ldloc this), ldloca awaiter, ldloc this)
+				// The C# compiler emits the non-unsafe call when the awaiter does not implement
+				// ICriticalNotifyCompletion.
+			}
+			else
+			{
+				return false;
+			}
+			if (callArgs.Count != 3)
+				return false;
+			if (!IsBuilderFieldOnThis(callArgs[0]))
+				return false;
+			if (!callArgs[1].MatchLdLoca(out awaiter))
+				return false;
+			if (callArgs[2].MatchLdThis())
+			{
+				// OK (if state machine is a struct)
+				pos--;
+			}
+			else if (callArgs[2].MatchLdLoca(out var tempVar))
+			{
+				// Roslyn, non-optimized uses a class for the state machine.
+				// stloc tempVar(ldloc this)
+				// call AwaitUnsafeOnCompleted(ldflda <>t__builder](ldloc this), ldloca awaiter, ldloca tempVar)
+				if (!(pos > 0 && block.Instructions[pos - 1].MatchStLoc(tempVar, out var tempVal)))
+					return false;
+				if (!tempVal.MatchLdThis())
+					return false;
+				pos -= 2;
+			}
+			else
+			{
+				return false;
+			}
+			// stfld StateMachine.<>awaiter(ldloc this, ldloc awaiter)
+			if (!block.Instructions[pos].MatchStFld(out var target, out awaiterField, out var value))
+				return false;
+			if (!target.MatchLdThis())
+				return false;
+			if (!value.MatchLdLoc(awaiter))
+				return false;
+			pos--;
+			// Store IL offset for debug info:
+			yieldOffset = block.Instructions[pos].EndILOffset;
+
+			// stloc S_10(ldloc this)
+			// stloc S_11(ldc.i4 0)
+			// stloc cachedStateVar(ldloc S_11)
+			// stfld <>1__state(ldloc S_10, ldloc S_11)
+			if (!block.Instructions[pos].MatchStFld(out target, out var field, out value))
+				return false;
+			if (!StackSlotValue(target).MatchLdThis())
+				return false;
+			if (field.MemberDefinition != stateField)
+				return false;
+			if (!StackSlotValue(value).MatchLdcI4(out state))
+				return false;
+			if (pos > 0 && block.Instructions[pos - 1] is StLoc stloc
+				&& stloc.Variable.Kind == VariableKind.Local && stloc.Variable.Index == cachedStateVar.Index
+				&& StackSlotValue(stloc.Value).MatchLdcI4(state))
+			{
+				// also delete the assignment to cachedStateVar
+				pos--;
+			}
+			block.Instructions.RemoveRange(pos, block.Instructions.Count - pos);
+			// delete preceding dead stores:
+			while (pos > 0 && block.Instructions[pos - 1] is StLoc stloc2
+				&& stloc2.Variable.IsSingleDefinition && stloc2.Variable.LoadCount == 0
+				&& stloc2.Variable.Kind == VariableKind.StackSlot
+				&& SemanticHelper.IsPure(stloc2.Value.Flags))
+			{
+				pos--;
+			}
+			block.Instructions.RemoveRange(pos, block.Instructions.Count - pos);
+			return true;
+		}
+
+		static ILInstruction StackSlotValue(ILInstruction inst)
+		{
+			if (inst.MatchLdLoc(out var v) && v.Kind == VariableKind.StackSlot && v.IsSingleDefinition)
+			{
+				if (v.StoreInstructions[0] is StLoc stloc)
+				{
+					return stloc.Value;
+				}
+			}
+			return inst;
+		}
+
+		private bool AnalyzeYieldReturn(Block block, out ILInstruction yieldValue, out int newState)
+		{
+			yieldValue = default;
+			newState = default;
+			Debug.Assert(block.Instructions.Last().MatchBranch(setResultYieldBlock));
+			// stfld current(ldloc this, ldstr "yieldValue")
+			// stloc S_45(ldloc this)
+			// stloc S_46(ldc.i4 -5)
+			// stloc V_0(ldloc S_46)
+			// stfld stateField(ldloc S_45, ldloc S_46)
+			// br setResultYieldBlock
+
+			int pos = block.Instructions.Count - 2;
+			// Immediately before the 'yield return', there should be a state assignment:
+			if (pos < 0 || !MatchStateAssignment(block.Instructions[pos], out newState))
+				return false;
+			pos--;
+
+			if (pos >= 0 && block.Instructions[pos].MatchStLoc(cachedStateVar, out var cachedStateNewValue))
+			{
+				if (StackSlotValue(cachedStateNewValue).MatchLdcI4(newState))
+				{
+					pos--; // OK, ignore V_0 store
+				}
+				else
+				{
+					return false;
+				}
+			}
+
+			while (pos >= 0 && block.Instructions[pos] is StLoc stloc)
+			{
+				if (stloc.Variable.Kind != VariableKind.StackSlot)
+					return false;
+				if (!SemanticHelper.IsPure(stloc.Value.Flags))
+					return false;
+				pos--;
+			}
+
+			if (pos < 0 || !MatchCurrentAssignment(block.Instructions[pos], out yieldValue))
+				return false;
+
+			block.Instructions.RemoveRange(pos, block.Instructions.Count - pos);
+			return true;
+		}
+
+		bool MatchCurrentAssignment(ILInstruction inst, out ILInstruction value)
+		{
+			if (!inst.MatchStFld(out var target, out var field, out value))
+				return false;
+			if (!StackSlotValue(target).MatchLdThis())
+				return false;
+			// TODO: check that we are accessing the current field (compare with get_Current)
+			return true;
+		}
+		#endregion
+
+		#region DetectAwaitPattern
+		void DetectAwaitPattern(ILFunction function)
+		{
+			context.StepStartGroup("DetectAwaitPattern", function);
+			foreach (var container in function.Descendants.OfType<BlockContainer>())
+			{
+				foreach (var block in container.Blocks)
+				{
+					context.CancellationToken.ThrowIfCancellationRequested();
+					DetectAwaitPattern(block);
+				}
+				container.SortBlocks(deleteUnreachableBlocks: true);
+			}
+			context.StepEndGroup(keepIfEmpty: true);
+		}
+
+		void DetectAwaitPattern(Block block)
+		{
+			// block:
+			//   stloc awaiterVar(callvirt GetAwaiter(...))
+			//   if (call get_IsCompleted(ldloca awaiterVar)) br completedBlock
+			//   br awaitBlock
+			// awaitBlock:
+			//   ..
+			//   br resumeBlock
+			// resumeBlock:
+			//   ..
+			//   br completedBlock
+			if (block.Instructions.Count < 3)
+				return;
+			// stloc awaiterVar(callvirt GetAwaiter(...))
+			if (!(block.Instructions[block.Instructions.Count - 3] is StLoc stLocAwaiter))
+				return;
+			ILVariable awaiterVar = stLocAwaiter.Variable;
+			ILInstruction awaitedValue;
+			IMethod getAwaiterMethod;
+			OpCode getAwaiterCallOpCode;
+			bool isDynamicAwait = false;
+			if (stLocAwaiter.Value is CallInstruction getAwaiterCall
+				&& getAwaiterCall.Method.Name == "GetAwaiter"
+				&& (!getAwaiterCall.Method.IsStatic || getAwaiterCall.Method.IsExtensionMethod)
+				&& getAwaiterCall.Arguments.Count == 1)
+			{
+				awaitedValue = getAwaiterCall.Arguments[0];
+				getAwaiterMethod = getAwaiterCall.Method;
+				getAwaiterCallOpCode = getAwaiterCall.OpCode;
+			}
+			else if (stLocAwaiter.Value is DynamicInvokeMemberInstruction dynGetAwaiter
+				&& dynGetAwaiter.Name == "GetAwaiter" && dynGetAwaiter.Arguments.Count == 1)
+			{
+				// awaiting a dynamic value: GetAwaiter/IsCompleted/GetResult are dynamic callsites
+				awaitedValue = dynGetAwaiter.Arguments[0];
+				getAwaiterMethod = CreateDynamicAwaiterMethod(context, "GetAwaiter");
+				isDynamicAwait = true;
+				getAwaiterCallOpCode = OpCode.CallVirt;
+			}
+			else
+			{
+				return;
+			}
+			// if (call get_IsCompleted(ldloca awaiterVar)) br completedBlock
+			if (!block.Instructions[block.Instructions.Count - 2].MatchIfInstruction(out var condition, out var trueInst))
+				return;
+			if (!trueInst.MatchBranch(out var completedBlock))
+				return;
+			// br awaitBlock
+			if (!block.Instructions.Last().MatchBranch(out var awaitBlock))
+				return;
+			// condition might be inverted, swap branches:
+			if (condition.MatchLogicNot(out var negatedCondition))
+			{
+				condition = negatedCondition;
+				ExtensionMethods.Swap(ref completedBlock, ref awaitBlock);
+			}
+			if (isDynamicAwait)
+			{
+				// if (dynamic.convert bool(dynamic.getmember "IsCompleted"(ldloc awaiterVar)))
+				ILInstruction isCompletedTest = condition;
+				if (isCompletedTest is DynamicConvertInstruction dynConv && dynConv.Type.IsKnownType(KnownTypeCode.Boolean))
+					isCompletedTest = dynConv.Argument;
+				if (!(isCompletedTest is DynamicGetMemberInstruction dynIsCompleted && dynIsCompleted.Name == "IsCompleted"))
+					return;
+				if (!dynIsCompleted.Target.MatchLdLoc(awaiterVar))
+					return;
+			}
+			else
+			{
+				// continue matching call get_IsCompleted(ldloca awaiterVar)
+				if (!MatchCall(condition, "get_IsCompleted", out var isCompletedArgs) || isCompletedArgs.Count != 1)
+					return;
+				if (!UnwrapConvUnknown(isCompletedArgs[0]).MatchLdLocRef(awaiterVar))
+					return;
+			}
+			// Check awaitBlock and resumeBlock:
+			if (!awaitBlocks.TryGetValue(awaitBlock, out var awaitBlockData))
+				return;
+			if (awaitBlockData.awaiterVar != awaiterVar)
+				return;
+			if (!CheckAwaitBlock(awaitBlock, out var resumeBlock, out var stackField))
+				return;
+			if (!CheckResumeBlock(resumeBlock, awaiterVar, awaitBlockData.awaiterField, completedBlock, stackField))
+				return;
+			// Check completedBlock. The first instruction involves the GetResult call, but it might have
+			// been inlined into another instruction.
+			ILInstruction getResultInst;
+			IMethod getResultMethod;
+			if (isDynamicAwait)
+			{
+				// dynamic.invokemember "GetResult"(ldloc awaiterVar), possibly inlined into another instruction
+				getResultInst = completedBlock.Instructions[0].Descendants.Prepend(completedBlock.Instructions[0])
+					.OfType<DynamicInvokeMemberInstruction>()
+					.FirstOrDefault(d => d.Name == "GetResult" && d.Arguments.Count == 1 && d.Arguments[0].MatchLdLoc(awaiterVar));
+				if (getResultInst == null)
+					return;
+				getResultMethod = CreateDynamicAwaiterMethod(context, "GetResult");
+			}
+			else
+			{
+				var getResultCall = ILInlining.FindFirstInlinedCall(completedBlock.Instructions[0]);
+				if (getResultCall == null)
+					return;
+				if (!MatchCall(getResultCall, "GetResult", out var getResultArgs) || getResultArgs.Count != 1)
+					return;
+				if (!UnwrapConvUnknown(getResultArgs[0]).MatchLdLocRef(awaiterVar))
+					return;
+				getResultInst = getResultCall;
+				getResultMethod = getResultCall.Method;
+			}
+			// All checks successful, let's transform.
+			context.Step("Transform await pattern", block);
+			block.Instructions.RemoveAt(block.Instructions.Count - 3); // remove getAwaiter call
+			block.Instructions.RemoveAt(block.Instructions.Count - 2); // remove if (isCompleted)
+			((Branch)block.Instructions.Last()).TargetBlock = completedBlock; // instead, directly jump to completed block
+			Await awaitInst = new Await(UnwrapConvUnknown(awaitedValue));
+			awaitInst.GetResultMethod = getResultMethod;
+			awaitInst.GetAwaiterMethod = getAwaiterMethod;
+			awaitInst.GetAwaiterCallOpCode = getAwaiterCallOpCode;
+			getResultInst.ReplaceWith(awaitInst);
+
+			// Remove useless reset of awaiterVar.
+			if (completedBlock.Instructions.ElementAtOrDefault(1) is StObj stobj)
+			{
+				if (stobj.Target.MatchLdLoca(awaiterVar) && stobj.Value.OpCode == OpCode.DefaultValue)
+				{
+					completedBlock.Instructions.RemoveAt(1);
+				}
+			}
+		}
+
+		static ILInstruction UnwrapConvUnknown(ILInstruction inst)
+		{
+			if (inst is Conv conv && conv.TargetType == PrimitiveType.Unknown)
+			{
+				return conv.Argument;
+			}
+			return inst;
+		}
+
+		/// <summary>
+		/// Synthesizes a GetAwaiter/GetResult method on the dynamic type, so a dynamic await carries the
+		/// type 'dynamic': the Await result type derives from GetResultMethod.ReturnType, and the dynamic
+		/// declaring type also marks the await as dynamic for IntroduceDynamicTypeOnLocals.
+		/// </summary>
+		static IMethod CreateDynamicAwaiterMethod(ILTransformContext context, string name)
+		{
+			return new FakeMethod(context.TypeSystem, SymbolKind.Method) {
+				Name = name,
+				DeclaringType = SpecialType.Dynamic,
+				ReturnType = SpecialType.Dynamic,
+			};
+		}
+
+		/// <summary>
+		/// Collapsing the dynamic GetAwaiter/IsCompleted/GetResult callsites leaves each dynamic await spread
+		/// across unconditional-branch-joined blocks. Re-join those chains so each dynamic await ends up in a
+		/// single block for DetectAwaitPattern. Await blocks are skipped so their branch to the resume block
+		/// survives; the unreachable callsite-init blocks must already be gone, otherwise their dangling branch
+		/// would keep the "after init" block from having the single predecessor CombineBlockWithNextBlock needs.
+		/// </summary>
+		void CoalesceDynamicAwaiterBlocks(BlockContainer container, ILTransformContext context)
+		{
+			foreach (var block in container.Blocks)
+			{
+				if (block.Instructions.Count == 0 || awaitBlocks.ContainsKey(block))
+					continue;
+				while (ControlFlowSimplification.CombineBlockWithNextBlock(container, block, context))
+				{
+					// keep pulling in trivial branch targets until this block can grow no further
+				}
+				// Only now is each awaiter copy in the same block as the call site that uses it.
+				InlineAwaiterCopies(block);
+			}
+		}
+
+		bool CheckAwaitBlock(Block block, out Block resumeBlock, out IField stackField)
+		{
+			// awaitBlock:
+			//   (pre-roslyn: save stack)
+			//   await(ldloca V_2)
+			//   br resumeBlock
+			resumeBlock = null;
+			stackField = null;
+			if (block.Instructions.Count < 2)
+				return false;
+			int pos = 0;
+			if (block.Instructions[pos] is StLoc stloc && stloc.Variable.IsSingleDefinition)
+			{
+				if (!block.Instructions[pos + 1].MatchStFld(out var target, out stackField, out var value))
+					return false;
+				if (!target.MatchLdThis())
+					return false;
+				pos += 2;
+			}
+			// await(ldloca awaiterVar)
+			if (block.Instructions[pos].OpCode != OpCode.Await)
+				return false;
+			// br resumeBlock
+			return block.Instructions[pos + 1].MatchBranch(out resumeBlock);
+		}
+
+		bool CheckResumeBlock(Block block, ILVariable awaiterVar, IField awaiterField, Block completedBlock, IField stackField)
+		{
+			int pos = 0;
+			if (!RestoreStack(block, ref pos, stackField))
+				return false;
+
+			// Visual Basic state machines use a different order of field assignements.
+			if (isVisualBasicStateMachine)
+			{
+				// stloc S_28(ldc.i4 -1)
+				// stloc cachedStateVar(ldloc S_28)
+				// stfld <>1__state(ldloc this, ldloc S_28)
+				if (!MatchStateFieldAssignement(block, ref pos))
+					return false;
+				pos++;
+
+				// stloc awaiterVar(ldfld awaiterField(ldloc this))
+				if (!MatchStoreToAwaiterVariable(block.Instructions[pos]))
+					return false;
+				pos++;
+
+				// [optional] stfld awaiterField(ldloc this, default.value)
+				MatchResetAwaiterField(block, ref pos);
+			}
+			else
+			{
+				// stloc awaiterVar(ldfld awaiterField(ldloc this))
+				if (!MatchStoreToAwaiterVariable(block.Instructions[pos]))
+					return false;
+				pos++;
+
+				// [optional] stfld awaiterField(ldloc this, default.value)
+				MatchResetAwaiterField(block, ref pos);
+
+				// stloc S_28(ldc.i4 -1)
+				// stloc cachedStateVar(ldloc S_28)
+				// stfld <>1__state(ldloc this, ldloc S_28)
+				if (!MatchStateFieldAssignement(block, ref pos))
+					return false;
+				pos++;
+			}
+			return block.Instructions[pos].MatchBranch(completedBlock);
+
+			bool MatchStoreToAwaiterVariable(ILInstruction instr)
+			{
+				// stloc awaiterVar(ldfld awaiterField(ldloc this))
+				if (!instr.MatchStLoc(awaiterVar, out var value))
+					return false;
+				// If the awaiter is a reference type, it might get stored in a field of type `object`
+				// and cast back to the awaiter type in the resume block (pre-Roslyn: with unbox.any)
+				if ((value.MatchCastClass(out var castArg, out var castType) || value.MatchUnboxAny(out castArg, out castType))
+					&& castType.Equals(awaiterVar.Type))
+				{
+					value = castArg;
+				}
+				if (!value.MatchLdFld(out var target, out var field))
+					return false;
+				if (!target.MatchLdThis())
+					return false;
+				if (!field.Equals(awaiterField))
+					return false;
+				return true;
+			}
+
+			void MatchResetAwaiterField(Block block, ref int pos)
+			{
+				// stfld awaiterField(ldloc this, default.value)
+				if (block.Instructions[pos].MatchStFld(out var target, out var field, out var value)
+					&& target.MatchLdThis()
+					&& field.Equals(awaiterField)
+					&& (value.OpCode == OpCode.DefaultValue || value.OpCode == OpCode.LdNull))
+				{
+					pos++;
+				}
+				else
+				{
+					// {stloc V_6(default.value System.Runtime.CompilerServices.TaskAwaiter)}
+					// {stobj System.Runtime.CompilerServices.TaskAwaiter`1[[System.Int32]](ldflda <>u__$awaiter4(ldloc this), ldloc V_6) at IL_0163}
+					if (block.Instructions[pos].MatchStLoc(out var variable, out value) && value.OpCode == OpCode.DefaultValue
+						&& block.Instructions[pos + 1].MatchStFld(out target, out field, out value)
+						&& field.Equals(awaiterField)
+						&& value.MatchLdLoc(variable))
+					{
+						pos += 2;
+					}
+				}
+			}
+
+			bool MatchStateFieldAssignement(Block block, ref int pos)
+			{
+				// stloc S_28(ldc.i4 -1)
+				// stloc cachedStateVar(ldloc S_28)
+				// stfld <>1__state(ldloc this, ldloc S_28)
+				ILVariable m1Var = null;
+				if (block.Instructions[pos] is StLoc stlocM1 && stlocM1.Value.MatchLdcI4(initialState) && stlocM1.Variable.Kind == VariableKind.StackSlot)
+				{
+					m1Var = stlocM1.Variable;
+					pos++;
+				}
+				if (block.Instructions[pos] is StLoc stlocCachedState)
+				{
+					if (stlocCachedState.Variable.Kind == VariableKind.Local && stlocCachedState.Variable.Index == cachedStateVar?.Index)
+					{
+						if (stlocCachedState.Value.MatchLdLoc(m1Var) || stlocCachedState.Value.MatchLdcI4(initialState))
+							pos++;
+					}
+				}
+				if (!block.Instructions[pos].MatchStFld(out var target, out var field, out var value))
+					return false;
+				if (!target.MatchLdThis())
+					return false;
+				if (!field.MemberDefinition.Equals(stateField.MemberDefinition))
+					return false;
+				if (!(value.MatchLdcI4(initialState) || value.MatchLdLoc(m1Var)))
+					return false;
+				return true;
+			}
+		}
+
+		private bool RestoreStack(Block block, ref int pos, IField stackField)
+		{
+			if (stackField == null)
+			{
+				return true; // nothing to restore
+			}
+			// stloc temp(unbox.any T(ldfld <>t__stack(ldloc this)))
+			if (!(block.Instructions[pos] is StLoc stloc))
+				return false;
+			if (!stloc.Variable.IsSingleDefinition)
+				return false;
+			if (!(stloc.Value is UnboxAny unbox))
+				return false;
+			if (!unbox.Argument.MatchLdFld(out var target, out var field))
+				return false;
+			if (!target.MatchLdThis())
+				return false;
+			if (!field.Equals(stackField))
+				return false;
+			pos++;
+			// restoring stack slots
+			while (block.Instructions[pos].MatchStLoc(out var v) && v.Kind == VariableKind.StackSlot)
+			{
+				pos++;
+			}
+			// stfld <>t__stack(ldloc this, ldnull)
+			if (block.Instructions[pos].MatchStFld(out target, out field, out var value))
+			{
+				if (target.MatchLdThis() && field.Equals(stackField) && value.MatchLdNull())
+				{
+					pos++;
+				}
+			}
+			return true;
+		}
+		#endregion
+
+		/// <summary>
+		/// Eliminates usage of doFinallyBodies
+		/// </summary>
+		private void CleanDoFinallyBodies(ILFunction function)
+		{
+			if (doFinallyBodies == null)
+			{
+				return; // roslyn-compiled code doesn't use doFinallyBodies
+			}
+			context.StepStartGroup("CleanDoFinallyBodies", function);
+			Block entryPoint = GetBodyEntryPoint(function.Body as BlockContainer);
+			if (entryPoint != null && entryPoint.Instructions[0].MatchStLoc(doFinallyBodies, out var value) && value.MatchLdcI4(1))
+			{
+				// Remove initial doFinallyBodies assignment, if it wasn't already removed when
+				// we rearranged the control flow.
+				entryPoint.Instructions.RemoveAt(0);
+			}
+			if (doFinallyBodies.StoreInstructions.Count != 0 || doFinallyBodies.AddressCount != 0)
+			{
+				// misdetected another variable as doFinallyBodies?
+				// reintroduce the initial store of ldc.i4(1)
+				context.Step("Re-introduce misdetected doFinallyBodies", function);
+				((BlockContainer)function.Body).EntryPoint.Instructions.Insert(0,
+					new StLoc(doFinallyBodies, new LdcI4(1)));
+				return;
+			}
+			foreach (var tryFinally in function.Descendants.OfType<TryFinally>())
+			{
+				entryPoint = GetBodyEntryPoint(tryFinally.FinallyBlock as BlockContainer);
+				if (entryPoint?.Instructions[0] is IfInstruction ifInst)
+				{
+					if (ifInst.Condition.MatchLogicNot(out var logicNotArg) && logicNotArg.MatchLdLoc(doFinallyBodies))
+					{
+						context.Step("Remove if(doFinallyBodies) from try-finally", tryFinally);
+						// condition will always be false now that we're using 'await' instructions
+						entryPoint.Instructions.RemoveAt(0);
+					}
+				}
+			}
+			// if there's any remaining loads (there shouldn't be), replace them with the constant 1
+			foreach (LdLoc load in doFinallyBodies.LoadInstructions.ToArray())
+			{
+				load.ReplaceWith(new LdcI4(1).WithILRange(load));
+			}
+			context.StepEndGroup(keepIfEmpty: true);
+		}
+
+		internal static Block GetBodyEntryPoint(BlockContainer body)
+		{
+			if (body == null)
+				return null;
+			Block entryPoint = body.EntryPoint;
+			while (entryPoint.Instructions[0].MatchBranch(out var targetBlock) && targetBlock.IncomingEdgeCount == 1 && targetBlock.Parent == body)
+			{
+				entryPoint = targetBlock;
+			}
+			return entryPoint;
+		}
+
+		void TranslateCachedFieldsToLocals()
+		{
+			foreach (var (cachedVar, param) in cachedFieldToParameterMap)
+			{
+				Debug.Assert(cachedVar.StoreCount <= 1);
+				foreach (var inst in cachedVar.LoadInstructions.ToArray())
+				{
+					inst.Variable = param;
+				}
+				foreach (var inst in cachedVar.AddressInstructions.ToArray())
+				{
+					inst.Variable = param;
+				}
+			}
+		}
+	}
+}

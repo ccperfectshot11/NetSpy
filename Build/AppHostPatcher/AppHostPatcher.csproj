@@ -1,17 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Import Project="..\..\DnSpyCommon.props" />
+  <Import Project="..\..\NetSpyCommon.props" />
 
   <PropertyGroup>
-    <Copyright>$(DnSpyAssemblyCopyright)</Copyright>
-    <Version>$(DnSpyAssemblyVersion)</Version>
-    <InformationalVersion>$(DnSpyAssemblyInformationalVersion)</InformationalVersion>
+    <Copyright>$(NetSpyAssemblyCopyright)</Copyright>
+    <Version>$(NetSpyAssemblyVersion)</Version>
+    <InformationalVersion>$(NetSpyAssemblyInformationalVersion)</InformationalVersion>
 
     <SignAssembly>True</SignAssembly>
-    <AssemblyOriginatorKeyFile>..\..\dnSpy.snk</AssemblyOriginatorKeyFile>
+    <AssemblyOriginatorKeyFile>..\..\NetSpy.snk</AssemblyOriginatorKeyFile>
     <Nullable>enable</Nullable>
 
-    <RuntimeIdentifiers>$(DnSpyRuntimeIdentifiers)</RuntimeIdentifiers>
+    <RuntimeIdentifiers>$(NetSpyRuntimeIdentifiers)</RuntimeIdentifiers>
     <OutputType>Exe</OutputType>
   </PropertyGroup>
 

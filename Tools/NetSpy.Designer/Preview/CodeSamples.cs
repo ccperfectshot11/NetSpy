@@ -13,7 +13,7 @@ namespace NetSpy.Designer.Preview
 	{
 		public static IReadOnlyList<CodeSample> All { get; } = new[] {
 			new CodeSample("JsonConvert", "Class", """
-				// Decompilat cu NetSpy (motor ILSpy)
+				// Decompilat cu NetSpy (motor NetSpy)
 				using System;
 				using System.Globalization;
 

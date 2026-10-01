@@ -16,7 +16,7 @@ namespace NetSpy.Designer.Model
 
 		public override string ToString() => Name;
 
-		// Aspectul clasic: drept, lipit, dens (ca dnSpy / Visual Studio).
+		// Aspectul clasic: drept, lipit, dens (ca NetSpy / Visual Studio).
 		static readonly Dictionary<string, string> Classic = new() {
 			["RoundedCorners"] = "false",
 			["PanelGap"] = "0",
@@ -128,7 +128,7 @@ namespace NetSpy.Designer.Model
 				["SyntaxComment"] = "#8B949E",
 			})),
 
-			new Preset("Visual Studio albastru (dnSpy)", Merge(Classic, new() {
+			new Preset("Visual Studio albastru (NetSpy)", Merge(Classic, new() {
 				["Accent"] = "#3399FF",
 				["WindowBg"] = "#293955",
 				["TitleBarBg"] = "#D6DBE9",
@@ -155,7 +155,7 @@ namespace NetSpy.Designer.Model
 				["LineNumber"] = "#2B91AF",
 			})),
 
-			new Preset("Visual Studio întunecat (dnSpy)", Merge(Classic, DarkEditor, new() {
+			new Preset("Visual Studio întunecat (NetSpy)", Merge(Classic, DarkEditor, new() {
 				["Accent"] = "#007ACC",
 				["WindowBg"] = "#2D2D30",
 				["TitleBarBg"] = "#2D2D30",

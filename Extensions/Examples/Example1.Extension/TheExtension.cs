@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using dnSpy.Contracts.Extension;
+using NetSpy.Contracts.Extension;
 
 // Each extension should export one class implementing IExtension
 

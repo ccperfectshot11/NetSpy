@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.Windows.Media;
-using dnSpy.Contracts.Documents.TreeView;
-using dnSpy.Contracts.Text.Classification;
-using dnSpy.Contracts.TreeView.Text;
+using NetSpy.Contracts.Documents.TreeView;
+using NetSpy.Contracts.Text.Classification;
+using NetSpy.Contracts.TreeView.Text;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Classification;
 using Microsoft.VisualStudio.Utilities;

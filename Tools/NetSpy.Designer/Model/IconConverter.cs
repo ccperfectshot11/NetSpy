@@ -13,14 +13,14 @@ using SharpVectors.Renderers.Wpf;
 namespace NetSpy.Designer.Model
 {
 	/// <summary>
-	/// Pune iconițele ILSpy (Icons\*.svg) în NetSpy: fiecare iconiță dnSpy din arbore (ex. ClassPrivate)
-	/// devine un fișier vectorial dnSpy\dnSpy\Images\ILSpy\ClassPrivate.xaml = iconița ILSpy de bază (Class.svg)
-	/// + suprapunerea de acces (OverlayPrivate.svg), exact cum le compune ILSpy. Culorile rămân cele pentru
+	/// Pune iconițele NetSpy (Icons\*.svg) în NetSpy: fiecare iconiță NetSpy din arbore (ex. ClassPrivate)
+	/// devine un fișier vectorial NetSpy\NetSpy\Images\NetSpy\ClassPrivate.xaml = iconița NetSpy de bază (Class.svg)
+	/// + suprapunerea de acces (OverlayPrivate.svg), exact cum le compune NetSpy. Culorile rămân cele pentru
 	/// fundal deschis: NetSpy le recolorează singur pe fundal închis (ThemedImageCreator, ca Visual Studio).
 	/// </summary>
 	public static class IconConverter
 	{
-		// tipurile care au variante de acces în dnSpy: nume dnSpy -> iconiță ILSpy
+		// tipurile care au variante de acces în NetSpy: nume NetSpy -> iconiță NetSpy
 		static readonly Dictionary<string, string> Kinds = new() {
 			["Class"] = "Class",
 			["Interface"] = "Interface",
@@ -36,7 +36,7 @@ namespace NetSpy.Designer.Model
 			["Operator"] = "Operator",
 		};
 
-		// sufixul dnSpy -> suprapunerea ILSpy (null = fără)
+		// sufixul NetSpy -> suprapunerea NetSpy (null = fără)
 		static readonly Dictionary<string, string?> Access = new() {
 			["Public"] = null,
 			["Internal"] = "OverlayInternal",
@@ -79,13 +79,13 @@ namespace NetSpy.Designer.Model
 		}
 
 		/// <summary>
-		/// Folderul dnSpy\dnSpy\Images\ILSpy al NetSpy. (dnSpy.Images e un submodul al dnSpyEx: nu-l modificăm;
-		/// NetSpy are un furnizor de imagini care le dă pe acestea înaintea celor din dnSpy.Images.)
+		/// Folderul NetSpy\NetSpy\Images\NetSpy al NetSpy. (NetSpy.Images e un submodul al NetSpyEx: nu-l modificăm;
+		/// NetSpy are un furnizor de imagini care le dă pe acestea înaintea celor din NetSpy.Images.)
 		/// </summary>
 		public static string? FindImagesDirectory()
 		{
 			var themes = ThemeExporter.FindThemesDirectory();
-			return themes is null ? null : Path.GetFullPath(Path.Combine(themes, "..", "Images", "ILSpy"));
+			return themes is null ? null : Path.GetFullPath(Path.Combine(themes, "..", "Images", "NetSpy"));
 		}
 
 		/// <returns>câte iconițe au fost scrise</returns>
@@ -100,12 +100,12 @@ namespace NetSpy.Designer.Model
 				{
 					var path = Path.Combine(iconsDirectory, layer + ".svg");
 					if (!File.Exists(path))
-						throw new FileNotFoundException("Lipsește iconița ILSpy", path);
+						throw new FileNotFoundException("Lipsește iconița NetSpy", path);
 					var reader = new FileSvgReader(new WpfDrawingSettings { IncludeRuntime = false, TextAsGeometry = true });
 					var drawing = reader.Read(path) ?? throw new InvalidDataException("SVG invalid: " + path);
 					group.Children.Add(drawing);
 				}
-				// toate SVG-urile ILSpy au viewBox 0 0 16 16: fixăm zona de desen la 16x16 (un dreptunghi transparent)
+				// toate SVG-urile NetSpy au viewBox 0 0 16 16: fixăm zona de desen la 16x16 (un dreptunghi transparent)
 				group.Children.Insert(0, new GeometryDrawing(Brushes.Transparent, null, new RectangleGeometry(new Rect(0, 0, 16, 16))));
 				group.ClipGeometry = new RectangleGeometry(new Rect(0, 0, 16, 16));
 
@@ -117,7 +117,7 @@ namespace NetSpy.Designer.Model
 				};
 				var xaml = XamlWriter.Save(viewbox);
 				File.WriteAllText(Path.Combine(imagesDirectory, target + ".xaml"),
-					"<!-- Generat din iconițele ILSpy (MIT) de NetSpy Designer: " + string.Join(" + ", layers) + " -->\r\n" + xaml);
+					"<!-- Generat din iconițele NetSpy (MIT) de NetSpy Designer: " + string.Join(" + ", layers) + " -->\r\n" + xaml);
 				count++;
 			}
 			return count;

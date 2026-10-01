@@ -1,12 +1,12 @@
 using System;
 using System.ComponentModel.Composition;
 using System.IO;
-using dnSpy.Contracts.Decompiler;
-using dnSpy.Contracts.Documents;
-using dnSpy.Contracts.Documents.Tabs.DocViewer;
-using dnSpy.Contracts.Documents.TreeView;
-using dnSpy.Contracts.Images;
-using dnSpy.Contracts.Text;
+using NetSpy.Contracts.Decompiler;
+using NetSpy.Contracts.Documents;
+using NetSpy.Contracts.Documents.Tabs.DocViewer;
+using NetSpy.Contracts.Documents.TreeView;
+using NetSpy.Contracts.Images;
+using NetSpy.Contracts.Text;
 
 // Adds a new IDsDocument that can be loaded into the document treeview. It gets its own DsDocumentNode.
 // Open a .txt/.xml/.cs/.vb (see supportedExtensions) file to trigger this code.
@@ -85,7 +85,7 @@ namespace Example2.Extension {
 		};
 	}
 
-	// Gets called by dnSpy to create a DsDocumentNode
+	// Gets called by NetSpy to create a DsDocumentNode
 	[ExportDsDocumentNodeProvider]
 	sealed class MyDsDocumentNodeProvider : IDsDocumentNodeProvider {
 		public DsDocumentNode? Create(IDocumentTreeView documentTreeView, DsDocumentNode? owner, IDsDocument document) {

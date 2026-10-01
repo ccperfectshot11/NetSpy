@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.Windows.Media;
-using dnSpy.Contracts.Hex;
-using dnSpy.Contracts.Hex.Tagging;
-using dnSpy.Contracts.Text.Classification;
+using NetSpy.Contracts.Hex;
+using NetSpy.Contracts.Hex.Tagging;
+using NetSpy.Contracts.Text.Classification;
 using Microsoft.VisualStudio.Text.Classification;
 using Microsoft.VisualStudio.Utilities;
 

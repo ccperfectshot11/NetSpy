@@ -1,0 +1,1088 @@
+// Copyright (c) 2014-2017 Daniel Grunwald
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal in the Software
+// without restriction, including without limitation the rights to use, copy, modify, merge,
+// publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+// to whom the Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in all copies or
+// substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Linq.Expressions;
+
+using NetSpy.Decompiler.TypeSystem;
+
+namespace NetSpy.Decompiler.IL.Transforms
+{
+	/// <summary>
+	/// Collection of transforms that detect simple expression patterns
+	/// (e.g. 'cgt.un(..., ld.null)') and replace them with different instructions.
+	/// </summary>
+	/// <remarks>
+	/// Should run after inlining so that the expression patterns can be detected.
+	/// </remarks>
+	public class ExpressionTransforms : ILVisitor, IStatementTransform
+	{
+		internal StatementTransformContext context;
+
+		public static void RunOnSingleStatement(ILInstruction statement, ILTransformContext context)
+		{
+			if (statement == null)
+				throw new ArgumentNullException(nameof(statement));
+			if (!(statement.Parent is Block parent))
+				throw new ArgumentException("ILInstruction must be a statement, i.e., direct child of a block.");
+			new ExpressionTransforms().Run(parent, statement.ChildIndex, new StatementTransformContext(new BlockTransformContext(context)));
+		}
+
+		public void Run(Block block, int pos, StatementTransformContext context)
+		{
+			this.context = context;
+			context.StepStartGroup($"ExpressionTransforms ({block.Label}:{pos})", block.Instructions[pos]);
+			block.Instructions[pos].AcceptVisitor(this);
+			context.StepEndGroup(keepIfEmpty: true);
+		}
+
+		protected override void Default(ILInstruction inst)
+		{
+			foreach (var child in inst.Children)
+			{
+				child.AcceptVisitor(this);
+			}
+		}
+
+		protected internal override void VisitBlockContainer(BlockContainer container)
+		{
+			if (container.Kind == ContainerKind.Switch)
+			{
+				// Special case for switch: Only visit the switch condition block.
+				var switchInst = (SwitchInstruction)container.EntryPoint.Instructions[0];
+				switchInst.Value.AcceptVisitor(this);
+
+				HandleSwitchExpression(container, switchInst);
+			}
+			// No need to call base.VisitBlockContainer, see comment in VisitBlock.
+		}
+
+		protected internal override void VisitBlock(Block block)
+		{
+			if (block.Kind == BlockKind.ControlFlow)
+			{
+				// Don't visit child control flow blocks;
+				// since this is a block transform
+				// we know those were already handled previously.
+				return;
+			}
+			base.VisitBlock(block);
+		}
+
+		protected internal override void VisitComp(Comp inst)
+		{
+			// "logic.not(arg)" is sugar for "comp(arg != ldc.i4 0)"
+			if (inst.MatchLogicNot(out var arg))
+			{
+				var toVisit = HandleLogicNot(inst, arg, context);
+				(toVisit ?? arg).AcceptVisitor(this);
+				return;
+			}
+			else if (inst.Kind == ComparisonKind.Inequality && inst.LiftingKind == ComparisonLiftingKind.None
+				&& inst.Right.MatchLdcI4(0)
+				&& (inst.Left.InferType(context.TypeSystem).IsKnownType(KnownTypeCode.Boolean)
+				   || inst.Left.MatchLdcI4(0) || inst.Left.MatchLdcI4(1)))
+			{
+				// When `x` is known to be 0 or 1:
+				// `comp(x != 0) => x`
+				context.Step("Remove redundant comp(... != 0)", inst);
+				inst.Left.AddILRange(inst);
+				var left = inst.Left;
+				inst.ReplaceWith(left);
+				context.EndStep(left);
+				left.AcceptVisitor(this);
+				return;
+			}
+			if (context.Settings.LiftNullables)
+			{
+				new NullableLiftingTransform(context).Run(inst);
+			}
+
+			base.VisitComp(inst);
+			if (inst.IsLifted)
+			{
+				return;
+			}
+			EarlyExpressionTransforms.FixComparisonKindLdNull(inst, context);
+
+			var rightWithoutConv = inst.Right.UnwrapConv(ConversionKind.SignExtend).UnwrapConv(ConversionKind.ZeroExtend);
+			if (rightWithoutConv.MatchLdcI4(0)
+				&& inst.Sign == Sign.Unsigned
+				&& (inst.Kind == ComparisonKind.GreaterThan || inst.Kind == ComparisonKind.LessThanOrEqual))
+			{
+				if (inst.Kind == ComparisonKind.GreaterThan)
+				{
+					context.Step("comp.unsigned(left > ldc.i4 0) => comp(left != ldc.i4 0)", inst);
+					inst.Kind = ComparisonKind.Inequality;
+					VisitComp(inst);
+					return;
+				}
+				else if (inst.Kind == ComparisonKind.LessThanOrEqual)
+				{
+					context.Step("comp.unsigned(left <= ldc.i4 0) => comp(left == ldc.i4 0)", inst);
+					inst.Kind = ComparisonKind.Equality;
+					VisitComp(inst);
+					return;
+				}
+			}
+			else if (rightWithoutConv.MatchLdcI4(0) && inst.Kind.IsEqualityOrInequality())
+			{
+				if (inst.Left.MatchLdLen(StackType.I, out ILInstruction array))
+				{
+					// comp.unsigned(ldlen array == conv i4->i(ldc.i4 0))
+					// => comp(ldlen.i4 array == ldc.i4 0)
+					// This is a special case where the C# compiler doesn't generate conv.i4 after ldlen.
+					context.Step("comp(ldlen.i4 array == ldc.i4 0)", inst);
+					inst.InputType = StackType.I4;
+					inst.Left.ReplaceWith(new LdLen(StackType.I4, array).WithILRange(inst.Left));
+					inst.Right = rightWithoutConv;
+				}
+				else if (inst.Left is Conv conv && conv.TargetType == PrimitiveType.I && conv.Argument.ResultType == StackType.Obj)
+				{
+					// C++/CLI sometimes uses this weird comparison with null:
+					context.Step("comp(conv o->i (ldloc obj) == conv i4->i <sign extend>(ldc.i4 0))", inst);
+					// -> comp(ldloc obj == ldnull)
+					inst.InputType = StackType.Obj;
+					inst.Left = conv.Argument;
+					inst.Right = new LdNull().WithILRange(inst.Right);
+					inst.Right.AddILRange(rightWithoutConv);
+				}
+			}
+		}
+
+		protected internal override void VisitConv(Conv inst)
+		{
+			inst.Argument.AcceptVisitor(this);
+			if (inst.Argument.MatchLdLen(StackType.I, out ILInstruction array) && inst.TargetType.IsIntegerType()
+				&& (!inst.CheckForOverflow || context.Settings.AssumeArrayLengthFitsIntoInt32))
+			{
+				context.Step("conv.i4(ldlen array) => ldlen.i4(array)", inst);
+				inst.AddILRange(inst.Argument);
+				var ldLen = new LdLen(inst.TargetType.GetStackType(), array).WithILRange(inst);
+				inst.ReplaceWith(ldLen);
+				context.EndStep(ldLen);
+				return;
+			}
+			if (inst.TargetType.IsFloatType() && inst.Argument is Conv conv
+				&& conv.Kind == ConversionKind.IntToFloat && conv.TargetType == PrimitiveType.R)
+			{
+				// IL conv.r.un does not indicate whether to convert the target type to R4 or R8,
+				// so the C# compiler usually follows it with an explicit conv.r4 or conv.r8.
+				// To avoid emitting '(float)(double)val', we combine these two conversions:
+				context.Step("conv.rN(conv.r.un(...)) => conv.rN.un(...)", inst);
+				var newConv = new Conv(conv.Argument, conv.InputType, conv.InputSign, inst.TargetType, inst.CheckForOverflow, inst.IsLifted | conv.IsLifted);
+				inst.ReplaceWith(newConv);
+				context.EndStep(newConv);
+				return;
+			}
+		}
+
+		protected internal override void VisitBox(Box inst)
+		{
+			inst.Argument.AcceptVisitor(this);
+			if (inst.Type.IsReferenceType == true && inst.Argument.ResultType == inst.ResultType)
+			{
+				// For reference types, box is a no-op.
+				context.Step("box ref-type(arg) => arg", inst);
+				inst.Argument.AddILRange(inst);
+				var arg = inst.Argument;
+				inst.ReplaceWith(arg);
+				context.EndStep(arg);
+			}
+		}
+
+		protected internal override void VisitLdElema(LdElema inst)
+		{
+			base.VisitLdElema(inst);
+			CleanUpArrayIndices(inst.Indices);
+			if (IndexRangeTransform.HandleLdElema(inst, context))
+				return;
+		}
+
+		protected internal override void VisitNewArr(NewArr inst)
+		{
+			base.VisitNewArr(inst);
+			CleanUpArrayIndices(inst.Indices);
+		}
+
+		void CleanUpArrayIndices(InstructionCollection<ILInstruction> indices)
+		{
+			foreach (ILInstruction index in indices)
+			{
+				if (index is Conv conv && conv.ResultType == StackType.I
+					&& (conv.Kind == ConversionKind.Truncate && conv.CheckForOverflow
+						|| conv.Kind == ConversionKind.ZeroExtend || conv.Kind == ConversionKind.SignExtend)
+				)
+				{
+					context.Step("Remove conv.i from array index", index);
+					index.ReplaceWith(conv.Argument);
+					context.EndStep(conv.Argument);
+				}
+			}
+		}
+
+		/// <summary>
+		/// Handles combining negations with comparisons and logical operations.
+		/// Returns the instruction that `inst` was replaced with; or null is no transformation was made.
+		/// </summary>
+		static ILInstruction HandleLogicNot(Comp inst, ILInstruction arg, ILTransformContext context)
+		{
+			if (arg is Comp comp)
+			{
+				if ((!comp.InputType.IsFloatType() && !comp.IsLifted) || comp.Kind.IsEqualityOrInequality())
+				{
+					context.Step("push negation into comparison", inst);
+					comp.Kind = comp.Kind.Negate();
+					comp.AddILRange(inst);
+					inst.ReplaceWith(comp);
+					context.EndStep(comp);
+					return comp;
+				}
+			}
+			else if (arg.MatchLogicAnd(out var lhs, out var rhs))
+			{
+				// logic.not(if (lhs) rhs else ldc.i4 0)
+				// ==> if (logic.not(lhs)) ldc.i4 1 else logic.not(rhs)
+				context.Step("push negation into logic.and", inst);
+				IfInstruction ifInst = (IfInstruction)arg;
+				var ldc0 = ifInst.FalseInst;
+				Debug.Assert(ldc0.MatchLdcI4(0));
+				ifInst.Condition = Comp.LogicNot(lhs).WithILRange(inst);
+				ifInst.TrueInst = new LdcI4(1).WithILRange(ldc0);
+				ifInst.FalseInst = Comp.LogicNot(rhs).WithILRange(inst);
+				inst.ReplaceWith(ifInst);
+				context.EndStep(ifInst);
+				return ifInst;
+			}
+			else if (arg.MatchLogicOr(out lhs, out rhs))
+			{
+				// logic.not(if (lhs) ldc.i4 1 else rhs)
+				// ==> if (logic.not(lhs)) logic.not(rhs) else ldc.i4 0)
+				context.Step("push negation into logic.or", inst);
+				IfInstruction ifInst = (IfInstruction)arg;
+				var ldc1 = ifInst.TrueInst;
+				Debug.Assert(ldc1.MatchLdcI4(1));
+				ifInst.Condition = Comp.LogicNot(lhs).WithILRange(inst);
+				ifInst.TrueInst = Comp.LogicNot(rhs).WithILRange(inst);
+				ifInst.FalseInst = new LdcI4(0).WithILRange(ldc1);
+				inst.ReplaceWith(ifInst);
+				context.EndStep(ifInst);
+				return ifInst;
+			}
+			return null;
+		}
+
+		protected internal override void VisitCall(Call inst)
+		{
+			if (NullableLiftingTransform.MatchGetValueOrDefault(inst, out var nullableValue, out var fallback)
+				&& SemanticHelper.IsPure(fallback.Flags))
+			{
+				context.Step("call Nullable{T}.GetValueOrDefault(a, b) -> a ?? b", inst);
+				var ldObj = new LdObj(nullableValue, inst.Method.DeclaringType);
+				var replacement = new NullCoalescingInstruction(
+					NullableType.GetUnderlyingType(inst.Method.DeclaringType),
+					NullCoalescingKind.NullableWithValueFallback, ldObj, fallback);
+				inst.ReplaceWith(replacement.WithILRange(inst));
+				context.EndStep(replacement);
+				replacement.AcceptVisitor(this);
+				return;
+			}
+			if (TransformArrayInitializers.TransformRuntimeHelpersCreateSpanInitialization(inst, context, out var replacement2))
+			{
+				context.Step("TransformRuntimeHelpersCreateSpanInitialization: single-dim", inst);
+				inst.ReplaceWith(replacement2);
+				context.EndStep(replacement2);
+				replacement2.AcceptVisitor(this);
+				return;
+			}
+			base.VisitCall(inst);
+			if (context.Settings.InlineArrays && InlineArrayTransform.RunOnExpression(inst, context))
+			{
+				return;
+			}
+			TransformAssignment.HandleCompoundAssign(inst, context);
+		}
+
+		protected internal override void VisitCallVirt(CallVirt inst)
+		{
+			base.VisitCallVirt(inst);
+			TransformAssignment.HandleCompoundAssign(inst, context);
+		}
+
+		protected internal override void VisitNewObj(NewObj inst)
+		{
+			if (TransformSpanTCtorContainingStackAlloc(inst, out ILInstruction locallocSpan))
+			{
+				context.Step("new Span<T>(stackalloc) -> stackalloc Span<T>", inst);
+				inst.ReplaceWith(locallocSpan);
+				context.EndStep(locallocSpan);
+				ILInstruction stmt = Block.GetContainingStatement(locallocSpan);
+				// Special case to eliminate extra store
+				if (stmt.GetNextSibling() is StLoc storeStmt && storeStmt.Value is LdLoc)
+					ILInlining.InlineIfPossible((Block)stmt.Parent, stmt.ChildIndex, context);
+				return;
+			}
+			if (TransformArrayInitializers.TransformSpanTArrayInitialization(inst, context, out var replacement))
+			{
+				context.Step("TransformSpanTArrayInitialization: single-dim", inst);
+				inst.ReplaceWith(replacement);
+				context.EndStep(replacement);
+				return;
+			}
+			if (TransformDelegateCtorLdVirtFtnToLdVirtDelegate(inst, out LdVirtDelegate ldVirtDelegate))
+			{
+				context.Step("new Delegate(target, ldvirtftn Method) -> ldvirtdelegate Delegate Method(target)", inst);
+				inst.ReplaceWith(ldVirtDelegate);
+				context.EndStep(ldVirtDelegate);
+				return;
+			}
+			base.VisitNewObj(inst);
+		}
+
+		/// <summary>
+		/// newobj Delegate..ctor(target, ldvirtftn TargetMethod(target))
+		/// =>
+		/// ldvirtdelegate System.Delegate TargetMethod(target)
+		/// </summary>
+		bool TransformDelegateCtorLdVirtFtnToLdVirtDelegate(NewObj inst, out LdVirtDelegate ldVirtDelegate)
+		{
+			ldVirtDelegate = null;
+			if (inst.Method.DeclaringType.Kind != TypeKind.Delegate)
+				return false;
+			if (inst.Arguments.Count != 2)
+				return false;
+			if (!(inst.Arguments[1] is LdVirtFtn ldVirtFtn))
+				return false;
+			if (!SemanticHelper.IsPure(inst.Arguments[0].Flags))
+				return false;
+			if (!inst.Arguments[0].Match(ldVirtFtn.Argument).Success)
+				return false;
+			ldVirtDelegate = new LdVirtDelegate(inst.Arguments[0], inst.Method.DeclaringType, ldVirtFtn.Method)
+				.WithILRange(inst).WithILRange(ldVirtFtn).WithILRange(ldVirtFtn.Argument);
+			return true;
+		}
+
+		/// <summary>
+		/// newobj Span..ctor(localloc(conv i4->u &lt;zero extend&gt;(ldc.i4 sizeInBytes)), numberOfElementsExpr)
+		/// =>
+		/// localloc.span T(numberOfElementsExpr)
+		/// 
+		/// -or-
+		/// 
+		/// newobj Span..ctor(Block IL_0000 (StackAllocInitializer) {
+		///		stloc I_0(localloc(conv i4->u&lt;zero extend>(ldc.i4 sizeInBytes)))
+		///		...
+		///		final: ldloc I_0
+		///	}, numberOfElementsExpr)
+		/// =>
+		/// Block IL_0000 (StackAllocInitializer) {
+		///		stloc I_0(localloc.span T(numberOfElementsExpr))
+		///		...
+		///		final: ldloc I_0
+		/// }
+		/// </summary>
+		bool TransformSpanTCtorContainingStackAlloc(NewObj newObj, out ILInstruction locallocSpan)
+		{
+			locallocSpan = null;
+			IType type = newObj.Method.DeclaringType;
+			if (!type.IsKnownType(KnownTypeCode.SpanOfT) && !type.IsKnownType(KnownTypeCode.ReadOnlySpanOfT))
+				return false;
+			if (newObj.Arguments.Count != 2 || type.TypeArguments.Count != 1)
+				return false;
+			IType elementType = type.TypeArguments[0];
+			if (newObj.Arguments[0].MatchLocAlloc(out var sizeInBytes) && MatchesElementCount(sizeInBytes, elementType, newObj.Arguments[1]))
+			{
+				locallocSpan = new LocAllocSpan(newObj.Arguments[1], type);
+				return true;
+			}
+			if (newObj.Arguments[0] is Block initializer && initializer.Kind == BlockKind.StackAllocInitializer)
+			{
+				if (!initializer.Instructions[0].MatchStLoc(out var initializerVariable, out var value))
+					return false;
+				if (!TypeUtils.IsCompatiblePointerTypeForMemoryAccess(initializerVariable.Type, elementType))
+					return false;
+				if (!(value.MatchLocAlloc(out sizeInBytes) && MatchesElementCount(sizeInBytes, elementType, newObj.Arguments[1])))
+					return false;
+				// The block addresses the allocation through the localloc pointer and only its
+				// result is the span, so the constructor becomes the block's final instruction
+				// instead of retyping the initializer variable to Span&lt;T&gt;.
+				initializer.FinalInstruction = new NewObj(newObj.Method) {
+					Arguments = { new LdLoc(initializerVariable), newObj.Arguments[1] }
+				}.WithILRange(newObj);
+				locallocSpan = initializer;
+				return true;
+			}
+			return false;
+		}
+
+		bool MatchesElementCount(ILInstruction sizeInBytesInstr, IType elementType, ILInstruction elementCountInstr2)
+		{
+			var pointerType = new PointerType(elementType);
+			var elementCountInstr = PointerArithmeticOffset.Detect(sizeInBytesInstr, pointerType.ElementType, checkForOverflow: true, unwrapZeroExtension: true);
+			if (elementCountInstr == null || !elementCountInstr.UnwrapConv(ConversionKind.ZeroExtend).Match(elementCountInstr2).Success)
+				return false;
+			return true;
+		}
+
+		bool TransformDecimalFieldToConstant(LdObj inst, out LdcDecimal result)
+		{
+			if (inst.MatchLdsFld(out var field) && field.DeclaringType.IsKnownType(KnownTypeCode.Decimal))
+			{
+				decimal? value = null;
+				if (field.Name == "One")
+				{
+					value = decimal.One;
+				}
+				else if (field.Name == "MinusOne")
+				{
+					value = decimal.MinusOne;
+				}
+				else if (field.Name == "Zero")
+				{
+					value = decimal.Zero;
+				}
+				if (value != null)
+				{
+					result = new LdcDecimal(value.Value).WithILRange(inst).WithILRange(inst.Target);
+					return true;
+				}
+			}
+			result = null;
+			return false;
+		}
+
+		protected internal override void VisitLdObj(LdObj inst)
+		{
+			base.VisitLdObj(inst);
+			EarlyExpressionTransforms.AddressOfLdLocToLdLoca(inst, context);
+			if (EarlyExpressionTransforms.LdObjToLdLoc(inst, context))
+				return;
+			if (TransformDecimalFieldToConstant(inst, out LdcDecimal decimalConstant))
+			{
+				context.Step("TransformDecimalFieldToConstant", inst);
+				inst.ReplaceWith(decimalConstant);
+				context.EndStep(decimalConstant);
+				return;
+			}
+		}
+
+		protected internal override void VisitLdObjIfRef(LdObjIfRef inst)
+		{
+			base.VisitLdObjIfRef(inst);
+			if (inst.Target is AddressOf)
+			{
+				context.Step("ldobj.if.ref(addressof(...)) -> addressof(...)", inst);
+				// there already is a temporary, so the ldobj.if.ref is a no-op in both cases
+				var target = inst.Target;
+				inst.ReplaceWith(target);
+				context.EndStep(target);
+				return;
+			}
+			if (inst.Target.MatchLdLoc(out var s) && s.IsSingleDefinition && s.LoadCount == 1
+				&& s.StoreInstructions.SingleOrDefault() is StLoc {
+					Value: LdLoca { Variable: { AddressCount: 1, StoreCount: 1 } }
+				})
+			{
+				context.Step("Single use of ldobj.if.ref(ldloc v) -> ldloc v", inst);
+				// there already is a temporary, so the ldobj.if.ref is a no-op in both cases
+				var target = inst.Target;
+				inst.ReplaceWith(target);
+				context.EndStep(target);
+				return;
+			}
+		}
+
+		protected internal override void VisitStObj(StObj inst)
+		{
+			base.VisitStObj(inst);
+			if (EarlyExpressionTransforms.StObjToStLoc(inst, context))
+			{
+				context.RequestRerun();
+				return;
+			}
+			TransformAssignment.HandleCompoundAssign(inst, context);
+		}
+
+		protected internal override void VisitStLoc(StLoc inst)
+		{
+			base.VisitStLoc(inst);
+			TransformAssignment.HandleCompoundAssign(inst, context);
+		}
+
+		protected internal override void VisitIfInstruction(IfInstruction inst)
+		{
+			inst.TrueInst.AcceptVisitor(this);
+			inst.FalseInst.AcceptVisitor(this);
+			inst = HandleConditionalOperator(inst);
+
+			// Bring LogicAnd/LogicOr into their canonical forms:
+			// if (cond) ldc.i4 0 else RHS --> if (!cond) RHS else ldc.i4 0
+			// if (cond) RHS else ldc.i4 1 --> if (!cond) ldc.i4 1 else RHS
+			// Be careful: when both LHS and RHS are the constant 1, we must not
+			// swap the arguments as it would lead to an infinite transform loop.
+			if (inst.TrueInst.MatchLdcI4(0) && !inst.FalseInst.MatchLdcI4(0)
+				|| inst.FalseInst.MatchLdcI4(1) && !inst.TrueInst.MatchLdcI4(1))
+			{
+				context.Step("canonicalize logic and/or", inst);
+				var t = inst.TrueInst;
+				inst.TrueInst = inst.FalseInst;
+				inst.FalseInst = t;
+				inst.Condition = Comp.LogicNot(inst.Condition);
+			}
+			// Process condition after our potential modifications.
+			inst.Condition.AcceptVisitor(this);
+
+			if (new NullableLiftingTransform(context).Run(inst))
+			{
+				context.Step("NullableLiftingTransform", inst);
+				return;
+			}
+
+			if (TransformDynamicAddAssignOrRemoveAssign(inst, context))
+				return;
+			if (inst.MatchIfInstructionPositiveCondition(out var condition, out var trueInst, out var falseInst))
+			{
+				ILInstruction transformed = UserDefinedLogicTransform.Transform(condition, trueInst, falseInst);
+				if (transformed == null)
+				{
+					transformed = UserDefinedLogicTransform.TransformDynamic(condition, trueInst, falseInst);
+				}
+				if (transformed != null)
+				{
+					context.Step("User-defined short-circuiting logic operator (roslyn pattern)", condition);
+					transformed.AddILRange(inst);
+					inst.ReplaceWith(transformed);
+					context.EndStep(transformed);
+					return;
+				}
+			}
+			if (MatchInstruction.IsPatternMatch(inst.Condition, out _, context.Settings)
+				&& inst.TrueInst.MatchLdcI4(1) && inst.FalseInst.MatchLdcI4(0))
+			{
+				context.Step("match(x) ? true : false -> match(x)", inst);
+				inst.Condition.AddILRange(inst);
+				var matchCondition = inst.Condition;
+				inst.ReplaceWith(matchCondition);
+				context.EndStep(matchCondition);
+				return;
+			}
+		}
+
+		IfInstruction HandleConditionalOperator(IfInstruction inst)
+		{
+			// if (cond) stloc A(V1) else stloc A(V2) --> stloc A(if (cond) V1 else V2)
+			if (inst.TrueInst is not Block trueInst || trueInst.Instructions.Count != 1)
+				return inst;
+			if (inst.FalseInst is not Block falseInst || falseInst.Instructions.Count != 1)
+				return inst;
+			ILVariable v;
+			ILInstruction value1, value2;
+			if (trueInst.Instructions[0].MatchStLoc(out v, out value1)
+				&& falseInst.Instructions[0].MatchStLoc(v, out value2))
+			{
+				context.Step("conditional operator", inst);
+				IType type = v.Type;
+				// Try to tighten the type to `bool`; this matters esp. for logic.and/logic.or:
+				IType type1 = value1.InferType(context.TypeSystem);
+				IType type2 = value2.InferType(context.TypeSystem);
+				if (type1.IsKnownType(KnownTypeCode.Boolean)
+					&& (type2.IsKnownType(KnownTypeCode.Boolean) || value2 is LdcI4 { Value: 0 or 1 }))
+				{
+					type = type1;
+				}
+				else if (type2.IsKnownType(KnownTypeCode.Boolean) && value1 is LdcI4 { Value: 0 or 1 })
+				{
+					type = type2;
+				}
+				var newIf = new IfInstruction(Comp.LogicNot(inst.Condition), value2, value1, type);
+				newIf.AddILRange(inst);
+				var stLoc = new StLoc(v, newIf);
+				inst.ReplaceWith(stLoc);
+				context.EndStep(stLoc);
+				context.RequestRerun();  // trigger potential inlining of the newly created StLoc
+				return newIf;
+			}
+			return inst;
+		}
+
+		/// <summary>
+		/// NetSpy: the returned values have sequence points that no other sequence point contains: they were
+		/// separate "return x;" statements of a switch statement, not the arms of a switch expression.
+		/// </summary>
+		bool WasSwitchStatement(SwitchInstruction switchInst)
+		{
+			if (!context.Settings.SourceLayoutFromPdb || context.DebugInfo is not { } debugInfo)
+				return false;
+			var method = context.Function.MoveNextMethod ?? context.Function.Method;
+			if (method == null || method.MetadataToken.IsNil || method.MetadataToken.Kind != System.Reflection.Metadata.HandleKind.MethodDefinition)
+				return false;
+			List<DebugInfo.SequencePoint> points;
+			try
+			{
+				points = debugInfo.GetSequencePoints((System.Reflection.Metadata.MethodDefinitionHandle)method.MetadataToken).Where(sp => !sp.IsHidden).ToList();
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return false;
+			}
+			int statements = 0;
+			foreach (var section in switchInst.Sections)
+			{
+				if (section.Body is not Branch { TargetBlock.Instructions: [Leave leave] })
+					continue;
+				int offset = leave.Value.StartILOffset;
+				var point = points.FirstOrDefault(sp => sp.Offset <= offset && offset < sp.EndOffset);
+				if (point == null)
+					continue;
+				bool contained = points.Any(other => other != point
+					&& (other.StartLine, other.StartColumn).CompareTo((point.StartLine, point.StartColumn)) <= 0
+					&& (other.EndLine, other.EndColumn).CompareTo((point.EndLine, point.EndColumn)) >= 0);
+				if (contained)
+					return false;
+				statements++;
+			}
+			return statements > 1;
+		}
+
+		private void HandleSwitchExpression(BlockContainer container, SwitchInstruction switchInst)
+		{
+			if (!context.Settings.SwitchExpressions)
+				return;
+			Debug.Assert(container.Kind == ContainerKind.Switch);
+			Debug.Assert(container.ResultType == StackType.Void);
+			var defaultSection = switchInst.GetDefaultSection();
+			BlockContainer leaveTarget = null;
+			ILVariable resultVariable = null;
+			foreach (var section in switchInst.Sections)
+			{
+				if (section != defaultSection)
+				{
+					// every section except for the default must have exactly 1 label
+					if (section.Labels.Count() != (section.HasNullLabel ? 0u : 1u))
+						return;
+				}
+				if (!section.Body.MatchBranch(out var sectionBlock))
+					return;
+				if (sectionBlock.IncomingEdgeCount != 1)
+					return;
+				if (sectionBlock.Parent != container)
+					return;
+				if (sectionBlock.Instructions.Count == 1)
+				{
+					if (sectionBlock.Instructions[0] is Throw)
+					{
+						// OK
+					}
+					else if (sectionBlock.Instructions[0] is Leave leave)
+					{
+						if (!leave.IsLeavingFunction)
+							return;
+						leaveTarget ??= leave.TargetContainer;
+						Debug.Assert(leaveTarget == leave.TargetContainer);
+					}
+					else
+					{
+						return;
+					}
+				}
+				else if (sectionBlock.Instructions.Count == 2)
+				{
+					if (!sectionBlock.Instructions[0].MatchStLoc(out var v, out _))
+						return;
+					if (!sectionBlock.Instructions[1].MatchLeave(container))
+						return;
+					resultVariable ??= v;
+					if (resultVariable != v)
+						return;
+				}
+				else
+				{
+					return;
+				}
+			}
+			// Exactly one of resultVariable/leaveTarget must be null
+			if ((resultVariable == null) == (leaveTarget == null))
+				return;
+			IType resultType = resultVariable?.Type ?? leaveTarget?.ExpectedResultType;
+			// C# has no ref-returning switch expression: an arm cannot be `0 => ref x`.
+			if (resultType.Kind == TypeKind.ByReference)
+				return;
+			if (switchInst.Value is StringToInt str2int)
+			{
+				// validate that each integer is used for exactly one value
+				var integersUsed = new HashSet<int>();
+				foreach ((string key, int val) in str2int.Map)
+				{
+					if (!integersUsed.Add(val))
+						return;
+				}
+			}
+
+			// NetSpy: with a PDB, "case 1: return a;" statements have their own sequence points, while the arms
+			// of a switch expression are inside the expression's one
+			if (leaveTarget != null && WasSwitchStatement(switchInst))
+				return;
+
+			context.Step("Switch Expression", switchInst);
+			switchInst.SetResultType(resultType);
+			foreach (var section in switchInst.Sections)
+			{
+				var block = ((Branch)section.Body).TargetBlock;
+				if (block.Instructions.Count == 1)
+				{
+					if (block.Instructions[0] is Throw t)
+					{
+						section.Body = t;
+					}
+					else if (block.Instructions[0] is Leave leave)
+					{
+						section.Body = leave.Value;
+					}
+					else
+					{
+						throw new InvalidOperationException();
+					}
+				}
+				else
+				{
+					section.Body = ((StLoc)block.Instructions[0]).Value;
+				}
+			}
+			if (resultVariable != null)
+			{
+				var stLoc = new StLoc(resultVariable, switchInst);
+				container.ReplaceWith(stLoc);
+				context.EndStep(stLoc);
+			}
+			else
+			{
+				var leaveInst = new Leave(leaveTarget, switchInst);
+				container.ReplaceWith(leaveInst);
+				context.EndStep(leaveInst);
+			}
+			context.RequestRerun(); // new StLoc might trigger inlining
+		}
+
+		/// <summary>
+		/// op is either add or remove/subtract:
+		/// if (dynamic.isevent (target)) {
+		///     dynamic.invokemember.invokespecial.discard op_Name(target, value)
+		/// } else {
+		///     dynamic.compound.op (dynamic.getmember Name(target), value)
+		/// }
+		/// =>
+		/// dynamic.compound.op (dynamic.getmember Name(target), value)
+		/// </summary>
+		internal static bool TransformDynamicAddAssignOrRemoveAssign(IfInstruction inst, ILTransformContext context)
+		{
+			if (!inst.MatchIfInstructionPositiveCondition(out var condition, out var trueInst, out var falseInst))
+				return false;
+			if (!(condition is DynamicIsEventInstruction isEvent))
+				return false;
+			trueInst = Block.Unwrap(trueInst);
+			falseInst = Block.Unwrap(falseInst);
+			if (!(falseInst is DynamicCompoundAssign dynamicCompoundAssign))
+				return false;
+			if (!(dynamicCompoundAssign.Target is DynamicGetMemberInstruction getMember))
+				return false;
+			if (!SemanticHelper.IsPure(isEvent.Argument.Flags))
+				return false;
+			if (!isEvent.Argument.Match(getMember.Target).Success)
+				return false;
+			if (!(trueInst is DynamicInvokeMemberInstruction invokeMember))
+				return false;
+			if (!(invokeMember.BinderFlags.HasFlag(CSharpBinderFlags.InvokeSpecialName) && invokeMember.BinderFlags.HasFlag(CSharpBinderFlags.ResultDiscarded)))
+				return false;
+			switch (dynamicCompoundAssign.Operation)
+			{
+				case ExpressionType.AddAssign:
+					if (invokeMember.Name != "add_" + getMember.Name)
+						return false;
+					break;
+				case ExpressionType.SubtractAssign:
+					if (invokeMember.Name != "remove_" + getMember.Name)
+						return false;
+					break;
+				default:
+					return false;
+			}
+			if (!dynamicCompoundAssign.Value.Match(invokeMember.Arguments[1]).Success)
+				return false;
+			if (!invokeMember.Arguments[0].Match(getMember.Target).Success)
+				return false;
+			context.Step("+= / -= dynamic.isevent pattern -> dynamic.compound.op", inst);
+			inst.ReplaceWith(dynamicCompoundAssign);
+			context.EndStep(dynamicCompoundAssign);
+			return true;
+		}
+
+		/// <summary>
+		/// dynamic.setmember.compound Name(target, dynamic.binary.operator op(dynamic.getmember Name(target), value))
+		/// =>
+		/// dynamic.compound.op (dynamic.getmember Name(target), value)
+		/// </summary>
+		protected internal override void VisitDynamicSetMemberInstruction(DynamicSetMemberInstruction inst)
+		{
+			base.VisitDynamicSetMemberInstruction(inst);
+			TransformDynamicSetMemberInstruction(inst, context);
+		}
+
+		internal static void TransformDynamicSetMemberInstruction(DynamicSetMemberInstruction inst, StatementTransformContext context)
+		{
+			if (!inst.BinderFlags.HasFlag(CSharpBinderFlags.ValueFromCompoundAssignment))
+				return;
+			if (!(inst.Value is DynamicBinaryOperatorInstruction binaryOp))
+				return;
+			if (!(binaryOp.Left is DynamicGetMemberInstruction dynamicGetMember))
+				return;
+			if (!dynamicGetMember.Target.Match(inst.Target).Success)
+				return;
+			if (!SemanticHelper.IsPure(dynamicGetMember.Target.Flags))
+				return;
+			if (inst.Name != dynamicGetMember.Name || !DynamicCompoundAssign.IsExpressionTypeSupported(binaryOp.Operation))
+				return;
+			context.Step("dynamic.setmember.compound -> dynamic.compound.op", inst);
+			var compoundAssign = new DynamicCompoundAssign(binaryOp.Operation, binaryOp.BinderFlags, binaryOp.Left, binaryOp.LeftArgumentInfo, binaryOp.Right, binaryOp.RightArgumentInfo);
+			inst.ReplaceWith(compoundAssign);
+			context.EndStep(compoundAssign);
+		}
+
+		/// <summary>
+		/// dynamic.setindex.compound(target, index, dynamic.binary.operator op(dynamic.getindex(target, index), value))
+		/// =>
+		/// dynamic.compound.op (dynamic.getindex(target, index), value)
+		/// </summary>
+		protected internal override void VisitDynamicSetIndexInstruction(DynamicSetIndexInstruction inst)
+		{
+			base.VisitDynamicSetIndexInstruction(inst);
+
+			if (!inst.BinderFlags.HasFlag(CSharpBinderFlags.ValueFromCompoundAssignment))
+				return;
+			if (!(inst.Arguments.LastOrDefault() is DynamicBinaryOperatorInstruction binaryOp))
+				return;
+			if (!(binaryOp.Left is DynamicGetIndexInstruction dynamicGetIndex))
+				return;
+			if (inst.Arguments.Count != dynamicGetIndex.Arguments.Count + 1)
+				return;
+			// Ensure that same arguments are passed to dynamicGetIndex and inst:
+			for (int j = 0; j < dynamicGetIndex.Arguments.Count; j++)
+			{
+				if (!SemanticHelper.IsPure(dynamicGetIndex.Arguments[j].Flags))
+					return;
+				if (!dynamicGetIndex.Arguments[j].Match(inst.Arguments[j]).Success)
+					return;
+			}
+			if (!DynamicCompoundAssign.IsExpressionTypeSupported(binaryOp.Operation))
+				return;
+			context.Step("dynamic.setindex.compound -> dynamic.compound.op", inst);
+			var compoundAssign = new DynamicCompoundAssign(binaryOp.Operation, binaryOp.BinderFlags, binaryOp.Left, binaryOp.LeftArgumentInfo, binaryOp.Right, binaryOp.RightArgumentInfo);
+			inst.ReplaceWith(compoundAssign);
+			context.EndStep(compoundAssign);
+		}
+
+		protected internal override void VisitBinaryNumericInstruction(BinaryNumericInstruction inst)
+		{
+			base.VisitBinaryNumericInstruction(inst);
+			switch (inst.Operator)
+			{
+				case BinaryNumericOperator.ShiftLeft:
+				case BinaryNumericOperator.ShiftRight:
+					if (inst.Right.MatchBinaryNumericInstruction(BinaryNumericOperator.BitAnd, out var lhs, out var rhs)
+						&& MatchExpectedShiftSize(rhs))
+					{
+						// a << (b & 31) => a << b
+						context.Step("Combine bit.and into shift", inst);
+						inst.Right = lhs;
+					}
+					break;
+				case BinaryNumericOperator.BitAnd:
+				{
+					IType leftType = inst.Left.InferType(context.TypeSystem);
+					IType rightType = inst.Right.InferType(context.TypeSystem);
+					DetectImprovedTypeForForBitOp(inst, leftType, rightType);
+					if (leftType.IsKnownType(KnownTypeCode.Boolean)
+						&& rightType.IsKnownType(KnownTypeCode.Boolean))
+					{
+						if (new NullableLiftingTransform(context).Run(inst))
+						{
+							// e.g. "(a.GetValueOrDefault() == b.GetValueOrDefault()) & (a.HasValue & b.HasValue)"
+						}
+					}
+					break;
+				}
+				case BinaryNumericOperator.BitOr:
+				case BinaryNumericOperator.BitXor:
+				{
+					IType leftType = inst.Left.InferType(context.TypeSystem);
+					IType rightType = inst.Right.InferType(context.TypeSystem);
+					DetectImprovedTypeForForBitOp(inst, leftType, rightType);
+					break;
+				}
+			}
+
+			bool MatchExpectedShiftSize(ILInstruction rhs)
+			{
+				switch (inst.ResultType)
+				{
+					case StackType.I4:
+						return rhs.MatchLdcI4(31);
+					case StackType.I8:
+						return rhs.MatchLdcI4(63);
+					case StackType.I:
+						// sizeof(IntPtr) * 8 - 1
+						return rhs.MatchBinaryNumericInstruction(BinaryNumericOperator.Sub, out var mult, out var one)
+							&& mult.MatchBinaryNumericInstruction(BinaryNumericOperator.Mul, out var size, out var eight)
+							&& size.MatchSizeOf(out var sizeofType) && sizeofType.GetStackType() == StackType.I
+							&& eight.MatchLdcI4(8) && one.MatchLdcI4(1);
+					default:
+						return false;
+				}
+			}
+		}
+
+		// Given bit.or(a, b), promotes the "known to be bool/short" information from the operands to bit.or
+		void DetectImprovedTypeForForBitOp(BinaryNumericInstruction inst, IType leftType, IType rightType)
+		{
+			if (leftType.Equals(rightType) && (leftType.IsCSharpPrimitiveIntegerType() || leftType.IsCSharpNativeIntegerType() || leftType.IsKnownType(KnownTypeCode.Boolean)))
+			{
+				if (!leftType.Equals(inst.CSharpResultType))
+				{
+					context.Step("DetectImprovedTypeForForBitOp", inst);
+					inst.CSharpResultType = leftType;
+					context.EndStep(inst);
+				}
+			}
+		}
+
+		protected internal override void VisitTryCatchHandler(TryCatchHandler inst)
+		{
+			base.VisitTryCatchHandler(inst);
+			if (inst.Filter is BlockContainer filterContainer && filterContainer.Blocks.Count == 1)
+			{
+				TransformCatchWhen(inst, filterContainer.EntryPoint);
+			}
+			if (inst.Body is BlockContainer catchContainer)
+				TransformCatchVariable(inst, catchContainer.EntryPoint, isCatchBlock: true);
+		}
+
+		/// <summary>
+		/// catch ex : TException when (...) BlockContainer {
+		/// 	Block entryPoint (incoming: 1) {
+		/// 		stloc v(ldloc ex)
+		/// 		...
+		/// 	}
+		/// }
+		/// =>
+		/// catch v : TException when (...) BlockContainer {
+		/// 	Block entryPoint (incoming: 1) {
+		/// 		...
+		/// 	}
+		/// }
+		/// </summary>
+		void TransformCatchVariable(TryCatchHandler handler, Block entryPoint, bool isCatchBlock)
+		{
+			if (!handler.Variable.IsSingleDefinition || handler.Variable.LoadCount != 1)
+				return; // handler.Variable already has non-trivial uses
+			if (!entryPoint.Instructions[0].MatchStLoc(out var exceptionVar, out var exceptionSlotLoad))
+			{
+				// Not the pattern with a second exceptionVar.
+				// However, it is still possible that we need to remove a pointless UnboxAny:
+				if (handler.Variable.LoadInstructions.Single().Parent is UnboxAny inlinedUnboxAny)
+				{
+					if (inlinedUnboxAny.Type.Equals(handler.Variable.Type))
+					{
+						context.Step("TransformCatchVariable - remove inlined UnboxAny", inlinedUnboxAny);
+						var unboxArgument = inlinedUnboxAny.Argument;
+						inlinedUnboxAny.ReplaceWith(unboxArgument);
+						context.EndStep(unboxArgument);
+						foreach (var range in inlinedUnboxAny.ILRanges)
+							handler.AddExceptionSpecifierILRange(range);
+					}
+				}
+				return;
+			}
+			if (exceptionVar.Kind != VariableKind.Local && exceptionVar.Kind != VariableKind.StackSlot)
+				return;
+			if (exceptionSlotLoad is UnboxAny unboxAny)
+			{
+				// When catching a type parameter, csc emits an unbox.any instruction
+				if (!unboxAny.Type.Equals(handler.Variable.Type))
+					return;
+				exceptionSlotLoad = unboxAny.Argument;
+			}
+			if (!exceptionSlotLoad.MatchLdLoc(handler.Variable))
+				return;
+			// Check that exceptionVar is only used within the catch block:
+			var allUses = exceptionVar.LoadInstructions
+				.Concat(exceptionVar.StoreInstructions.Cast<ILInstruction>())
+				.Concat(exceptionVar.AddressInstructions);
+			foreach (var inst in allUses)
+			{
+				if (!inst.IsDescendantOf(handler))
+					return;
+			}
+			context.Step("TransformCatchVariable", entryPoint.Instructions[0]);
+			exceptionVar.Kind = VariableKind.ExceptionLocal;
+			exceptionVar.Name = handler.Variable.Name;
+			exceptionVar.Type = handler.Variable.Type;
+			exceptionVar.HasGeneratedName = handler.Variable.HasGeneratedName;
+			handler.Variable = exceptionVar;
+			if (isCatchBlock)
+			{
+				foreach (var offset in entryPoint.Instructions[0].Descendants.SelectMany(o => o.ILRanges))
+					handler.AddExceptionSpecifierILRange(offset);
+			}
+			entryPoint.Instructions.RemoveAt(0);
+		}
+
+		/// <summary>
+		/// Inline condition from catch-when condition BlockContainer, if possible.
+		/// </summary>
+		void TransformCatchWhen(TryCatchHandler handler, Block entryPoint)
+		{
+			TransformCatchVariable(handler, entryPoint, isCatchBlock: false);
+			if (entryPoint.Instructions.Count == 1 && entryPoint.Instructions[0].MatchLeave(out _, out var condition))
+			{
+				context.Step("TransformCatchWhen", entryPoint.Instructions[0]);
+				handler.Filter = condition;
+				context.EndStep(condition);
+			}
+		}
+
+		protected internal override void VisitMatchInstruction(MatchInstruction inst)
+		{
+			inst.TestedOperand.AcceptVisitor(this);
+			// Do not recurse into the sub-patterns: patterns are restricted to use only certain ILInstructions,
+			// and arbitrary transforms might not stay within that allowed set of instructions.
+			foreach (var subPattern in inst.SubPatterns)
+			{
+				// However, we still need to simplify negations:
+				foreach (var potentialNegation in subPattern.Descendants.OfType<Comp>())
+				{
+					if (potentialNegation.MatchLogicNot(out var arg))
+					{
+						HandleLogicNot(potentialNegation, arg, context);
+					}
+				}
+			}
+		}
+	}
+}

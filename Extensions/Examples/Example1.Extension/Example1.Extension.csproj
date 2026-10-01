@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
 
-  <Import Project="..\..\..\DnSpyCommon.props" />
+  <Import Project="..\..\..\NetSpyCommon.props" />
 
   <PropertyGroup>
     <AssemblyName>Example1.Extension.x</AssemblyName>
@@ -9,8 +9,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\dnSpy\dnSpy.Contracts.DnSpy\dnSpy.Contracts.DnSpy.csproj" />
-    <ProjectReference Include="..\..\..\dnSpy\dnSpy.Contracts.Logic\dnSpy.Contracts.Logic.csproj" />
+    <ProjectReference Include="..\..\..\NetSpy\NetSpy.Contracts.NetSpy\NetSpy.Contracts.NetSpy.csproj" />
+    <ProjectReference Include="..\..\..\NetSpy\NetSpy.Contracts.Logic\NetSpy.Contracts.Logic.csproj" />
   </ItemGroup>
 
   <ItemGroup>

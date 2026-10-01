@@ -1,6 +1,6 @@
-# dnSpyEx
+# NetSpyEx
 
-dnSpyEx is an unofficial continuation of the [dnSpy](https://github.com/dnSpy/dnSpy) project which is a debugger and .NET assembly editor. You can use it to edit and debug assemblies even if you don't have any source code available. Main features:
+NetSpyEx is an unofficial continuation of the [NetSpy](https://github.com/dnSpy/dnSpy) project which is a debugger and .NET assembly editor. You can use it to edit and debug assemblies even if you don't have any source code available. Main features:
 
 - Debug .NET and Unity assemblies
 - Edit .NET and Unity assemblies
@@ -23,7 +23,7 @@ If you like living on the edge you can use the latest "beta" builds from:
 
 ```PS
 git clone --recursive https://github.com/dnSpyEx/dnSpy.git
-cd dnSpy
+cd NetSpy
 # or dotnet build
 ./build.ps1 -NoMsbuild
 ```
@@ -47,7 +47,7 @@ To debug Unity games, you need this repo too: https://github.com/dnSpyEx/dnSpy-U
 - Variables windows support evaluating C# / Visual Basic expressions
 - Dynamic modules can be debugged (but not dynamic methods due to CLR limitations)
 - Output window logs various debugging events, and it shows timestamps by default :)
-- Assemblies that decrypt themselves at runtime can be debugged, dnSpy will use the in-memory image. You can also force dnSpy to always use in-memory images instead of disk files.
+- Assemblies that decrypt themselves at runtime can be debugged, NetSpy will use the in-memory image. You can also force NetSpy to always use in-memory images instead of disk files.
 - Bypasses for common debugger detection techniques
 - Public API, you can write an extension or use the C# Interactive window to control the debugger
 
@@ -74,7 +74,7 @@ To debug Unity games, you need this repo too: https://github.com/dnSpyEx/dnSpy-U
 - BAML decompiler and disassembler
 - Blue, light and dark themes (and a dark high contrast theme)
 - Bookmarks
-- C# Interactive window can be used to script dnSpy
+- C# Interactive window can be used to script NetSpy
 - Search assemblies for classes, methods, strings, etc
 - Analyze class and method usage, find callers, etc
 - Multiple tabs and tab groups
@@ -84,9 +84,9 @@ To debug Unity games, you need this repo too: https://github.com/dnSpyEx/dnSpy-U
 - Code tooltips (C# and Visual Basic)
 - Export to project
 
-# List of other open source libraries used by dnSpy
+# List of other open source libraries used by NetSpy
 
-- [ILSpy decompiler engine](https://github.com/icsharpcode/ILSpy) (C# and Visual Basic decompilers)
+- [NetSpy decompiler engine](https://github.com/icsharpcode/ILSpy) (C# and Visual Basic decompilers)
 - [Roslyn](https://github.com/dotnet/roslyn) (C# and Visual Basic compilers)
 - [dnlib](https://github.com/0xd4d/dnlib) (.NET metadata reader/writer which can also read obfuscated assemblies)
 - [VS MEF](https://github.com/microsoft/vs-mef) (Faster MEF equals faster startup)
@@ -95,9 +95,9 @@ To debug Unity games, you need this repo too: https://github.com/dnSpyEx/dnSpy-U
 - [Newtonsoft.Json](https://github.com/JamesNK/Newtonsoft.Json) (JSON serializer & deserializer)
 - [NuGet.Configuration](https://github.com/NuGet/NuGet.Client) (NuGet configuration file reader)
 
-# Translating dnSpy
+# Translating NetSpy
 
-[Click here](https://crowdin.com/project/dnspy) if you want to help with translating dnSpy to your native language.
+[Click here](https://crowdin.com/project/dnspy) if you want to help with translating NetSpy to your native language.
 
 # Wiki
 
@@ -105,6 +105,6 @@ See the [Wiki](https://github.com/dnSpyEx/dnSpy/wiki) for build instructions and
 
 # License
 
-dnSpy is licensed under [GPLv3](dnSpy/dnSpy/LicenseInfo/GPLv3.txt).
+NetSpy is licensed under [GPLv3](NetSpy/NetSpy/LicenseInfo/GPLv3.txt).
 
-# [Credits](dnSpy/dnSpy/LicenseInfo/CREDITS.txt)
+# [Credits](NetSpy/NetSpy/LicenseInfo/CREDITS.txt)

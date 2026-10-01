@@ -182,7 +182,7 @@ namespace NetSpy.Designer.Model
 		static List<Setting> CreateSettings() => new() {
 			// ---- Colțuri rotunjite ----
 			new BoolSetting("RoundedCorners", "Colțuri rotunjite", GCorners, true,
-				"Oprit = colțuri drepte peste tot (aspectul clasic dnSpy / Visual Studio)."),
+				"Oprit = colțuri drepte peste tot (aspectul clasic NetSpy / Visual Studio)."),
 			new NumberSetting("ControlRadius", "Rază controale", GCorners, 4, 0, 12,
 				hint: "Butoane, taburi, selecția din arbore, câmpuri. WinUI folosește 4."),
 			new NumberSetting("PanelRadius", "Rază panouri", GCorners, 8, 0, 20,
@@ -210,7 +210,7 @@ namespace NetSpy.Designer.Model
 			}, "Left"),
 			new ChoiceSetting("ToolBarIcons", "Stil iconițe butoane", GLayout, new Choice[] {
 				new("Fluent", "Fluent (Windows 11, monocrome)"),
-				new("Classic", "Clasice (ILSpy / Visual Studio, colorate)"),
+				new("Classic", "Clasice (NetSpy / Visual Studio, colorate)"),
 			}, "Fluent", "Bara de unelte și meniurile. Arborele păstrează iconițele colorate (culoarea arată tipul)."),
 			new ChoiceSetting("IconTheme", "Culori iconițe", GLayout, new Choice[] {
 				new("Auto", "Automat (după fundal)"),
@@ -219,7 +219,7 @@ namespace NetSpy.Designer.Model
 			}, "Auto"),
 			new NumberSetting("TreeWidth", "Lățime arbore", GLayout, 300, 180, 520),
 			new NumberSetting("RowHeight", "Înălțime rând (arbore)", GLayout, 26, 18, 40,
-				hint: "Densitatea: ~20 compact (dnSpy), ~26 normal, ~32 aerisit (WinUI)."),
+				hint: "Densitatea: ~20 compact (NetSpy), ~26 normal, ~32 aerisit (WinUI)."),
 			new NumberSetting("IconSize", "Mărime iconițe", GLayout, 16, 12, 24),
 			new BoolSetting("SelectionIndicator", "Indicator selecție (bara accent WinUI)", GLayout, true),
 			new BoolSetting("Shadows", "Umbre (fereastră, meniuri)", GLayout, true),

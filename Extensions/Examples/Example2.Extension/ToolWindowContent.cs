@@ -3,12 +3,12 @@ using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.Windows;
 using System.Windows.Input;
-using dnSpy.Contracts.Controls;
-using dnSpy.Contracts.Extension;
-using dnSpy.Contracts.Menus;
-using dnSpy.Contracts.MVVM;
-using dnSpy.Contracts.ToolWindows;
-using dnSpy.Contracts.ToolWindows.App;
+using NetSpy.Contracts.Controls;
+using NetSpy.Contracts.Extension;
+using NetSpy.Contracts.Menus;
+using NetSpy.Contracts.MVVM;
+using NetSpy.Contracts.ToolWindows;
+using NetSpy.Contracts.ToolWindows.App;
 
 // Adds a tool window and a command that will show it. The command is added to the View menu and a
 // keyboard shortcut is added to the main window. Keyboard shortcut Ctrl+Alt+Z shows the tool window.
@@ -42,7 +42,7 @@ namespace Example2.Extension {
 		}
 	}
 
-	// Called by dnSpy to create the tool window
+	// Called by NetSpy to create the tool window
 	[Export(typeof(IToolWindowContentProvider))]
 	sealed class MainToolWindowContentProvider : IToolWindowContentProvider {
 		// Caches the created tool window
@@ -53,12 +53,12 @@ namespace Example2.Extension {
 		[ImportingConstructor]
 		MainToolWindowContentProvider(DeppDep deppDep) => deppDep.Hello();
 
-		// Lets dnSpy know which tool windows it can create and their default locations
+		// Lets NetSpy know which tool windows it can create and their default locations
 		public IEnumerable<ToolWindowContentInfo> ContentInfos {
 			get { yield return new ToolWindowContentInfo(ToolWindowContentImpl.THE_GUID, ToolWindowContentImpl.DEFAULT_LOCATION, 0, false); }
 		}
 
-		// Called by dnSpy. If it's your tool window guid, return the instance. Make sure it's
+		// Called by NetSpy. If it's your tool window guid, return the instance. Make sure it's
 		// cached since it can be called multiple times.
 		public ToolWindowContent? GetOrCreate(Guid guid) {
 			if (guid == ToolWindowContentImpl.THE_GUID)
@@ -80,7 +80,7 @@ namespace Example2.Extension {
 
 		// The element inside UIObject that gets the focus when the tool window should be focused.
 		// If it's not as easy as calling FocusedElement.Focus() to focus it, you must implement
-		// dnSpy.Contracts.Controls.IFocusable.
+		// NetSpy.Contracts.Controls.IFocusable.
 		public override IInputElement? FocusedElement => toolWindowControl.option1TextBox;
 
 		// The element that gets scaled when the user zooms in or out. Return null if zooming isn't

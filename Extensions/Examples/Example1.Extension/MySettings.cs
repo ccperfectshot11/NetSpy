@@ -1,8 +1,8 @@
 using System;
 using System.ComponentModel;
 using System.ComponentModel.Composition;
-using dnSpy.Contracts.MVVM;
-using dnSpy.Contracts.Settings;
+using NetSpy.Contracts.MVVM;
+using NetSpy.Contracts.Settings;
 
 // Reads and writes the extension settings
 
@@ -59,7 +59,7 @@ namespace Example1.Extension {
 
 		readonly ISettingsService settingsService;
 
-		// Tell MEF to pass in the required ISettingsService instance exported by dnSpy
+		// Tell MEF to pass in the required ISettingsService instance exported by NetSpy
 		[ImportingConstructor]
 		MySettingsImpl(ISettingsService settingsService) {
 			this.settingsService = settingsService;

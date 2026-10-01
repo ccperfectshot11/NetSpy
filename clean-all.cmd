@@ -1,12 +1,12 @@
 @echo off
 
-pushd Extensions\ILSpy.Decompiler\NRefactory && git clean -xdf && popd || goto :error
-pushd Libraries\ICSharpCode.TreeView && git clean -xdf && popd || goto :error
-pushd Extensions\ILSpy.Decompiler\ICSharpCode.Decompiler && git clean -xdf && popd || goto :error
-pushd dnSpy\dnSpy.Images && git clean -xdf && popd || goto :error
-pushd Extensions\dnSpy.Debugger\netcorefiles && git clean -xdf && popd || goto :error
-pushd dnSpy\Roslyn\Roslyn.ExpressionCompiler && git clean -xdf && popd || goto :error
-pushd Extensions\dnSpy.Debugger\Mono.Debugger.Soft && git clean -xdf && popd || goto :error
+pushd Extensions\Decompiler\NRefactory && git clean -xdf && popd || goto :error
+pushd Libraries\NetSpy.TreeView && git clean -xdf && popd || goto :error
+pushd Extensions\Decompiler\NetSpy.Decompiler && git clean -xdf && popd || goto :error
+pushd NetSpy\NetSpy.Images && git clean -xdf && popd || goto :error
+pushd Extensions\NetSpy.Debugger\netcorefiles && git clean -xdf && popd || goto :error
+pushd NetSpy\Roslyn\Roslyn.ExpressionCompiler && git clean -xdf && popd || goto :error
+pushd Extensions\NetSpy.Debugger\Mono.Debugger.Soft && git clean -xdf && popd || goto :error
 git clean -xdf || goto :error
 
 goto :EOF

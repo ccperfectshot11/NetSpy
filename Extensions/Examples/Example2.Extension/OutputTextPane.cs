@@ -1,10 +1,10 @@
 using System;
 using System.ComponentModel.Composition;
 using System.Diagnostics;
-using dnSpy.Contracts.Extension;
-using dnSpy.Contracts.Menus;
-using dnSpy.Contracts.Output;
-using dnSpy.Contracts.Text;
+using NetSpy.Contracts.Extension;
+using NetSpy.Contracts.Menus;
+using NetSpy.Contracts.Output;
+using NetSpy.Contracts.Text;
 
 // Creates an Output window text pane where our log messages will go.
 // Adds context menu commands.
@@ -29,7 +29,7 @@ namespace Example2.Extension {
 		}
 		static IOutputTextPane? _instance;
 
-		// This class initializes the Logger property. It gets auto loaded by dnSpy
+		// This class initializes the Logger property. It gets auto loaded by NetSpy
 		[ExportAutoLoaded(Order = double.MinValue)]
 		sealed class InitializeLogger : IAutoLoaded {
 			[ImportingConstructor]

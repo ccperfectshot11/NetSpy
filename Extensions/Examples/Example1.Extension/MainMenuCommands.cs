@@ -1,5 +1,5 @@
-using dnSpy.Contracts.App;
-using dnSpy.Contracts.Menus;
+using NetSpy.Contracts.App;
+using NetSpy.Contracts.Menus;
 
 // Adds a new "_Extension" menu and several commands.
 // Adds a command to the View menu

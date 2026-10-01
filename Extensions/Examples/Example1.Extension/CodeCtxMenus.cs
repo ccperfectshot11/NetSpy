@@ -4,10 +4,10 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using dnlib.DotNet;
-using dnSpy.Contracts.Controls;
-using dnSpy.Contracts.Documents.Tabs.DocViewer;
-using dnSpy.Contracts.Extension;
-using dnSpy.Contracts.Menus;
+using NetSpy.Contracts.Controls;
+using NetSpy.Contracts.Documents.Tabs.DocViewer;
+using NetSpy.Contracts.Extension;
+using NetSpy.Contracts.Menus;
 using Microsoft.VisualStudio.Text;
 
 // Adds menu items to the text editor context menu
@@ -18,12 +18,12 @@ namespace Example1.Extension {
 	static class Constants {
 		//TODO: Use your own guids
 		// The first number is the order of the group, and the guid is the guid of the group,
-		// see eg. dnSpy.Contracts.Menus.MenuConstants.GROUP_CTX_CODE_HEX etc
+		// see eg. NetSpy.Contracts.Menus.MenuConstants.GROUP_CTX_CODE_HEX etc
 		public const string GROUP_TEXTEDITOR = "20000,3567EC95-E68E-44CE-932C-98A686FDCACF";
 		public const string GROUP_TREEVIEW = "20000,77ACC18E-D8EB-483B-8D93-3581574B8891";
 	}
 
-	// This gets loaded by dnSpy and is used to add the Ctrl+Alt+Q command
+	// This gets loaded by NetSpy and is used to add the Ctrl+Alt+Q command
 	[ExportAutoLoaded]
 	sealed class CommandLoader : IAutoLoaded {
 		static readonly RoutedCommand Option1Command = new RoutedCommand("Option1Command", typeof(CommandLoader));

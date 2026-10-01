@@ -4,10 +4,10 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows;
 using dnlib.DotNet.Emit;
-using dnSpy.Contracts.App;
-using dnSpy.Contracts.Documents.TreeView;
-using dnSpy.Contracts.Menus;
-using dnSpy.Contracts.TreeView;
+using NetSpy.Contracts.App;
+using NetSpy.Contracts.Documents.TreeView;
+using NetSpy.Contracts.Menus;
+using NetSpy.Contracts.TreeView;
 
 // Adds a couple of commands to the file treeview context menu.
 // Since there are several commands using the same state, MenuItemBase<TContext> is used

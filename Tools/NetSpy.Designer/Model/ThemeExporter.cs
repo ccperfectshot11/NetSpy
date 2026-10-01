@@ -9,7 +9,7 @@ using System.Windows.Media;
 namespace NetSpy.Designer.Model
 {
 	/// <summary>
-	/// Transformă designul într-o temă NetSpy (Themes\netspy.dntheme). Pornește de la tema dnSpy "dark"
+	/// Transformă designul într-o temă NetSpy (Themes\netspy.dntheme). Pornește de la tema NetSpy "dark"
 	/// (sau "light" pentru un design deschis): culorile paletei Visual Studio sunt înlocuite cu cele din
 	/// design, iar elementele importante (cod, arbore, taburi, meniuri) primesc culori explicite.
 	/// Lângă temă se scrie și designul (razele, fonturile etc. sunt citite de NetSpy din el).
@@ -21,13 +21,13 @@ namespace NetSpy.Designer.Model
 		// GUID fix: setarea „tema curentă” din NetSpy rămâne valabilă după fiecare export
 		public const string ThemeGuid = "5E7A1C42-9B3D-4F61-8C2E-7D4B0A9F1E63";
 
-		/// <summary>Folderul Themes al NetSpy, găsit urcând din folderul designerului până la dnSpy.sln.</summary>
+		/// <summary>Folderul Themes al NetSpy, găsit urcând din folderul designerului până la NetSpy.sln.</summary>
 		public static string? FindThemesDirectory()
 		{
 			for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
 			{
-				if (File.Exists(Path.Combine(dir.FullName, "dnSpy.sln")))
-					return Path.Combine(dir.FullName, "dnSpy", "dnSpy", "Themes");
+				if (File.Exists(Path.Combine(dir.FullName, "NetSpy.sln")))
+					return Path.Combine(dir.FullName, "NetSpy", "NetSpy", "Themes");
 			}
 			return null;
 		}
@@ -94,7 +94,7 @@ namespace NetSpy.Designer.Model
 			var thumb = Over(Color.FromArgb(140, d.Color("ScrollThumb").R, d.Color("ScrollThumb").G, d.Color("ScrollThumb").B), panel);
 			if (!dark)
 			{
-				// paleta temei "light" din dnSpy
+				// paleta temei "light" din NetSpy
 				return new Dictionary<string, Color> {
 					["F5F5F5"] = d.Color("WindowBg"),
 					["EEEEF2"] = d.Color("WindowBg"),
@@ -104,7 +104,7 @@ namespace NetSpy.Designer.Model
 					["1E1E1E"] = d.Color("Text"),
 				};
 			}
-			// paleta temei "dark" din dnSpy (Visual Studio 2013/2015 Dark) → culorile designului
+			// paleta temei "dark" din NetSpy (Visual Studio 2013/2015 Dark) → culorile designului
 			return new Dictionary<string, Color> {
 				["F1F1F1"] = d.Color("Text"),
 				["2D2D30"] = d.Color("WindowBg"),

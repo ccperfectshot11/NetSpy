@@ -12,7 +12,7 @@ using SharpVectors.Renderers.Wpf;
 namespace NetSpy.Designer.Controls
 {
 	/// <summary>
-	/// Încarcă iconițele SVG ale ILSpy (Icons\*.svg). Sunt iconițe din pachetul Visual Studio,
+	/// Încarcă iconițele SVG ale NetSpy (Icons\*.svg). Sunt iconițe din pachetul Visual Studio,
 	/// desenate cu o paletă fixă; pentru fundal închis înlocuim culorile paletei (ca Visual Studio).
 	/// </summary>
 	public static class IconCache
@@ -86,7 +86,7 @@ namespace NetSpy.Designer.Controls
 		}
 	}
 
-	/// <summary>&lt;c:SvgIcon Icon="Class"/&gt; – o iconiță ILSpy care se recolorează singură la schimbarea temei.</summary>
+	/// <summary>&lt;c:SvgIcon Icon="Class"/&gt; – o iconiță NetSpy care se recolorează singură la schimbarea temei.</summary>
 	public sealed class SvgIcon : Image
 	{
 		public static readonly DependencyProperty IconProperty = DependencyProperty.Register(

@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 $netframework_tfm = 'net48'
 $net_tfm = 'net10.0-windows'
 $configuration = 'Release'
-$net_baseoutput = "dnSpy\dnSpy\bin\$configuration"
+$net_baseoutput = "NetSpy\NetSpy\bin\$configuration"
 $apphostpatcher_dir = "Build\AppHostPatcher"
 
 #
