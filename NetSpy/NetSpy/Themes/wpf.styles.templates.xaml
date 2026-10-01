@@ -3140,7 +3140,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type Thumb}">
-                    <!-- NetSpy: bară subțire, rotunjită (ca în NetSpy Designer) -->
+                    <!-- NetSpy: thin, rounded scroll bar thumb (WinUI style) -->
                     <Border x:Name="Border"
                             Margin="2"
                             CornerRadius="3"
@@ -3506,7 +3506,7 @@
                             <ColumnDefinition Width="Auto"
                                               SharedSizeGroup="ComboBoxButton"/>
                         </Grid.ColumnDefinitions>
-                        <!-- NetSpy: chevron subțire, ca în NetSpy Designer -->
+                        <!-- NetSpy: thin chevron, WinUI style -->
                         <Border x:Name="Chrome"
                                 Grid.Column="1"
                                 Width="22"
@@ -3591,7 +3591,7 @@
                                 <ColumnDefinition Width="Auto"
                                                   SharedSizeGroup="ComboBoxButton"/>
                             </Grid.ColumnDefinitions>
-                            <!-- NetSpy: câmp rotunjit (ca în NetSpy Designer) -->
+                            <!-- NetSpy: rounded field (WinUI style) -->
                             <Border Name="Background"
                                     Grid.ColumnSpan="2"
                                     CornerRadius="{DynamicResource NetSpy.ControlCorner}"
@@ -4714,7 +4714,7 @@
                 Value="False" />
         <Setter Property="Template">
             <Setter.Value>
-                <!-- NetSpy: chevron ca în NetSpy Designer / WinUI -->
+                <!-- NetSpy: chevron WinUI style -->
                 <ControlTemplate TargetType="{x:Type ToggleButton}">
                     <Border Width="16"
                             Height="16"
@@ -4891,7 +4891,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type shtv:SharpTreeViewItem}">
-                    <!-- NetSpy: rând rotunjit cu margini, înălțimea și bara de accent din design (ca în NetSpy Designer) -->
+                    <!-- NetSpy: rounded row with margins, row height and accent bar from the design (WinUI style) -->
                     <Border x:Name="nodeBorder"
                             Background="{TemplateBinding Background}"
                             Margin="4 1"
@@ -5154,7 +5154,7 @@
             </Button.Resources>
             <StackPanel Orientation="Horizontal">
                 <img:DsImage ImageReference="{Binding ImageReference}" x:Name="image" />
-                <!-- NetSpy: glifa Windows 11 (Segoe Fluent Icons) în locul imaginii colorate -->
+                <!-- NetSpy: Windows 11 glyph (Segoe Fluent Icons) instead of the colored image -->
                 <TextBlock x:Name="glyph" Text="{Binding Glyph}" FontSize="{Binding GlyphSize}" Width="18" TextAlignment="Center"
                            VerticalAlignment="Center" FontFamily="{DynamicResource NetSpy.IconFont}"
                            TextOptions.TextRenderingMode="Grayscale" Visibility="Collapsed" />
@@ -5255,7 +5255,7 @@
                             Background="{TemplateBinding Background}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}">
-                        <!-- NetSpy: glifele Windows 11 (Segoe Fluent Icons) în loc de desene -->
+                        <!-- NetSpy: Windows 11 glyphs (Segoe Fluent Icons) instead of paths -->
                         <TextBlock
                             x:Name="path"
                             FontFamily="{DynamicResource NetSpy.IconFont}"
@@ -5381,10 +5381,10 @@
                                     Background="Transparent"
                                     VerticalAlignment="Center"
                                     Visibility="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=ShowMenuButton, Converter={StaticResource BooleanToVisibilityConverter}}" >
-                                    <!-- NetSpy: iconița aplicației, ca în aplicațiile Windows 11 -->
+                                    <!-- NetSpy: the application icon, like Windows 11 apps -->
                                     <Image Source="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=Icon}" Width="18" Height="18" />
                                 </ctrls:SysMenuButton>
-                                <!-- NetSpy: meniul principal stă în bara de titlu (MetroWindow.TitleBarContent) -->
+                                <!-- NetSpy: the main menu lives in the title bar (MetroWindow.TitleBarContent) -->
                                 <ContentPresenter
                                     DockPanel.Dock="Left"
                                     Content="{TemplateBinding TitleBarContent}"
@@ -5481,7 +5481,7 @@
         </Setter>
     </Style>
     <Style x:Key="MainWindowStyle" TargetType="{x:Type ctrls2:MetroWindow}" BasedOn="{StaticResource {x:Type ctrls2:MetroWindow}}">
-        <!-- NetSpy: fontul interfeței din design (Segoe UI Variable) -->
+        <!-- NetSpy: UI font from the design (Segoe UI Variable) -->
         <Setter Property="FontFamily" Value="{DynamicResource NetSpy.UiFont}" />
         <Setter Property="FontSize" Value="{DynamicResource NetSpy.UiFontSize}" />
         <Setter Property="Foreground" Value="{DynamicResource EnvironmentForeground}" />
@@ -5577,7 +5577,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type TabControl}">
-                    <!-- NetSpy: panoul e un card rotunjit, separat de vecini (ca în NetSpy Designer) -->
+                    <!-- NetSpy: the panel is a rounded card, separated from its neighbors (WinUI style) -->
                     <Border Margin="{DynamicResource NetSpy.PanelMargin}"
                             Background="{DynamicResource NetSpy.PanelBg}"
                             BorderBrush="{DynamicResource NetSpy.Border}"
@@ -5595,7 +5595,7 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
-                        <!-- bara taburilor -->
+                        <!-- tab strip -->
                         <Border Grid.Row="0" Background="{DynamicResource NetSpy.TabStripBg}"
                                 BorderBrush="{DynamicResource NetSpy.Border}" BorderThickness="0 0 0 1" />
                         <TabPanel x:Name="HeaderPanel"
@@ -5755,7 +5755,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type TabControl}">
-                    <!-- NetSpy: panoul e un card rotunjit, separat de vecini (ca în NetSpy Designer) -->
+                    <!-- NetSpy: the panel is a rounded card, separated from its neighbors (WinUI style) -->
                     <Border Margin="{DynamicResource NetSpy.PanelMargin}"
                             Background="{DynamicResource NetSpy.PanelBg}"
                             BorderBrush="{DynamicResource NetSpy.Border}"
@@ -5817,7 +5817,7 @@
                 Value="Stretch"/>
         <Setter Property="Control.Template">
             <Setter.Value>
-                <!-- NetSpy: tab „subliniat” (ca în NetSpy Designer): fără chenar, linie de accent sub tabul selectat -->
+                <!-- NetSpy: "underline" tab (WinUI style): no border, accent line under the selected tab -->
                 <ControlTemplate TargetType="{x:Type TabItem}">
                     <Grid Name="TabBorder"
                           mvvm:IsDraggableAP.IsDraggable="True"

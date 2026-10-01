@@ -29,7 +29,7 @@ using WpfColor = System.Windows.Media.Color;
 
 namespace NetSpy.Themes {
 	/// <summary>
-	/// The design exported by Tools\NetSpy.Designer next to the theme (Themes\netspy.netspy-design.json):
+	/// The NetSpy design values stored next to the theme (Themes\netspy.netspy-design.json):
 	/// corner radii, fonts, toolbar icon style... The file is a flat "key": "value" object, read with a
 	/// regex so it works on .NET Framework too (no System.Text.Json there).
 	/// </summary>
@@ -86,7 +86,7 @@ namespace NetSpy.Themes {
 
 		/// <summary>
 		/// Adds the design values as "NetSpy.*" resources; the templates in wpf.styles.templates.xaml
-		/// read them with DynamicResource (the same keys NetSpy Designer's preview uses, with a "NetSpy." prefix)
+		/// read them with DynamicResource (keys "NetSpy.<setting>")
 		/// </summary>
 		public static void ApplyTo(ResourceDictionary resources) {
 			double control = Radius("ControlRadius", 4), panel = Radius("PanelRadius", 8), popup = Radius("PopupRadius", 8);

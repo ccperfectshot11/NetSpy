@@ -285,7 +285,7 @@ namespace NetSpy.MainApp {
 			savedLocations = new Dictionary<Guid, AppToolWindowLocation>();
 
 			var guid = new Guid(MenuConstants.GUIDOBJ_TOOLWINDOW_TABCONTROL_GUID);
-			// NetSpy: the side panels start as wide as the tree in the design (NetSpy Designer "TreeWidth")
+			// NetSpy: the side panels start as wide as the tree in the design (design value "TreeWidth")
 			double HORIZ_WIDTH = NetSpy.Themes.NetSpyDesign.GetNumber("TreeWidth", 300);
 			const double VERT_HEIGHT = 250;
 			toolWindowUIs.Add(AppToolWindowLocation.Left, new ToolWindowUI(this, AppToolWindowLocation.Left, HORIZ_WIDTH, horizontalContent, false, toolWindowService.Create(new ToolWindowGroupServiceOptions(guid))));

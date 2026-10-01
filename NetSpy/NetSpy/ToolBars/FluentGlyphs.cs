@@ -23,7 +23,7 @@ using NetSpy.Themes;
 
 namespace NetSpy.ToolBars {
 	/// <summary>
-	/// Segoe Fluent Icons (the Windows 11 icon font) glyph for a toolbar image, like in NetSpy Designer.
+	/// Segoe Fluent Icons (the Windows 11 icon font) glyph for a toolbar image.
 	/// Images without a glyph keep their colored image.
 	/// </summary>
 	static class FluentGlyphs {

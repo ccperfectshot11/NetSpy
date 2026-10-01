@@ -84,7 +84,7 @@ namespace NetSpy.MainApp {
 			comboBox = new ComboBox {
 				DisplayMemberPath = "Name",
 				Width = 170,
-				Height = 30, // NetSpy: like the language box in NetSpy Designer
+				Height = 30, // NetSpy: taller, rounded language box (WinUI style)
 				ItemsSource = infos,
 			};
 			comboBox.SetBinding(Selector.SelectedItemProperty, new Binding(nameof(SelectedItem)) {

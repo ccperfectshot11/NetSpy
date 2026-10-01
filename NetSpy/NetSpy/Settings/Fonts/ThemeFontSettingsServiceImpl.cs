@@ -108,7 +108,7 @@ namespace NetSpy.Settings.Fonts {
 		DefaultFontInfo TextEditorDefaultFontInfo {
 			get {
 				if (textEditorDefaultFontInfo.FontFamily is null)
-					// NetSpy: the code font from the design (Tools/NetSpy.Designer), falling back to the old default
+					// NetSpy: the code font from the design (Themes/netspy.netspy-design.json), falling back to the old default
 					textEditorDefaultFontInfo = new DefaultFontInfo(
 						new FontFamily(NetSpy.Themes.NetSpyDesign.Get("CodeFont", "Cascadia Mono") + ", " + FontUtilities.GetDefaultTextEditorFont()),
 						NetSpy.Themes.NetSpyDesign.GetNumber("CodeFontSize", FontUtilities.DEFAULT_FONT_SIZE));

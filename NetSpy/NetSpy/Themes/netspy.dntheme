@@ -1,4 +1,4 @@
-<!-- Generat de NetSpy Designer (Tools\NetSpy.Designer). Nu edita de mână: reexportă din designer. -->
+<!-- NetSpy (Fluent) theme: the dark theme with the colors from netspy.netspy-design.json. -->
 <theme guid="5E7A1C42-9B3D-4F61-8C2E-7D4B0A9F1E63" name="netspy" menu-name="_NetSpy (Fluent)" order="50" is-dark="true" is-high-contrast="false">
 	<colors>
 		<color name="defaulttext" fg="#DCDCDC" bg="#1F1F1F" />
