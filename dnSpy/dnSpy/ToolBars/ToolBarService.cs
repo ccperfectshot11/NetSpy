@@ -27,6 +27,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
+using System.Windows.Media;
 using dnSpy.Contracts.Command;
 using dnSpy.Contracts.Images;
 using dnSpy.Contracts.MVVM;
@@ -202,7 +203,19 @@ namespace dnSpy.ToolBars {
 		object CreateToggleButton(Binding binding, ICommand command, IInputElement? commandTarget, string? header, string? toolTip, ImageReference imgRef) {
 			var sp = new StackPanel();
 			sp.Orientation = Orientation.Horizontal;
-			if (!imgRef.IsDefault)
+			if (FluentGlyphs.Get(imgRef) is var (glyph, size)) {
+				var glyphBlock = new TextBlock {
+					Text = glyph,
+					FontSize = size,
+					Width = 18,
+					TextAlignment = TextAlignment.Center,
+					VerticalAlignment = VerticalAlignment.Center,
+				};
+				glyphBlock.SetResourceReference(TextBlock.FontFamilyProperty, "NetSpy.IconFont");
+				TextOptions.SetTextRenderingMode(glyphBlock, TextRenderingMode.Grayscale);
+				sp.Children.Add(glyphBlock);
+			}
+			else if (!imgRef.IsDefault)
 				sp.Children.Add(new DsImage { ImageReference = imgRef });
 			if (!string.IsNullOrEmpty(header)) {
 				sp.Children.Add(new TextBlock {

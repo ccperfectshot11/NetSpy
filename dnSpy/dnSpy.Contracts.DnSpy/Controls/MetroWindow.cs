@@ -864,6 +864,21 @@ namespace dnSpy.Contracts.Controls {
 			new UIPropertyMetadata(true));
 
 		/// <summary>
+		/// Content shown in the title bar after the window icon (NetSpy: the main menu, like WinUI apps)
+		/// </summary>
+		public object? TitleBarContent {
+			get => GetValue(TitleBarContentProperty);
+			set => SetValue(TitleBarContentProperty, value);
+		}
+
+		/// <summary>
+		/// <see cref="TitleBarContent"/> dependency property
+		/// </summary>
+		public static readonly DependencyProperty TitleBarContentProperty =
+			DependencyProperty.Register(nameof(TitleBarContent), typeof(object), typeof(MetroWindow),
+			new UIPropertyMetadata(null));
+
+		/// <summary>
 		/// Gets/sets whether to show the menu button
 		/// </summary>
 		public bool ShowMenuButton {
@@ -901,7 +916,7 @@ namespace dnSpy.Contracts.Controls {
 		static readonly CornerRadius CornerRadius = new CornerRadius(0, 0, 0, 0);
 		static readonly Thickness GlassFrameThickness = new Thickness(0);
 		// NOTE: Keep these in sync: CaptionHeight + ResizeBorderThickness.Top = GridCaptionHeight
-		static readonly double CaptionHeight = 20;
+		static readonly double CaptionHeight = 30;
 		static readonly Thickness ResizeBorderThickness = new Thickness(10, 10, 5, 5);
 		/// <summary>
 		/// Gets the grid caption height

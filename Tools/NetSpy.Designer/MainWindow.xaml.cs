@@ -112,6 +112,25 @@ namespace NetSpy.Designer
 				document.ApplyPreset(preset);
 		}
 
+		void Export_Click(object sender, RoutedEventArgs e)
+		{
+			var themes = ThemeExporter.FindThemesDirectory();
+			if (themes is null)
+			{
+				MessageBox.Show(this, "Nu am găsit sursa NetSpy (dnSpy.sln) deasupra folderului designerului.", Title);
+				return;
+			}
+			try
+			{
+				var path = ThemeExporter.Export(document, themes);
+				UpdateStatus($"Exportat în {path}. Recompilează NetSpy ca să vezi tema.");
+			}
+			catch (Exception ex)
+			{
+				MessageBox.Show(this, "Exportul a eșuat:\n" + ex.Message, Title);
+			}
+		}
+
 		void New_Click(object sender, RoutedEventArgs e)
 		{
 			document.ApplyPreset(Preset.All[0]);

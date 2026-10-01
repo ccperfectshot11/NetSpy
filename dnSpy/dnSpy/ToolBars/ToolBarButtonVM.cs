@@ -37,6 +37,15 @@ namespace dnSpy.ToolBars {
 			Header = string.IsNullOrEmpty(header) ? null : header;
 			ToolTip = string.IsNullOrEmpty(toolTip) ? null : toolTip;
 			ImageReference = imageReference ?? default;
+			if (FluentGlyphs.Get(ImageReference) is var (glyph, size)) {
+				Glyph = glyph;
+				GlyphSize = size;
+			}
 		}
+
+		/// <summary>Segoe Fluent Icons glyph shown instead of <see cref="ImageReference"/> (NetSpy design)</summary>
+		public string? Glyph { get; }
+		public double GlyphSize { get; } = 16;
+		public bool HasGlyph => Glyph is not null;
 	}
 }

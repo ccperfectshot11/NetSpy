@@ -48,6 +48,45 @@ namespace NetSpy.Designer
 					LogException(ex);
 			};
 
+			// "--export design.json": scrie tema NetSpy din design, fără fereastră
+			int x = Array.IndexOf(e.Args, "--export");
+			if (x >= 0 && x + 1 < e.Args.Length)
+			{
+				// fără ferestre (nici de eroare): rezultatul e codul de ieșire, eroarea ajunge în crash.log
+				try
+				{
+					var doc = new Model.DesignDocument();
+					doc.Load(e.Args[x + 1]);
+					var themes = Model.ThemeExporter.FindThemesDirectory() ?? throw new DirectoryNotFoundException("Nu am găsit dnSpy.sln deasupra designerului.");
+					Model.ThemeExporter.Export(doc, themes);
+					Shutdown(0);
+				}
+				catch (Exception ex)
+				{
+					LogException(ex);
+					Shutdown(1);
+				}
+				return;
+			}
+
+			// "--convert-icons": iconițele ILSpy devin iconițele arborelui din NetSpy (dnSpy.Images\Images\*.xaml)
+			if (Array.IndexOf(e.Args, "--convert-icons") >= 0)
+			{
+				try
+				{
+					var images = Model.IconConverter.FindImagesDirectory() ?? throw new DirectoryNotFoundException("Nu am găsit dnSpy.sln deasupra designerului.");
+					int count = Model.IconConverter.Convert(Path.Combine(AppContext.BaseDirectory, "Icons"), images);
+					File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "convert-icons.log"), $"{count} iconițe scrise în {images}");
+					Shutdown(0);
+				}
+				catch (Exception ex)
+				{
+					LogException(ex);
+					Shutdown(1);
+				}
+				return;
+			}
+
 			int i = Array.IndexOf(e.Args, "--snapshot");
 			if (i >= 0 && i + 1 < e.Args.Length)
 			{
@@ -57,6 +96,8 @@ namespace NetSpy.Designer
 				SnapshotOverrides = e.Args.Skip(i + 2).Where(a => a.Contains('=')).ToArray();
 			}
 			base.OnStartup(e);
+			// (fără StartupUri în App.xaml: fereastra se creează aici, doar când nu exportăm)
+			new MainWindow().Show();
 		}
 
 		public static void TakeSnapshot(Window window)

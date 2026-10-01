@@ -1,7 +1,6 @@
-<Application x:Class="NetSpy.Designer.App"
+﻿<Application x:Class="NetSpy.Designer.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             StartupUri="MainWindow.xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Application.Resources>
         <SolidColorBrush x:Key="D.Accent" Color="#0067C0" />
         <SolidColorBrush x:Key="D.Border" Color="#D6D6D6" />
@@ -40,7 +39,7 @@
             <Setter Property="Foreground" Value="White" />
         </Style>
 
-        <!-- Câmp de text cu linie de accent la focus (ca în WinUI) -->
+        <!-- CĂ˘mp de text cu linie de accent la focus (ca Ă®n WinUI) -->
         <Style x:Key="DesignerTextBox" TargetType="TextBox">
             <Setter Property="Padding" Value="6,3" />
             <Setter Property="Template">
@@ -87,7 +86,7 @@
             </Setter>
         </Style>
 
-        <!-- Grup pliabil din panoul de setări -->
+        <!-- Grup pliabil din panoul de setÄri -->
         <Style x:Key="GroupExpander" TargetType="Expander">
             <Setter Property="Margin" Value="0,0,0,8" />
             <Setter Property="Template">
@@ -133,7 +132,7 @@
             </Setter>
         </Style>
 
-        <!-- ===== Slider ca în Windows 11: linie subțire, partea stângă în accent, buton rotund ===== -->
+        <!-- ===== Slider ca Ă®n Windows 11: linie subČ›ire, partea stĂ˘ngÄ Ă®n accent, buton rotund ===== -->
         <Style x:Key="SliderFill" TargetType="RepeatButton">
             <Setter Property="Focusable" Value="False" />
             <Setter Property="IsTabStop" Value="False" />
@@ -192,7 +191,7 @@
             </Setter>
         </Style>
 
-        <!-- ===== ComboBox rotunjit, cu listă în popup cu umbră ===== -->
+        <!-- ===== ComboBox rotunjit, cu listÄ Ă®n popup cu umbrÄ ===== -->
         <Style TargetType="ComboBoxItem">
             <Setter Property="Padding" Value="10,6" />
             <Setter Property="Template">

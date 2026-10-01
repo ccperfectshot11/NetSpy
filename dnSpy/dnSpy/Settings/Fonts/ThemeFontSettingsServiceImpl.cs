@@ -108,7 +108,10 @@ namespace dnSpy.Settings.Fonts {
 		DefaultFontInfo TextEditorDefaultFontInfo {
 			get {
 				if (textEditorDefaultFontInfo.FontFamily is null)
-					textEditorDefaultFontInfo = new DefaultFontInfo(new FontFamily(FontUtilities.GetDefaultTextEditorFont()), FontUtilities.DEFAULT_FONT_SIZE);
+					// NetSpy: the code font from the design (Tools/NetSpy.Designer), falling back to the old default
+					textEditorDefaultFontInfo = new DefaultFontInfo(
+						new FontFamily(dnSpy.Themes.NetSpyDesign.Get("CodeFont", "Cascadia Mono") + ", " + FontUtilities.GetDefaultTextEditorFont()),
+						dnSpy.Themes.NetSpyDesign.GetNumber("CodeFontSize", FontUtilities.DEFAULT_FONT_SIZE));
 				return textEditorDefaultFontInfo;
 			}
 		}

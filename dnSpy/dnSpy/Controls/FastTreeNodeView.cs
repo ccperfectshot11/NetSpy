@@ -54,12 +54,12 @@ namespace dnSpy.Controls {
 			icon = new DsImage {
 				Width = 16,
 				Height = 16,
-				Margin = new Thickness(0, 0, 5, 1),
+				Margin = new Thickness(0, 0, 7, 0),
 				VerticalAlignment = VerticalAlignment.Center,
 				Focusable = false
 			};
 			content = new ContentPresenter {
-				Margin = new Thickness(2, 0, 6, 0),
+				Margin = new Thickness(0, 0, 8, 0),
 				VerticalAlignment = VerticalAlignment.Center,
 				Focusable = false
 			};

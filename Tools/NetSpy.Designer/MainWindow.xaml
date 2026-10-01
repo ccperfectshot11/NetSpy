@@ -68,6 +68,8 @@
         <Border DockPanel.Dock="Top" Background="White" BorderBrush="#E0E0E0" BorderThickness="0,0,0,1" Padding="14,9">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource DesignerButton}" Content="Exportă în NetSpy" Click="Export_Click" Margin="4,0,16,0"
+                            ToolTip="Scrie tema în NetSpy (dnSpy\dnSpy\Themes\netspy.dntheme); se vede după recompilarea NetSpy" />
                     <Button Style="{StaticResource DesignerButton}" Content="Nou" Click="New_Click" ToolTip="Pornește de la tema implicită" />
                     <Button Style="{StaticResource DesignerButton}" Content="Deschide…" Click="Open_Click" />
                     <Button Style="{StaticResource DesignerButton}" Content="Salvează ca…" Click="SaveAs_Click" />

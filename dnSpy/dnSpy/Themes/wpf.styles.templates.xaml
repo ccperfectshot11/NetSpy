@@ -2843,9 +2843,11 @@
         <Setter Property="Foreground"
                 Value="{DynamicResource SystemColorsControlText}"/>
         <Setter Property="Padding"
-                Value="2"/>
+                Value="7 6"/>
+        <Setter Property="Margin"
+                Value="1 0"/>
         <Setter Property="BorderThickness"
-                Value="1"/>
+                Value="0"/>
         <Setter Property="Background"
                 Value="Transparent"/>
         <Setter Property="BorderBrush"
@@ -2862,6 +2864,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type Button}">
                     <Border Name="Bd"
+                            CornerRadius="{DynamicResource NetSpy.ControlCorner}"
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
@@ -2876,19 +2879,19 @@
                                  Value="true">
                             <Setter TargetName="Bd"
                                     Property="BorderBrush"
-                                    Value="{DynamicResource ToolBarButtonHoverBorder}"/>
+                                    Value="Transparent"/>
                             <Setter TargetName="Bd"
                                     Property="Background"
-                                    Value="{DynamicResource ToolBarButtonHover}"/>
+                                    Value="{DynamicResource NetSpy.Hover}"/>
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused"
                                  Value="true">
                             <Setter TargetName="Bd"
                                     Property="BorderBrush"
-                                    Value="{DynamicResource ToolBarButtonHoverBorder}"/>
+                                    Value="Transparent"/>
                             <Setter TargetName="Bd"
                                     Property="Background"
-                                    Value="{DynamicResource ToolBarButtonHover}"/>
+                                    Value="{DynamicResource NetSpy.Hover}"/>
                         </Trigger>
                         <Trigger Property="IsPressed"
                                  Value="true">
@@ -3137,7 +3140,10 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type Thumb}">
+                    <!-- NetSpy: bară subțire, rotunjită (ca în NetSpy Designer) -->
                     <Border x:Name="Border"
+                            Margin="2"
+                            CornerRadius="3"
                             BorderBrush="Transparent"
                             Background="{DynamicResource EnvironmentScrollBarThumbBackground}" />
                     <ControlTemplate.Triggers>
@@ -3160,13 +3166,13 @@
                             Value="{x:Static theme:ScrollGlyph.VerticalGripper}">
                             <Setter Property="BorderThickness"
                                 TargetName="Border"
-                                Value="4 0 4 0"/>
+                                Value="0"/>
                         </Trigger>
                         <Trigger Property="theme:ScrollChrome.ScrollGlyph"
                             Value="{x:Static theme:ScrollGlyph.HorizontalGripper}">
                             <Setter Property="BorderThickness"
                                 TargetName="Border"
-                                Value="0 4 0 4"/>
+                                Value="0"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -3222,9 +3228,9 @@
         <Setter Property="Foreground"
                 Value="{DynamicResource SystemColorsControlText}"/>
         <Setter Property="Width"
-                Value="{DynamicResource {x:Static SystemParameters.VerticalScrollBarWidthKey}}"/>
+                Value="10"/>
         <Setter Property="MinWidth"
-                Value="{DynamicResource {x:Static SystemParameters.VerticalScrollBarWidthKey}}"/>
+                Value="10"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type ScrollBar}">
@@ -3233,11 +3239,11 @@
                             BorderBrush="{DynamicResource EnvironmentScrollBarBorder}">
                         <Grid SnapsToDevicePixels="true">
                             <Grid.RowDefinitions>
-                                <RowDefinition MaxHeight="{DynamicResource {x:Static SystemParameters.VerticalScrollBarButtonHeightKey}}"/>
+                                <RowDefinition MaxHeight="0"/>
                                 <RowDefinition Height="0.00001*"/>
-                                <RowDefinition MaxHeight="{DynamicResource {x:Static SystemParameters.VerticalScrollBarButtonHeightKey}}"/>
+                                <RowDefinition MaxHeight="0"/>
                             </Grid.RowDefinitions>
-                            <RepeatButton Style="{StaticResource ScrollBarButton}"
+                            <RepeatButton Style="{StaticResource ScrollBarButton}" Visibility="Collapsed"
                                           Command="{x:Static ScrollBar.LineUpCommand}"
                                           theme:ScrollChrome.ScrollGlyph="UpArrow"/>
                             <Track Grid.Row="1"
@@ -3256,7 +3262,7 @@
                                            theme:ScrollChrome.ScrollGlyph="VerticalGripper"/>
                                 </Track.Thumb>
                             </Track>
-                            <RepeatButton Style="{StaticResource ScrollBarButton}"
+                            <RepeatButton Style="{StaticResource ScrollBarButton}" Visibility="Collapsed"
                                           Grid.Row="2"
                                           Command="{x:Static ScrollBar.LineDownCommand}"
                                           theme:ScrollChrome.ScrollGlyph="DownArrow"/>
@@ -3273,9 +3279,9 @@
                 <Setter Property="MinWidth"
                         Value="0"/>
                 <Setter Property="Height"
-                        Value="{DynamicResource {x:Static SystemParameters.HorizontalScrollBarHeightKey}}"/>
+                        Value="10"/>
                 <Setter Property="MinHeight"
-                        Value="{DynamicResource {x:Static SystemParameters.HorizontalScrollBarHeightKey}}"/>
+                        Value="10"/>
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="{x:Type ScrollBar}">
@@ -3284,11 +3290,11 @@
                                     BorderBrush="{DynamicResource EnvironmentScrollBarBorder}">
                                 <Grid SnapsToDevicePixels="true">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition MaxWidth="{DynamicResource {x:Static SystemParameters.HorizontalScrollBarButtonWidthKey}}"/>
+                                        <ColumnDefinition MaxWidth="0"/>
                                         <ColumnDefinition Width="0.00001*"/>
-                                        <ColumnDefinition MaxWidth="{DynamicResource {x:Static SystemParameters.HorizontalScrollBarButtonWidthKey}}"/>
+                                        <ColumnDefinition MaxWidth="0"/>
                                     </Grid.ColumnDefinitions>
-                                    <RepeatButton Style="{StaticResource ScrollBarButton}"
+                                    <RepeatButton Style="{StaticResource ScrollBarButton}" Visibility="Collapsed"
                                                   Command="{x:Static ScrollBar.LineLeftCommand}"
                                                   theme:ScrollChrome.ScrollGlyph="LeftArrow"/>
                                     <Track Grid.Column="1"
@@ -3306,7 +3312,7 @@
                                                    theme:ScrollChrome.ScrollGlyph="HorizontalGripper"/>
                                         </Track.Thumb>
                                     </Track>
-                                    <RepeatButton Style="{StaticResource ScrollBarButton}"
+                                    <RepeatButton Style="{StaticResource ScrollBarButton}" Visibility="Collapsed"
                                                   Grid.Column="2"
                                                   Command="{x:Static ScrollBar.LineRightCommand}"
                                                   theme:ScrollChrome.ScrollGlyph="RightArrow"/>
@@ -3500,17 +3506,17 @@
                             <ColumnDefinition Width="Auto"
                                               SharedSizeGroup="ComboBoxButton"/>
                         </Grid.ColumnDefinitions>
+                        <!-- NetSpy: chevron subțire, ca în NetSpy Designer -->
                         <Border x:Name="Chrome"
                                 Grid.Column="1"
-                                Width="13"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="1"
+                                Width="22"
+                                Background="Transparent"
+                                CornerRadius="{DynamicResource NetSpy.ControlCorner}"
                                 SnapsToDevicePixels="true">
                             <Path x:Name="ArrowDownPath"
-                                  Data="M 0 0 L 3 3 L 6 0 Z"
-                                  Margin="0 1 0 0"
-                                  Fill="{TemplateBinding Foreground}"
+                                  Data="M 0 0 L 4 4 L 8 0"
+                                  Stroke="{TemplateBinding Foreground}"
+                                  StrokeThickness="1.2"
                                   HorizontalAlignment="Center"
                                   VerticalAlignment="Center"/>
                         </Border>
@@ -3524,7 +3530,7 @@
                                     Property="BorderBrush"
                                     Value="{DynamicResource CommonControlsComboBoxSeparatorPressed}" />
                             <Setter TargetName="ArrowDownPath"
-                                    Property="Fill"
+                                    Property="Stroke"
                                     Value="{DynamicResource CommonControlsComboBoxGlyphPressed}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
@@ -3535,7 +3541,7 @@
                                     Property="BorderBrush"
                                     Value="{DynamicResource CommonControlsComboBoxSeparatorPressed}" />
                             <Setter TargetName="ArrowDownPath"
-                                    Property="Fill"
+                                    Property="Stroke"
                                     Value="{DynamicResource CommonControlsComboBoxGlyphPressed}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
@@ -3585,10 +3591,13 @@
                                 <ColumnDefinition Width="Auto"
                                                   SharedSizeGroup="ComboBoxButton"/>
                             </Grid.ColumnDefinitions>
+                            <!-- NetSpy: câmp rotunjit (ca în NetSpy Designer) -->
                             <Border Name="Background"
-                                    Background="{TemplateBinding Background}"/>
+                                    Grid.ColumnSpan="2"
+                                    CornerRadius="{DynamicResource NetSpy.ControlCorner}"
+                                    Background="{DynamicResource NetSpy.InputBg}"/>
                             <Border Name="SelectedContentBorder"
-                                    Margin="2,2,1,2">
+                                    Margin="8,2,2,2">
                                 <ContentPresenter x:Name="ContentSite"
                                                   Content="{TemplateBinding SelectionBoxItem}"
                                                   ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
@@ -3599,8 +3608,9 @@
                             </Border>
                             <Border Name="Border"
                                     Grid.ColumnSpan="2"
-                                    BorderThickness="{TemplateBinding BorderThickness}"
-                                    BorderBrush="{TemplateBinding BorderBrush}"/>
+                                    CornerRadius="{DynamicResource NetSpy.ControlCorner}"
+                                    BorderThickness="1"
+                                    BorderBrush="{DynamicResource NetSpy.Border}"/>
                             <ToggleButton BorderBrush="{DynamicResource CommonControlsComboBoxSeparator}"
                                           Background="{DynamicResource CommonControlsComboBoxGlyphBackground}"
                                           Foreground="{DynamicResource CommonControlsComboBoxGlyph}"
@@ -3629,14 +3639,15 @@
                                                           MinWidth="{TemplateBinding ActualWidth}"
                                                           MaxHeight="{TemplateBinding MaxDropDownHeight}">
                                 <Border x:Name="DropDownBorder"
-                                        Background="{TemplateBinding Background}"
-                                        Margin="0 1 0 0"
+                                        Background="{DynamicResource NetSpy.PopupBg}"
+                                        CornerRadius="{DynamicResource NetSpy.PopupCorner}"
+                                        Padding="4"
+                                        Margin="0 4 0 0"
                                         BorderThickness="1"
                                         BorderBrush="{DynamicResource CommonControlsComboBoxListBorder}">
                                     <ScrollViewer Name="DropDownScrollViewer">
-                                      <Grid RenderOptions.ClearTypeHint="Enabled"
-                                            Background="{DynamicResource CommonControlsComboBoxListBackground}">
-                                        <Canvas Height="0" Width="0" HorizontalAlignment="Left" VerticalAlignment="Top">
+                                      <Grid RenderOptions.ClearTypeHint="Enabled">
+                                        <Canvas Height="0" Width="0" HorizontalAlignment="Left" VerticalAlignment="Top" Visibility="Collapsed">
                                             <Rectangle
                                                 Name="OpaqueRect"
                                                 Height="{Binding ElementName=DropDownBorder,Path=ActualHeight}"
@@ -3881,9 +3892,9 @@
     <Style x:Key="{x:Static ToolBar.MenuStyleKey}"
            TargetType="{x:Type Menu}">
         <Setter Property="FontFamily"
-                Value="{DynamicResource {x:Static SystemFonts.MenuFontFamilyKey}}"/>
+                Value="{DynamicResource NetSpy.UiFont}"/>
         <Setter Property="FontSize"
-                Value="{DynamicResource {x:Static SystemFonts.MenuFontSizeKey}}"/>
+                Value="{DynamicResource NetSpy.UiFontSize}"/>
         <Setter Property="FontStyle"
                 Value="{DynamicResource {x:Static SystemFonts.MenuFontStyleKey}}"/>
         <Setter Property="FontWeight"
@@ -4703,21 +4714,21 @@
                 Value="False" />
         <Setter Property="Template">
             <Setter.Value>
+                <!-- NetSpy: chevron ca în NetSpy Designer / WinUI -->
                 <ControlTemplate TargetType="{x:Type ToggleButton}">
                     <Border Width="16"
                             Height="16"
+                            Margin="4 0 2 0"
                             Background="Transparent">
                         <Path Name="ExpandPath"
-                              Fill="Transparent"
-                              Stroke="{DynamicResource TreeViewGlyph}"
-                              Data="M0.5,0.5 L0.5,6.5 L6.5,0.5 z"
+                              Data="M 0 0 L 3.5 3.5 L 0 7"
+                              Stroke="{DynamicResource NetSpy.TextSecondary}"
+                              StrokeThickness="1.2"
                               VerticalAlignment="Center"
                               HorizontalAlignment="Center"
-                              SnapsToDevicePixels="True">
+                              RenderTransformOrigin="0.5,0.5">
                             <Path.RenderTransform>
-                                <RotateTransform Angle="135"
-                                                 CenterX="3"
-                                                 CenterY="3"/>
+                                <RotateTransform Angle="0" />
                             </Path.RenderTransform>
                         </Path>
                     </Border>
@@ -4727,38 +4738,15 @@
                             <Setter TargetName="ExpandPath"
                                     Property="RenderTransform">
                                 <Setter.Value>
-                                    <RotateTransform Angle="180"
-                                                     CenterX="3"
-                                                     CenterY="3"/>
+                                    <RotateTransform Angle="90" />
                                 </Setter.Value>
                             </Setter>
-                            <Setter TargetName="ExpandPath"
-                                    Property="Fill"
-                                    Value="{DynamicResource TreeViewGlyph}" />
-                            <Setter TargetName="ExpandPath"
-                                    Property="Stroke"
-                                    Value="{DynamicResource TreeViewGlyph}" />
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="ExpandPath"
                                     Property="Stroke"
                                     Value="{DynamicResource TreeViewGlyphMouseOver}" />
-                            <Setter TargetName="ExpandPath"
-                                    Property="Fill"
-                                    Value="Transparent" />
                         </Trigger>
-                        <MultiTrigger>
-                            <MultiTrigger.Conditions>
-                                <Condition Property="IsMouseOver" Value="True"/>
-                                <Condition Property="IsChecked" Value="True"/>
-                            </MultiTrigger.Conditions>
-                            <Setter TargetName="ExpandPath"
-                                    Property="Stroke"
-                                    Value="{DynamicResource TreeViewGlyphMouseOver}" />
-                            <Setter TargetName="ExpandPath"
-                                    Property="Fill"
-                                    Value="{DynamicResource TreeViewGlyphMouseOver}" />
-                        </MultiTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -4903,10 +4891,21 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type shtv:SharpTreeViewItem}">
-                    <Border x:Name="nodeBorder" Background="{TemplateBinding Background}">
-                        <ctrls:FastTreeNodeView x:Name="nodeView"
-                                                    Foreground="{Binding Foreground}"
-                                                    HorizontalAlignment="Left" />
+                    <!-- NetSpy: rând rotunjit cu margini, înălțimea și bara de accent din design (ca în NetSpy Designer) -->
+                    <Border x:Name="nodeBorder"
+                            Background="{TemplateBinding Background}"
+                            Margin="4 1"
+                            CornerRadius="{DynamicResource NetSpy.ControlCorner}"
+                            MinHeight="{DynamicResource NetSpy.RowHeight}">
+                        <Grid>
+                            <Border x:Name="indicator" Width="3" Height="16" CornerRadius="1.5" HorizontalAlignment="Left"
+                                    Background="{DynamicResource NetSpy.Accent}" Opacity="0"
+                                    Visibility="{DynamicResource NetSpy.SelectionIndicatorVisibility}" />
+                            <ctrls:FastTreeNodeView x:Name="nodeView"
+                                                        Foreground="{Binding Foreground}"
+                                                        VerticalAlignment="Center"
+                                                        HorizontalAlignment="Left" />
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsSelected"
@@ -4917,16 +4916,22 @@
                             <Setter TargetName="nodeView"
                                     Property="Foreground"
                                     Value="{DynamicResource TreeViewItemSelectedForeground}" />
+                            <Setter TargetName="indicator"
+                                    Property="Opacity"
+                                    Value="1" />
                         </Trigger>
-                        <Trigger Property="IsMouseOver"
-                                 Value="True">
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True" />
+                                <Condition Property="IsSelected" Value="False" />
+                            </MultiTrigger.Conditions>
                             <Setter TargetName="nodeBorder"
                                     Property="Background"
                                     Value="{DynamicResource TreeViewItemMouseOverTextBackground}" />
                             <Setter TargetName="nodeView"
                                     Property="Foreground"
                                     Value="{DynamicResource TreeViewItemMouseOverForeground}" />
-                        </Trigger>
+                        </MultiTrigger>
                         <!--<MultiTrigger>
                             <MultiTrigger.Conditions>
                                 <Condition Property="IsSelected"
@@ -5148,10 +5153,20 @@
                 </Style>
             </Button.Resources>
             <StackPanel Orientation="Horizontal">
-                <img:DsImage ImageReference="{Binding ImageReference}" />
+                <img:DsImage ImageReference="{Binding ImageReference}" x:Name="image" />
+                <!-- NetSpy: glifa Windows 11 (Segoe Fluent Icons) în locul imaginii colorate -->
+                <TextBlock x:Name="glyph" Text="{Binding Glyph}" FontSize="{Binding GlyphSize}" Width="18" TextAlignment="Center"
+                           VerticalAlignment="Center" FontFamily="{DynamicResource NetSpy.IconFont}"
+                           TextOptions.TextRenderingMode="Grayscale" Visibility="Collapsed" />
                 <TextBlock Margin="5 0 5 0"  Text="{Binding Header}" Visibility="{Binding HasHeader, Converter={StaticResource BooleanToVisibilityConverter}}" />
             </StackPanel>
         </Button>
+        <DataTemplate.Triggers>
+            <DataTrigger Binding="{Binding HasGlyph}" Value="True">
+                <Setter TargetName="image" Property="Visibility" Value="Collapsed" />
+                <Setter TargetName="glyph" Property="Visibility" Value="Visible" />
+            </DataTrigger>
+        </DataTemplate.Triggers>
     </DataTemplate>
 
     <Style x:Key="StackedContentGridStyle"
@@ -5174,7 +5189,8 @@
                     <Border x:Name="Border"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             Background="{TemplateBinding Background}"
-                            BorderThickness="1"
+                            CornerRadius="{DynamicResource NetSpy.ControlCorner}"
+                            BorderThickness="0"
                             SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}">
                         <ContentPresenter Margin="{TemplateBinding Padding}"
                                           VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
@@ -5191,9 +5207,7 @@
                             <Setter Property="Background"
                                     TargetName="Border"
                                     Value="{Binding HoverBackground, RelativeSource={RelativeSource TemplatedParent}}"/>
-                            <Setter Property="BorderThickness"
-                                    TargetName="Border"
-                                    Value="{Binding HoverBorderThickness, RelativeSource={RelativeSource TemplatedParent}}"/>
+
                             <Setter Property="TextElement.Foreground"
                                     Value="{Binding HoverForeground, RelativeSource={RelativeSource Self}}"/>
                         </Trigger>
@@ -5205,9 +5219,7 @@
                             <Setter Property="Background"
                                     TargetName="Border"
                                     Value="{Binding PressedBackground, RelativeSource={RelativeSource TemplatedParent}}"/>
-                            <Setter Property="BorderThickness"
-                                    TargetName="Border"
-                                    Value="{Binding PressedBorderThickness, RelativeSource={RelativeSource TemplatedParent}}"/>
+
                             <Setter Property="TextElement.Foreground"
                                     Value="{Binding PressedForeground, RelativeSource={RelativeSource Self}}"/>
                         </Trigger>
@@ -5220,14 +5232,13 @@
            TargetType="{x:Type ctrls:WinSysButton}"
            BasedOn="{StaticResource {x:Type ctrls:TabButton}}">
         <Setter Property="Margin" Value="0" />
-        <Setter Property="Padding" Value="0,3,0,0" />
-        <Setter Property="Width" Value="34" />
-        <Setter Property="Height" Value="25" />
-        <Setter Property="VerticalAlignment" Value="Top" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Width" Value="46" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
         <Setter Property="HorizontalAlignment" Value="Center" />
-        <Setter Property="BorderThickness" Value="1,0,1,1" />
-        <Setter Property="HoverBorderThickness" Value="1,0,1,1" />
-        <Setter Property="PressedBorderThickness" Value="1,0,1,1" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="HoverBorderThickness" Value="0" />
+        <Setter Property="PressedBorderThickness" Value="0" />
         <Setter Property="BorderBrush" Value="{DynamicResource EnvironmentMainWindowButtonActiveBorder}" />
         <Setter Property="GlyphForeground" Value="{DynamicResource EnvironmentMainWindowButtonActiveGlyph}" />
         <Setter Property="HoverBackground" Value="{DynamicResource EnvironmentMainWindowButtonHoverActive}" />
@@ -5244,13 +5255,14 @@
                             Background="{TemplateBinding Background}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}">
-                        <Path
+                        <!-- NetSpy: glifele Windows 11 (Segoe Fluent Icons) în loc de desene -->
+                        <TextBlock
                             x:Name="path"
-                            Margin="{TemplateBinding Padding}"
-                            VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                            HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                            SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"
-                            Fill="{Binding Path=(TextElement.Foreground), RelativeSource={RelativeSource Self}}" />
+                            FontFamily="{DynamicResource NetSpy.IconFont}"
+                            FontSize="10"
+                            TextOptions.TextRenderingMode="Grayscale"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver"
@@ -5283,31 +5295,27 @@
                         </Trigger>
                         <Trigger Property="CurrentWinSysType" Value="Minimize">
                             <Setter Property="ToolTip" Value="{x:Static p:dnSpy_Resources.Window_Minimize}" />
-                            <Setter TargetName="path" Property="Width" Value="9" />
-                            <Setter TargetName="path" Property="Height" Value="9" />
-                            <Setter TargetName="path" Property="Stretch" Value="None" />
-                            <Setter TargetName="path" Property="Data" Value="F1M0,6L0,9 9,9 9,6 0,6z" />
+                            <Setter TargetName="path" Property="Text" Value="&#xE921;" />
                         </Trigger>
                         <Trigger Property="CurrentWinSysType" Value="Maximize">
                             <Setter Property="ToolTip" Value="{x:Static p:dnSpy_Resources.Window_Maximize}" />
-                            <Setter TargetName="path" Property="Width" Value="9" />
-                            <Setter TargetName="path" Property="Height" Value="9" />
-                            <Setter TargetName="path" Property="Stretch" Value="Uniform" />
-                            <Setter TargetName="path" Property="Data" Value="F1M0,0L0,9 9,9 9,0 0,0 0,3 8,3 8,8 1,8 1,3z" />
+                            <Setter TargetName="path" Property="Text" Value="&#xE922;" />
                         </Trigger>
                         <Trigger Property="CurrentWinSysType" Value="Restore">
                             <Setter Property="ToolTip" Value="{x:Static p:dnSpy_Resources.Window_Restore}" />
-                            <Setter TargetName="path" Property="Width" Value="10" />
-                            <Setter TargetName="path" Property="Height" Value="10" />
-                            <Setter TargetName="path" Property="Stretch" Value="Uniform" />
-                            <Setter TargetName="path" Property="Data" Value="F1M0,10L0,3 3,3 3,0 10,0 10,2 4,2 4,3 7,3 7,6 6,6 6,5 1,5 1,10z M1,10L7,10 7,7 10,7 10,2 9,2 9,6 6,6 6,9 1,9z" />
+                            <Setter TargetName="path" Property="Text" Value="&#xE923;" />
                         </Trigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="CurrentWinSysType" Value="Close" />
+                                <Condition Property="IsMouseOver" Value="True" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="Border" Property="Background" Value="#C42B1C" />
+                            <Setter Property="TextElement.Foreground" Value="White" />
+                        </MultiTrigger>
                         <Trigger Property="CurrentWinSysType" Value="Close">
                             <Setter Property="ToolTip" Value="{x:Static p:dnSpy_Resources.Window_Close}" />
-                            <Setter TargetName="path" Property="Width" Value="10" />
-                            <Setter TargetName="path" Property="Height" Value="8" />
-                            <Setter TargetName="path" Property="Stretch" Value="Uniform" />
-                            <Setter TargetName="path" Property="Data" Value="F1M0,0L2,0 5,3 8,0 10,0 6,4 10,8 8,8 5,5 2,8 0,8 4,4 0,0z" />
+                            <Setter TargetName="path" Property="Text" Value="&#xE8BB;" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -5368,13 +5376,21 @@
                                     WindowChrome.IsHitTestVisibleInChrome="True"
                                     Command="{x:Static ctrls2:MetroWindow.ShowSystemMenuCommand}"
                                     CommandParameter="{Binding RelativeSource={RelativeSource Self}}"
-                                    Margin="4 7 4 7"
+                                    Margin="12 0 4 0"
                                     Padding="0 0 0 0"
                                     Background="Transparent"
                                     VerticalAlignment="Center"
                                     Visibility="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=ShowMenuButton, Converter={StaticResource BooleanToVisibilityConverter}}" >
-                                    <img:DsImage ImageReference="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=SystemMenuImage}" />
+                                    <!-- NetSpy: iconița aplicației, ca în aplicațiile Windows 11 -->
+                                    <Image Source="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=Icon}" Width="18" Height="18" />
                                 </ctrls:SysMenuButton>
+                                <!-- NetSpy: meniul principal stă în bara de titlu (MetroWindow.TitleBarContent) -->
+                                <ContentPresenter
+                                    DockPanel.Dock="Left"
+                                    Content="{TemplateBinding TitleBarContent}"
+                                    VerticalAlignment="Center"
+                                    Margin="2 0 0 0"
+                                    WindowChrome.IsHitTestVisibleInChrome="True" />
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" WindowChrome.IsHitTestVisibleInChrome="True">
                                     <ctrls:WinSysButton x:Name="minButton" WinSysType="Minimize" Visibility="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=ShowMinimizeButton, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                         ctrls2:MetroWindow.IsMinimizeButton="True"/>
@@ -5385,7 +5401,9 @@
                                 </StackPanel>
                                 <TextBlock
                                     Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=Title}"
-                                    Margin="5 0 0 0"
+                                    Margin="10 0 0 0"
+                                    FontSize="12"
+                                    Opacity="0.85"
                                     HorizontalAlignment="Left"
                                     VerticalAlignment="Center"
                                     TextTrimming="CharacterEllipsis"
@@ -5463,6 +5481,9 @@
         </Setter>
     </Style>
     <Style x:Key="MainWindowStyle" TargetType="{x:Type ctrls2:MetroWindow}" BasedOn="{StaticResource {x:Type ctrls2:MetroWindow}}">
+        <!-- NetSpy: fontul interfeței din design (Segoe UI Variable) -->
+        <Setter Property="FontFamily" Value="{DynamicResource NetSpy.UiFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource NetSpy.UiFontSize}" />
         <Setter Property="Foreground" Value="{DynamicResource EnvironmentForeground}" />
         <Setter Property="Background" Value="{DynamicResource EnvironmentBackground}" />
         <Setter Property="ActiveCaption" Value="{DynamicResource EnvironmentMainWindowActiveCaption}" />
@@ -5483,6 +5504,8 @@
         <Setter Property="ShowCloseButton" Value="True" />
     </Style>
     <Style x:Key="DialogWindowStyle" TargetType="{x:Type ctrls2:MetroWindow}" BasedOn="{StaticResource {x:Type ctrls2:MetroWindow}}">
+        <Setter Property="FontFamily" Value="{DynamicResource NetSpy.UiFont}" />
+        <Setter Property="FontSize" Value="{DynamicResource NetSpy.UiFontSize}" />
         <Setter Property="Foreground" Value="{DynamicResource DialogWindowForeground}"/>
         <Setter Property="Background" Value="{DynamicResource DialogWindowBackground}"/>
         <Setter Property="ActiveCaption" Value="{DynamicResource DialogWindowActiveCaption}" />
@@ -5538,7 +5561,7 @@
         <Setter Property="Foreground"
                 Value="{DynamicResource SystemColorsControlText}"/>
         <Setter Property="Padding"
-                Value="0 2 0 0"/>
+                Value="0"/>
         <Setter Property="BorderThickness"
                 Value="0 0 0 0"/>
         <Setter Property="Background"
@@ -5554,8 +5577,15 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type TabControl}">
+                    <!-- NetSpy: panoul e un card rotunjit, separat de vecini (ca în NetSpy Designer) -->
+                    <Border Margin="{DynamicResource NetSpy.PanelMargin}"
+                            Background="{DynamicResource NetSpy.PanelBg}"
+                            BorderBrush="{DynamicResource NetSpy.Border}"
+                            BorderThickness="1"
+                            CornerRadius="{DynamicResource NetSpy.PanelCorner}">
                     <Grid KeyboardNavigation.TabNavigation="Local"
                           SnapsToDevicePixels="true"
+                          ctrls:RoundClip.Radius="{DynamicResource NetSpy.PanelInnerRadius}"
                           ClipToBounds="true">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition />
@@ -5565,13 +5595,16 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
+                        <!-- bara taburilor -->
+                        <Border Grid.Row="0" Background="{DynamicResource NetSpy.TabStripBg}"
+                                BorderBrush="{DynamicResource NetSpy.Border}" BorderThickness="0 0 0 1" />
                         <TabPanel x:Name="HeaderPanel"
                                   mvvm:IsDraggableAP.IsDraggable="True"
                                   Panel.ZIndex ="1"
                                   KeyboardNavigation.TabIndex="1"
                                   Grid.Column="0"
                                   Grid.Row="0"
-                                  Margin="0 0 0 0"
+                                  Margin="2 0 2 -1"
                                   IsItemsHost="true"/>
                         <Border x:Name="ContentPanel"
                                 mvvm:IsDraggableAP.IsDraggable="False"
@@ -5589,6 +5622,7 @@
                                               ContentSource="SelectedContent"/>
                         </Border>
                     </Grid>
+                    </Border>
                     <ControlTemplate.Triggers>
                         <DataTrigger Value="Active" Binding="{Binding Path=DataContext.TabGroupState, RelativeSource={RelativeSource Self}}">
                             <Setter Property="Background" Value="{DynamicResource EnvironmentFileTabSelectedGradient}" />
@@ -5613,15 +5647,18 @@
                     <Border ToolTip="{Binding ToolTip}" mvvm:IsDraggableAP.IsDraggable="True">
                         <Border>
                             <Border Name="Border"
-                                    Background="{DynamicResource EnvironmentFileTabBackground}"
-                                    BorderBrush="{DynamicResource EnvironmentFileTabBorder}"
-                                    BorderThickness="0 2 0 0"
-                                    Padding="0 1 0 3">
+                                    Background="Transparent"
+                                    BorderBrush="Transparent"
+                                    BorderThickness="1 1 1 0"
+                                    CornerRadius="{DynamicResource NetSpy.TabCorner}"
+                                    Margin="4 6 0 0"
+                                    Padding="12 6 6 7">
                                 <DockPanel Name="DockPanel" TextBlock.Foreground="{DynamicResource EnvironmentFileTabText}">
                                     <ctrls:TabButton x:Name="CloseButton"
                                                      mvvm:IsDraggableAP.IsDraggable="False"
                                                      DockPanel.Dock="Right"
-                                                     Margin="3 0 3 0"
+                                                     Margin="8 0 0 0"
+                                                     VerticalAlignment="Center"
                                                      Command="{Binding CloseCommand}"
                                                      GlyphForeground="Transparent"
                                                      HoverBackground="{DynamicResource EnvironmentFileTabButtonHoverInactive}"
@@ -5633,15 +5670,12 @@
                                                      PressedForeground="{DynamicResource EnvironmentFileTabButtonDownInactiveGlyph}"
                                                      PressedBorderThickness="1"
                                                      ToolTip="{x:Static p:dnSpy_Resources.CloseTabButtonToolTip}">
-                                        <Path x:Name="CloseButtonCross"
-                                              Width="10" Height="8"
-                                              Stretch="Uniform"
-                                              Data="F1M0,0L2,0 5,3 8,0 10,0 6,4 10,8 8,8 5,5 2,8 0,8 4,4 0,0z"
-                                              Fill="{Binding Path=(TextElement.Foreground), RelativeSource={RelativeSource Self}}" />
+                                        <TextBlock x:Name="CloseButtonCross" Text="&#xE711;" FontSize="9" Margin="3"
+                                                   FontFamily="{DynamicResource NetSpy.IconFont}" TextOptions.TextRenderingMode="Grayscale" />
                                     </ctrls:TabButton>
                                     <TextBlock HorizontalAlignment="Stretch"
-                                               Margin="4 0 4 0"
-                                               VerticalAlignment="Stretch"
+                                               Margin="0"
+                                               VerticalAlignment="Center"
                                                Text="{Binding Header}"
                                                MaxWidth="230"
                                                TextTrimming="CharacterEllipsis"
@@ -5721,8 +5755,15 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type TabControl}">
+                    <!-- NetSpy: panoul e un card rotunjit, separat de vecini (ca în NetSpy Designer) -->
+                    <Border Margin="{DynamicResource NetSpy.PanelMargin}"
+                            Background="{DynamicResource NetSpy.PanelBg}"
+                            BorderBrush="{DynamicResource NetSpy.Border}"
+                            BorderThickness="1"
+                            CornerRadius="{DynamicResource NetSpy.PanelCorner}">
                     <Grid KeyboardNavigation.TabNavigation="Local"
                           SnapsToDevicePixels="true"
+                          ctrls:RoundClip.Radius="{DynamicResource NetSpy.PanelInnerRadius}"
                           ClipToBounds="true">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition />
@@ -5732,19 +5773,21 @@
                             <RowDefinition Height="*"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
+                        <Border Grid.Row="1" Background="{DynamicResource NetSpy.TabStripBg}"
+                                BorderBrush="{DynamicResource NetSpy.Border}" BorderThickness="0 1 0 0"
+                                Visibility="{Binding Visibility, ElementName=HeaderPanel}" />
                         <TabPanel x:Name="HeaderPanel"
                                   mvvm:IsDraggableAP.IsDraggable="True"
                                   Panel.ZIndex ="1"
                                   KeyboardNavigation.TabIndex="1"
                                   Grid.Column="0"
                                   Grid.Row="1"
-                                  Margin="0 -1 0 0"
+                                  Margin="2 0 2 0"
                                   IsItemsHost="true"/>
                         <Border x:Name="ContentPanel"
                                 mvvm:IsDraggableAP.IsDraggable="False"
                                 Background="{TemplateBinding Background}"
-                                BorderThickness="1 1 1 1"
-                                BorderBrush="{DynamicResource EnvironmentToolWindowBorder}"
+                                BorderThickness="0"
                                 KeyboardNavigation.TabNavigation="Local"
                                 KeyboardNavigation.DirectionalNavigation="Contained"
                                 KeyboardNavigation.TabIndex="2"
@@ -5756,6 +5799,7 @@
                                               ContentSource="SelectedContent"/>
                         </Border>
                     </Grid>
+                    </Border>
                     <ControlTemplate.Triggers>
                         <DataTrigger Value="1" Binding="{Binding Path=Items.Count, RelativeSource={RelativeSource Self}}">
                             <Setter TargetName="HeaderPanel" Property="Visibility" Value="Collapsed" />
@@ -5773,57 +5817,42 @@
                 Value="Stretch"/>
         <Setter Property="Control.Template">
             <Setter.Value>
+                <!-- NetSpy: tab „subliniat” (ca în NetSpy Designer): fără chenar, linie de accent sub tabul selectat -->
                 <ControlTemplate TargetType="{x:Type TabItem}">
-                    <Border Name="TabBorder"
-                            mvvm:IsDraggableAP.IsDraggable="True"
-                            ToolTip="{Binding ToolTip}"
-                            VerticalAlignment="Stretch"
-                            HorizontalAlignment="Stretch"
-                            BorderBrush="{DynamicResource EnvironmentToolWindowBorder}"
-                            BorderThickness="0 1 0 0">
+                    <Grid Name="TabBorder"
+                          mvvm:IsDraggableAP.IsDraggable="True"
+                          ToolTip="{Binding ToolTip}"
+                          Background="Transparent"
+                          Margin="2 0 0 0">
                         <Border Name="Border"
-                                Background="{DynamicResource EnvironmentToolWindowTabGradient}"
-                                BorderBrush="{DynamicResource EnvironmentToolWindowTabBorder}"
-                                BorderThickness="0 0 0 2"
-                                Padding="0 0 0 1">
-                            <DockPanel Name="DockPanel" TextBlock.Foreground="{DynamicResource EnvironmentToolWindowTabText}">
-                                <TextBlock HorizontalAlignment="Stretch"
-                                           Margin="5 2 5 0"
-                                           VerticalAlignment="Stretch"
-                                           Text="{Binding Header}"
-                                           MaxWidth="230"
-                                           TextTrimming="CharacterEllipsis"
-                                           ToolTip="{Binding ToolTip}" />
-                            </DockPanel>
-                        </Border>
-                    </Border>
+                                Margin="0 4 0 4"
+                                CornerRadius="{DynamicResource NetSpy.ControlCorner}"
+                                Background="Transparent" />
+                        <DockPanel Name="DockPanel" Margin="12 7 12 8" TextBlock.Foreground="{DynamicResource NetSpy.TextSecondary}">
+                            <TextBlock HorizontalAlignment="Stretch"
+                                       VerticalAlignment="Center"
+                                       Text="{Binding Header}"
+                                       MaxWidth="230"
+                                       TextTrimming="CharacterEllipsis"
+                                       ToolTip="{Binding ToolTip}" />
+                        </DockPanel>
+                        <Border Name="Line"
+                                Height="3"
+                                Margin="10 0"
+                                CornerRadius="1.5"
+                                VerticalAlignment="Bottom"
+                                Background="{DynamicResource NetSpy.Accent}"
+                                Visibility="Hidden" />
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <DataTrigger Value="True" Binding="{Binding Path=IsMouseOver, RelativeSource={RelativeSource Self}}">
-                            <Setter TargetName="Border" Property="Background" Value="{DynamicResource EnvironmentToolWindowTabMouseOverBackgroundGradient}" />
-                            <Setter TargetName="Border" Property="BorderBrush" Value="{DynamicResource EnvironmentToolWindowTabMouseOverBorder}" />
-                            <Setter TargetName="DockPanel" Property="TextBlock.Foreground" Value="{DynamicResource EnvironmentToolWindowTabMouseOverText}" />
+                            <Setter TargetName="Border" Property="Background" Value="{DynamicResource NetSpy.Hover}" />
                         </DataTrigger>
                         <DataTrigger Value="True" Binding="{Binding IsSelected}">
-                            <Setter Property="Panel.ZIndex" Value="-1" />
-                            <Setter TargetName="Border" Property="Background" Value="{DynamicResource EnvironmentToolWindowTabSelectedTab}" />
-                            <Setter TargetName="Border" Property="BorderBrush" Value="{DynamicResource EnvironmentToolWindowTabSelectedBorder}" />
-                            <Setter TargetName="TabBorder" Property="BorderThickness" Value="1,0,1,1" />
+                            <Setter TargetName="Line" Property="Visibility" Value="Visible" />
+                            <Setter TargetName="DockPanel" Property="TextBlock.Foreground" Value="{DynamicResource EnvironmentToolWindowTabSelectedActiveText}" />
                             <Setter Property="Focusable" Value="False" />
                         </DataTrigger>
-                        <MultiDataTrigger>
-                            <MultiDataTrigger.Conditions>
-                                <Condition Value="False" Binding="{Binding IsActive}" />
-                                <Condition Value="True" Binding="{Binding IsSelected}" />
-                            </MultiDataTrigger.Conditions>
-                            <Setter TargetName="DockPanel" Property="TextBlock.Foreground" Value="{DynamicResource EnvironmentToolWindowTabSelectedText}" />
-                        </MultiDataTrigger>
-                        <MultiDataTrigger>
-                            <MultiDataTrigger.Conditions>
-                                <Condition Value="True" Binding="{Binding Path=IsSelected}" />
-                                <Condition Value="True" Binding="{Binding Path=IsActive}" />
-                            </MultiDataTrigger.Conditions>
-                            <Setter TargetName="DockPanel" Property="TextBlock.Foreground" Value="{DynamicResource EnvironmentToolWindowTabSelectedActiveText}" />
-                        </MultiDataTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -5836,8 +5865,8 @@
                 <Border Name="Bd"
                         mvvm:IsDraggableAP.IsDraggable="True"
                         BorderThickness="0,0,0,0"
-                        MinHeight="19"
-                        Padding="1,3,1,3"
+                        MinHeight="32"
+                        Padding="12,0,6,0"
                         Focusable="False"
                         BorderBrush="{DynamicResource EnvironmentTitleBarInactiveBorder}"
                         Background="{DynamicResource EnvironmentTitleBarInactiveGradient}"
@@ -5850,8 +5879,8 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="{Binding Title}" Margin="3,0" VerticalAlignment="Center"/>
-                        <Rectangle Grid.Column="1" Name="Rect" Height="5" VerticalAlignment="Center" Margin="8 0 4 0" Fill="{DynamicResource EnvironmentTitleBarDragHandle}" />
+                        <TextBlock Text="{Binding Title}" Margin="0" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="12"/>
+                        <Rectangle Grid.Column="1" Name="Rect" Height="5" VerticalAlignment="Center" Margin="8 0 4 0" Fill="Transparent" />
                         <ctrls:TabButton x:Name="MenuButton"
                                          Grid.Column="2"
                                          mvvm:IsDraggableAP.IsDraggable="False"
@@ -5869,10 +5898,7 @@
                                          PressedForeground="{DynamicResource EnvironmentToolWindowButtonDownActiveGlyph}"
                                          PressedBorderThickness="1"
                                          ToolTip="{x:Static p:dnSpy_Resources.ToolWindowWinPosButtonToolTip}">
-                            <Path Width="8" Height="4"
-                                  Stretch="Uniform"
-                                  Data="F1 M0,0 L4,4 L8,0 L0,0"
-                                  Fill="{Binding Path=(TextElement.Foreground), RelativeSource={RelativeSource Self}}" />
+                            <TextBlock Text="&#xE70D;" FontSize="9" Margin="5" FontFamily="{DynamicResource NetSpy.IconFont}" TextOptions.TextRenderingMode="Grayscale" />
                         </ctrls:TabButton>
                         <ctrls:TabButton x:Name="PART_Close"
                                          Grid.Column="3"
@@ -5889,11 +5915,7 @@
                                          PressedForeground="{DynamicResource EnvironmentToolWindowButtonDownActiveGlyph}"
                                          PressedBorderThickness="1"
                                          ToolTip="{x:Static p:dnSpy_Resources.CloseTabButtonToolTip}">
-                            <Path x:Name="CloseButtonCross"
-                                  Width="10" Height="8"
-                                  Stretch="Uniform"
-                                  Data="F1M0,0L2,0 5,3 8,0 10,0 6,4 10,8 8,8 5,5 2,8 0,8 4,4 0,0z"
-                                  Fill="{Binding Path=(TextElement.Foreground), RelativeSource={RelativeSource Self}}" />
+                            <TextBlock x:Name="CloseButtonCross" Text="&#xE711;" FontSize="9" Margin="5" FontFamily="{DynamicResource NetSpy.IconFont}" TextOptions.TextRenderingMode="Grayscale" />
                         </ctrls:TabButton>
                     </Grid>
                 </Border>
@@ -5913,7 +5935,6 @@
                 <Setter TargetName="MenuButton" Value="{DynamicResource EnvironmentToolWindowButtonHoverActiveBorder}" Property="HoverBorderBrush" />
                 <Setter TargetName="MenuButton" Value="{DynamicResource EnvironmentToolWindowButtonHoverActiveGlyph}" Property="HoverForeground" />
                 <Setter TargetName="MenuButton" Value="{DynamicResource EnvironmentToolWindowButtonActiveGlyph}" Property="GlyphForeground" />
-                <Setter TargetName="Rect" Value="{DynamicResource EnvironmentTitleBarDragHandleActive}" Property="Fill" />
             </DataTrigger>
         </DataTemplate.Triggers>
     </DataTemplate>

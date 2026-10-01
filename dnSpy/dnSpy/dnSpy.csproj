@@ -74,7 +74,7 @@
     <EmbeddedResource Include="LicenseInfo\CREDITS.txt" />
     <None Remove="app.config" Condition=" '$(IsDotNetFramework)' != 'true' " />
     <None Include="app.manifest" />
-    <None Include="Themes\*.dntheme">
+    <None Include="Themes\*.dntheme;Themes\*.netspy-design.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Include="FileLists\*.FileList.xml;LicenseInfo\*">

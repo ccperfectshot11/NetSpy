@@ -19,7 +19,10 @@
 
 using System;
 using System.ComponentModel.Composition;
+using System.Linq;
+using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using dnSpy.Contracts.Controls;
 using dnSpy.Contracts.ToolBars;
 using dnSpy.Controls;
@@ -35,10 +38,32 @@ namespace dnSpy.MainApp {
 		[ImportingConstructor]
 		public AppToolBar(IToolBarService toolBarService) {
 			this.toolBarService = toolBarService;
-			toolBar = new ToolBar();
+			toolBar = new ToolBar { Padding = new Thickness(8, 4, 8, 4) };
 		}
 
-		internal void Initialize(MetroWindow window) =>
+		internal void Initialize(MetroWindow window) {
+			// the menu is moved to the title bar below; detach it first so it can be added to the toolbar again
+			window.TitleBarContent = null;
 			toolBarService.InitializeToolBar(toolBar, new Guid(ToolBarConstants.APP_TB_GUID), window);
+			MoveMenuToTitleBar(window);
+		}
+
+		/// <summary>
+		/// NetSpy: like WinUI apps, the main menu is shown in the title bar (the toolbar keeps the buttons)
+		/// </summary>
+		void MoveMenuToTitleBar(MetroWindow window) {
+			var menu = toolBar.Items.OfType<Menu>().FirstOrDefault();
+			if (menu is null)
+				return;
+			int index = toolBar.Items.IndexOf(menu);
+			toolBar.Items.RemoveAt(index);
+			// the separator that followed the menu
+			if (index < toolBar.Items.Count && toolBar.Items[index] is Separator)
+				toolBar.Items.RemoveAt(index);
+			// outside the toolbar the menu no longer gets the toolbar's menu style automatically
+			menu.SetResourceReference(FrameworkElement.StyleProperty, ToolBar.MenuStyleKey);
+			menu.Background = Brushes.Transparent;
+			window.TitleBarContent = menu;
+		}
 	}
 }

@@ -118,12 +118,14 @@ namespace dnSpy.Themes {
 		void InitializeResources() {
 			var app = Application.Current;
 			Debug2.Assert(app is not null);
-			if (app is not null)
+			if (app is not null) {
 				((Theme)Theme).UpdateResources(app.Resources);
+				NetSpyDesign.ApplyTo(app.Resources);
+			}
 		}
 
 		Guid CurrentDefaultThemeGuid => IsHighContrast ? DefaultHighContrastThemeGuid : DefaultThemeGuid;
-		static readonly Guid DefaultThemeGuid = ThemeConstants.THEME_DARK_GUID;
+		static readonly Guid DefaultThemeGuid = ThemeConstants.THEME_NETSPY_GUID;
 		static readonly Guid DefaultHighContrastThemeGuid = ThemeConstants.THEME_HIGHCONTRAST_GUID;
 
 		ITheme GetThemeOrDefault(Guid guid) {

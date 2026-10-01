@@ -285,7 +285,9 @@ namespace dnSpy.MainApp {
 			savedLocations = new Dictionary<Guid, AppToolWindowLocation>();
 
 			var guid = new Guid(MenuConstants.GUIDOBJ_TOOLWINDOW_TABCONTROL_GUID);
-			const double HORIZ_WIDTH = 250, VERT_HEIGHT = 250;
+			// NetSpy: the side panels start as wide as the tree in the design (NetSpy Designer "TreeWidth")
+			double HORIZ_WIDTH = dnSpy.Themes.NetSpyDesign.GetNumber("TreeWidth", 300);
+			const double VERT_HEIGHT = 250;
 			toolWindowUIs.Add(AppToolWindowLocation.Left, new ToolWindowUI(this, AppToolWindowLocation.Left, HORIZ_WIDTH, horizontalContent, false, toolWindowService.Create(new ToolWindowGroupServiceOptions(guid))));
 			toolWindowUIs.Add(AppToolWindowLocation.Right, new ToolWindowUI(this, AppToolWindowLocation.Right, HORIZ_WIDTH, horizontalContent, true, toolWindowService.Create(new ToolWindowGroupServiceOptions(guid))));
 			toolWindowUIs.Add(AppToolWindowLocation.Top, new ToolWindowUI(this, AppToolWindowLocation.Top, VERT_HEIGHT, verticalContent, false, toolWindowService.Create(new ToolWindowGroupServiceOptions(guid))));
@@ -315,7 +317,8 @@ namespace dnSpy.MainApp {
 
 			void ToolWindowGroupService_TabGroupCollectionChanged(object? sender, ToolWindowGroupCollectionChangedEventArgs e) => mainWindowControl.TabGroupCollectionChanged(this);
 
-			const double DEFAULT_MIN_HEIGHT = 20;
+			// NetSpy: a card panel needs room for its 32px header and a row
+			const double DEFAULT_MIN_HEIGHT = 90;
 			const double DEFAULT_MIN_WIDTH = 20;
 			public StackedContentChildInfo GetSizeInfo() => new StackedContentChildInfo {
 				Horizontal = new GridChildLength(new GridLength(Length, GridUnitType.Pixel), min: DEFAULT_MIN_WIDTH),

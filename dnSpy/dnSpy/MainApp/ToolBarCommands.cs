@@ -83,7 +83,8 @@ namespace dnSpy.MainApp {
 			UpdateSelectedItem();
 			comboBox = new ComboBox {
 				DisplayMemberPath = "Name",
-				Width = 90,
+				Width = 170,
+				Height = 30, // NetSpy: like the language box in NetSpy Designer
 				ItemsSource = infos,
 			};
 			comboBox.SetBinding(Selector.SelectedItemProperty, new Binding(nameof(SelectedItem)) {
