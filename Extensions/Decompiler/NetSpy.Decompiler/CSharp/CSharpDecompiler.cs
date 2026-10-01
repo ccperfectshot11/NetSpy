@@ -284,6 +284,7 @@ namespace NetSpy.Decompiler.CSharp
 				new PrettifyAssignments(), // must run after DeclareVariables
 				new IntroduceUsingDeclarations(),
 				new IntroduceExtensionMethods(), // must run after IntroduceUsingDeclarations
+				new IntroduceExtensionMemberAccess(), // NetSpy: C# 14 extension properties / static extension members
 				new IntroduceQueryExpressions(), // must run after IntroduceExtensionMethods
 				new CombineQueryExpressions(),
 				new NormalizeBlockStatements(),
