@@ -294,6 +294,8 @@ namespace NetSpy.Decompiler.CSharp
 				new AddXmlDocumentationTransform(),
 				new IntroduceSwitchExpressions(), // NetSpy: pattern switch expressions from decision trees
 				new CombineBooleanReturns(), // NetSpy: after the switch expressions (their arms are ifs too)
+				new IntroduceRangePatterns(), // NetSpy: "switch (c) { case 'a': ... return true; }" -> "c is >= 'a' and <= 'z'"
+				new IntroducePatternCombinators(), // NetSpy: "x == null || x is string t && t == \"c\"" -> "x is null or \"c\""
 				new CharLiteralsInArithmetic(), // NetSpy
 				new IntroduceNameof(), // NetSpy
 				new RemoveTargetTypedTupleNames(), // NetSpy
