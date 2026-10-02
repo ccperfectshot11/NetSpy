@@ -79,9 +79,9 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 			Modifiers.File,
 			Modifiers.Public, Modifiers.Private, Modifiers.Protected, Modifiers.Internal,
 			Modifiers.New,
-			Modifiers.Unsafe,
+			// NetSpy: the .NET default order (csharp_preferred_modifier_order): "static unsafe", "readonly unsafe"
 			Modifiers.Static, Modifiers.Abstract, Modifiers.Virtual, Modifiers.Sealed, Modifiers.Override,
-			Modifiers.Required, Modifiers.Readonly, Modifiers.Volatile,
+			Modifiers.Readonly, Modifiers.Unsafe, Modifiers.Required, Modifiers.Volatile,
 			Modifiers.Scoped,
 			Modifiers.Ref,
 			Modifiers.Extern, Modifiers.Partial, Modifiers.Const,
