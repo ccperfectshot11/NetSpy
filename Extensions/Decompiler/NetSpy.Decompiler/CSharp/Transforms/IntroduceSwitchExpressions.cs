@@ -876,7 +876,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					&& value is double or float)
 				{
 					double d = System.Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
-					if (d == System.Math.Floor(d) && d >= int.MinValue && d <= int.MaxValue && !(d == 0 && double.IsNegative(d)))
+					if (d == System.Math.Floor(d) && d >= int.MinValue && d <= int.MaxValue && !(d == 0 && System.BitConverter.DoubleToInt64Bits(d) < 0))
 					{
 						var literal = new PrimitiveExpression((int)d);
 						literal.AddAnnotation(new ConstantResolveResult(valueType, value));

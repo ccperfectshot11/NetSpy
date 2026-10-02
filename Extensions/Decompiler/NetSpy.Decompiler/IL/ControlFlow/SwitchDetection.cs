@@ -524,6 +524,10 @@ namespace NetSpy.Decompiler.IL.ControlFlow
 			if (analysis.ContainsILSwitch || MatchRoslynSwitchOnString())
 				return true;
 
+			// NetSpy: with a PDB, a comparison that starts a statement of its own was an "if", not a "case"
+			if (WasIfChain())
+				return false;
+
 			// heuristic to determine if a block would be better represented as an if statement rather than switch
 			int ifCount = analysis.InnerBlocks.Count + 1;
 			int intervalCount = analysis.Sections.Where(s => !s.Key.SetEquals(defaultSectionKey)).Sum(s => s.Key.Intervals.Length);
@@ -561,6 +565,31 @@ namespace NetSpy.Decompiler.IL.ControlFlow
 		/// <summary>
 		/// stloc switchValueVar(call ComputeStringHash(switchValue))
 		/// </summary>
+		/// <summary>
+		/// NetSpy: "if (i == 0) ...; if (i == 1) ...;" and "switch (i) { case 0: ... case 1: ... }" compile to the same
+		/// comparisons, but in the PDB every "if" starts a sequence point while the cases of a switch don't.
+		/// True if one of the inner comparison blocks starts a visible sequence point.
+		/// </summary>
+		private bool WasIfChain()
+		{
+			if (!context.Settings.SourceLayoutFromPdb || context.DebugInfo is not { } debugInfo)
+				return false;
+			var method = context.Function.MoveNextMethod ?? context.Function.Method;
+			if (method == null || method.MetadataToken.IsNil || method.MetadataToken.Kind != System.Reflection.Metadata.HandleKind.MethodDefinition)
+				return false;
+			HashSet<int> starts;
+			try
+			{
+				starts = new HashSet<int>(debugInfo.GetSequencePoints((System.Reflection.Metadata.MethodDefinitionHandle)method.MetadataToken)
+					.Where(sp => !sp.IsHidden).Select(sp => sp.Offset));
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return false;
+			}
+			return analysis.InnerBlocks.Any(b => starts.Contains(b.StartILOffset));
+		}
+
 		private bool MatchRoslynSwitchOnString()
 		{
 			var insns = analysis.RootBlock.Instructions;
