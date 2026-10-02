@@ -303,6 +303,7 @@ namespace NetSpy.Decompiler.CSharp
 				new IntroduceNullConditionalAssignment(), // NetSpy
 				new RemoveConcatToString(), // NetSpy
 				new RemoveRedundantOperandCasts(), // NetSpy: "(double)a / (double)b" -> "(double)a / b"
+				new IntroduceCollectionSpreads(), // NetSpy: hand-built arrays/lists -> [a, .. b]
 				new SplitMergedStatements(), // NetSpy: before the layout (the new statements get their lines)
 				new ApplySourceLayout(), // NetSpy: PDB layout (after all statement changes)
 				new IntroduceTopLevelStatements(IntroduceTopLevelStatements.Phase.Move), // NetSpy
