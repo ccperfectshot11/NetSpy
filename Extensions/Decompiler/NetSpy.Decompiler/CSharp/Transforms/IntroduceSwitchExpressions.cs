@@ -91,6 +91,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 			if (!parser.SawNoMatchThrow && !ReturnsWereMerged(body, method))
 			{
+				// NetSpy: every arm returns on its own: a pattern switch statement, if the PDB has "switch (subject)"
+				if (TryIntroduceSwitchStatement(body, method, arms))
+					return;
 				Trace(method, $"no evidence (optimized={IsOptimized(method)}, ret={CountRetInstructions(method)})");
 				return;
 			}
@@ -121,6 +124,68 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// Guard clauses ("if (x == null) return 0; return x.Length;") have one 'ret' per return statement in an
 		/// optimized build; the arms of a switch expression all store the result and share a single 'ret'.
 		/// </summary>
+		/// <summary>
+		/// NetSpy: C# 7 pattern switch statements ("switch (o) { case int i when i &gt; 0: return a; ... }") compile to the
+		/// same decision tree as a switch expression, but every case returns on its own. The arms become a switch
+		/// statement when the PDB proves it: a sequence point spans exactly "switch (subject)".
+		/// </summary>
+		bool TryIntroduceSwitchStatement(BlockStatement body, IMethod method, List<Arm> arms)
+		{
+			if (arms.Any(a => a.Result is null && a.Thrown is null))
+				return false;
+			var points = VisibleSequencePoints(method);
+			if (points is null)
+				return false;
+			// a "when" clause has a sequence point of its own; patterns don't: more points than the header and one
+			// statement per case means guards
+			var builder = new SwitchBuilder { PreferWhen = points.Count > 1 + arms.Count };
+			var switchExpression = builder.Build(arms);
+			if (switchExpression is null)
+				return false;
+			int width = "switch (".Length + switchExpression.Expression.ToString().Length + ")".Length;
+			if (!points.Any(sp => sp.StartLine == sp.EndLine && sp.EndColumn - sp.StartColumn == width))
+				return false;
+			var statement = new SwitchStatement { Expression = switchExpression.Expression.Detach() };
+			foreach (var arm in switchExpression.SwitchSections.ToList())
+			{
+				var label = new CaseLabel();
+				bool discard = arm.Pattern is IdentifierExpression { Identifier: "_" };
+				if (discard && arm.Condition is not null)
+					return false; // "case var _ when c:" isn't what the source had
+				if (!discard)
+					label.Expression = arm.Pattern.Detach();
+				if (arm.Condition is { } condition)
+					label.Condition = condition.Detach();
+				var section = new SwitchSection();
+				section.CaseLabels.Add(label);
+				section.Statements.Add(arm.Body is ThrowExpression thrown
+					? new ThrowStatement(thrown.Expression.Detach())
+					: new ReturnStatement(arm.Body.Detach()));
+				statement.SwitchSections.Add(section);
+			}
+			context.Step("Introduce pattern switch statement", body);
+			body.Statements.Clear();
+			body.Statements.Add(statement);
+			return true;
+		}
+
+		/// <summary>The method's visible sequence points; null without a PDB.</summary>
+		List<DebugInfo.SequencePoint>? VisibleSequencePoints(IMethod method)
+		{
+			if (!context.Settings.SourceLayoutFromPdb || context.DecompileRun.DebugInfoProvider is not { } provider
+				|| method.MetadataToken.IsNil || method.MetadataToken.Kind != System.Reflection.Metadata.HandleKind.MethodDefinition)
+				return null;
+			try
+			{
+				return provider.GetSequencePoints((System.Reflection.Metadata.MethodDefinitionHandle)method.MetadataToken)
+					.Where(sp => !sp.IsHidden).ToList();
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return null;
+			}
+		}
+
 		bool ReturnsWereMerged(BlockStatement body, IMethod method)
 		{
 			int returnStatements = body.Descendants.OfType<ReturnStatement>().Count(r => !IsInsideLambda(r, body));
@@ -458,6 +523,12 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		{
 			readonly List<string> rootOrder = new List<string>();
 
+			/// <summary>
+			/// NetSpy: only type and null tests become patterns; every other condition stays a "when" clause
+			/// (C# 7 switch statements: "case int i when i &gt; 100:").
+			/// </summary>
+			public bool PreferWhen;
+
 			public SwitchExpression? Build(List<Arm> arms)
 			{
 				var built = new List<(Dictionary<string, PNode> Roots, List<Expression> When, Arm Arm)>();
@@ -721,6 +792,12 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					AddCondition(and.Right!, false);
 					return;
 				}
+				if (owner.PreferWhen && !IsTypeOrNullTest(condition))
+				{
+					var guard = condition.Clone();
+					When.Add(negated ? Negate(guard) : guard);
+					return;
+				}
 				var converted = Convert(condition, negated);
 				if (converted is { } c)
 				{
@@ -730,6 +807,28 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				{
 					var clone = condition.Clone();
 					When.Add(negated ? Negate(clone) : clone);
+				}
+			}
+
+			/// <summary>"x is T", "x is T v", "x == null", "x != null", "x is null", "x is not null" (and their negations).</summary>
+			static bool IsTypeOrNullTest(Expression condition)
+			{
+				switch (condition)
+				{
+					case UnaryOperatorExpression { Operator: UnaryOperatorType.Not, Expression: { } inner }:
+						return IsTypeOrNullTest(inner);
+					case ParenthesizedExpression { Expression: { } inner }:
+						return IsTypeOrNullTest(inner);
+					case IsExpression:
+						return true;
+					case BinaryOperatorExpression { Operator: BinaryOperatorType.Equality or BinaryOperatorType.InEquality } eq:
+						return eq.Right is NullReferenceExpression || eq.Left is NullReferenceExpression;
+					case BinaryOperatorExpression { Operator: BinaryOperatorType.IsPattern, Right: { } pattern }:
+						return pattern is DeclarationExpression or TypeReferenceExpression or NullReferenceExpression
+							|| pattern is UnaryOperatorExpression { Operator: UnaryOperatorType.PatternNot, Expression: NullReferenceExpression }
+							|| pattern is RecursivePatternExpression { SubPatterns.Count: 0, IsPositional: false };
+					default:
+						return false;
 				}
 			}
 

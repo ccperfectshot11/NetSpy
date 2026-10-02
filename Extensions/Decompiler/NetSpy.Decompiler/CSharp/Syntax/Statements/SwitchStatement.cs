@@ -70,5 +70,14 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 		/// </summary>
 		[Slot("Expression")]
 		public partial Expression? Expression { get; set; }
+
+		/// <summary>A label without a "when" clause.</summary>
+		public CaseLabel(Expression? expression) : this(expression, null)
+		{
+		}
+
+		/// <summary>NetSpy: the case guard ("case int i when i &gt; 0:"), or null</summary>
+		[Slot("Condition")]
+		public partial Expression? Condition { get; set; }
 	}
 }

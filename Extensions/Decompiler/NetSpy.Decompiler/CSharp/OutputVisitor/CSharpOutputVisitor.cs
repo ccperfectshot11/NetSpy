@@ -2188,6 +2188,13 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 				WriteKeyword(CaseLabel.CaseKeyword);
 				Space();
 				caseLabel.Expression.AcceptVisitor(this);
+				if (caseLabel.Condition is not null)
+				{
+					Space();
+					WriteKeyword(SwitchExpressionSection.WhenKeyword);
+					Space();
+					caseLabel.Condition.AcceptVisitor(this);
+				}
 			}
 			WriteToken(Tokens.Colon);
 			EndNode(caseLabel);
