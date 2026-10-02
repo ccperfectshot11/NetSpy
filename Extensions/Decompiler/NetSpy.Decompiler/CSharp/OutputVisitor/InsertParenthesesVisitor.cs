@@ -493,8 +493,8 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			// Only ((a ? b : c) ? d : e) strictly needs the additional parentheses
 			if (InsertParenthesesForReadability && !IsConditionalRefExpression(conditionalExpression))
 			{
-				// Precedence of ?: can be confusing; so always put parentheses in nice-looking mode.
-				ParenthesizeIfRequired(conditionalExpression.Condition, PrecedenceLevel.NullableRewrap);
+				// NetSpy: the condition only gets the parentheses it needs ("a > b ? x : y", as the source writes it)
+				ParenthesizeIfRequired(conditionalExpression.Condition, PrecedenceLevel.Conditional + 1);
 				ParenthesizeForReadability(conditionalExpression.TrueExpression, PrecedenceLevel.NullableRewrap);
 				ParenthesizeForReadability(conditionalExpression.FalseExpression, PrecedenceLevel.NullableRewrap);
 			}
