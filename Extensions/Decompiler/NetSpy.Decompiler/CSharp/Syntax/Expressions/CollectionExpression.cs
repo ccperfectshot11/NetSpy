@@ -21,7 +21,7 @@
 namespace NetSpy.Decompiler.CSharp.Syntax
 {
 	/// <summary>
-	/// NetSpy: C# 12 collection expression.
+	/// NetSpy: C# 12 collection expression; also a C# 11 list pattern (<c>[1, .. var rest]</c>).
 	/// <c>collection_expression ::= '[' (element (',' element)*)? ']'</c>, <c>element ::= expression | spread_element</c>
 	/// </summary>
 	[DecompilerAstNode]
@@ -32,13 +32,13 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 	}
 
 	/// <summary>
-	/// NetSpy: spread element of a C# 12 collection expression.
-	/// <c>spread_element ::= '..' expression</c>
+	/// NetSpy: spread element of a C# 12 collection expression, or the slice of a C# 11 list pattern.
+	/// <c>spread_element ::= '..' expression?</c> (no expression: the bare <c>..</c> slice pattern)
 	/// </summary>
 	[DecompilerAstNode]
 	public partial class SpreadElement : Expression
 	{
 		[Slot("Expression")]
-		public partial Expression Expression { get; set; }
+		public partial Expression? Expression { get; set; }
 	}
 }

@@ -80,9 +80,11 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			foreach (var block in body.DescendantsAndSelf.OfType<BlockStatement>().ToList())
 				IntroduceValueSwitchExpressions(block);
+			if (method is not null)
+				IntroduceListIsPatterns(body, method);
 			if (isAsync || method is null || body.Descendants.Any(n => n is YieldReturnStatement or YieldBreakStatement))
 				return;
-			var parser = new ArmParser();
+			var parser = new ArmParser { LineOf = SourceLines(method) };
 			var arms = parser.ParseList(body.Statements.ToList(), 0, out bool exhaustive);
 			if (arms is null || !exhaustive || arms.Count < 2)
 			{
@@ -169,6 +171,52 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			return true;
 		}
 
+		/// <summary>
+		/// NetSpy: "if (x is [var a, ..]) { ... }" compiles to
+		/// <code>
+		/// if (x != null &amp;&amp; x.Length &gt;= 1) { int a = x[0]; ... }
+		/// </code>
+		/// The condition and the element reads at the start of the block are one arm with a list pattern.
+		/// Only done when the PDB has a sequence point exactly as wide as "if (x is [var a, ..])".
+		/// </summary>
+		void IntroduceListIsPatterns(BlockStatement body, IMethod method)
+		{
+			List<DebugInfo.SequencePoint>? points = null;
+			foreach (var ifElse in body.Descendants.OfType<IfElseStatement>().ToList())
+			{
+				if (ifElse.TrueStatement is not BlockStatement block || ifElse.Condition is not { } condition)
+					continue;
+				var bindings = block.Statements.TakeWhile(s => s is VariableDeclarationStatement { Variables.Count: 1, Modifiers: Modifiers.None } d
+					&& d.Variables.Single().Initializer is IndexerExpression or IdentifierExpression).ToList();
+				if (bindings.Count == 0 || bindings[0] is not VariableDeclarationStatement { } first || first.Variables.Single().Initializer is not IndexerExpression)
+					continue;
+				var names = bindings.Select(b => ((VariableDeclarationStatement)b).Variables.Single().Name).ToList();
+				// the names the rest of the block uses get a designation in the pattern
+				var used = block.Statements.Except(bindings).SelectMany(s => s.DescendantsAndSelf).OfType<IdentifierExpression>()
+					.Where(id => names.Contains(id.Identifier)).Select(id => id.Identifier).Distinct().ToList();
+				var arm = new Arm { Result = new InvocationExpression(new IdentifierExpression("_"), used.Select(n => new IdentifierExpression(n))) };
+				arm.Path.Add(new ConditionItem(condition, negated: false));
+				arm.Path.AddRange(bindings.Select(b => new BindingItem(b)));
+				var built = new SwitchBuilder().Build(new List<Arm> { arm });
+				if (built?.SwitchSections.SingleOrDefault() is not { Condition: null, Pattern: { } pattern }
+					|| !pattern.DescendantsAndSelf.Any(n => n is CollectionExpression)
+					|| built.Expression is not IdentifierExpression { Identifier: var subjectName })
+					continue;
+				var subject = condition.DescendantsAndSelf.OfType<IdentifierExpression>().FirstOrDefault(id => id.Identifier == subjectName);
+				if (subject is null)
+					continue;
+				var isPattern = new BinaryOperatorExpression(subject.Clone(), BinaryOperatorType.IsPattern, pattern.Detach());
+				points ??= VisibleSequencePoints(method);
+				int width = "if (".Length + isPattern.ToString().Length + ")".Length;
+				if (points is null || !points.Any(sp => sp.StartLine == sp.EndLine && sp.EndColumn - sp.StartColumn == width))
+					continue;
+				context.Step("Introduce list pattern", ifElse);
+				ifElse.Condition = isPattern;
+				foreach (var binding in bindings)
+					binding.Remove();
+			}
+		}
+
 		/// <summary>The method's visible sequence points; null without a PDB.</summary>
 		List<DebugInfo.SequencePoint>? VisibleSequencePoints(IMethod method)
 		{
@@ -184,6 +232,53 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			{
 				return null;
 			}
+		}
+
+		/// <summary>
+		/// NetSpy: maps an expression to the source line of the sequence point its first IL instruction is in
+		/// (-1 if unknown or hidden); null without a PDB.
+		/// </summary>
+		Func<Expression, int>? SourceLines(IMethod method)
+		{
+			if (!context.Settings.SourceLayoutFromPdb || context.DecompileRun.DebugInfoProvider is not { } provider
+				|| method.MetadataToken.IsNil || method.MetadataToken.Kind != HandleKind.MethodDefinition)
+				return null;
+			List<DebugInfo.SequencePoint> points;
+			try
+			{
+				points = provider.GetSequencePoints((MethodDefinitionHandle)method.MetadataToken).OrderBy(sp => sp.Offset).ToList();
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return null;
+			}
+			if (points.Count == 0)
+				return null;
+			return expression => {
+				int offset = StartOffset(expression);
+				if (offset < 0)
+					return -1;
+				var point = points.LastOrDefault(sp => sp.Offset <= offset);
+				return point is null || point.IsHidden ? -1 : point.StartLine;
+			};
+		}
+
+		/// <summary>The lowest IL offset of the instructions an expression was built from (-1 if unknown).</summary>
+		static int StartOffset(Expression expression)
+		{
+			int min = int.MaxValue;
+			foreach (var node in expression.DescendantsAndSelf)
+			{
+				foreach (var inst in node.Annotations.OfType<IL.ILInstruction>())
+				{
+					foreach (var d in inst.Descendants)
+					{
+						if (!d.ILRangeIsEmpty && d.StartILOffset < min)
+							min = d.StartILOffset;
+					}
+				}
+			}
+			return min == int.MaxValue ? -1 : min;
 		}
 
 		bool ReturnsWereMerged(BlockStatement body, IMethod method)
@@ -367,6 +462,37 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		{
 			public bool SawNoMatchThrow;
 
+			/// <summary>
+			/// NetSpy: the source line of an arm's result (from the PDB; -1 if unknown). Roslyn emits every arm's value
+			/// with a sequence point of its own, so the lines give back the source order of the arms.
+			/// </summary>
+			public Func<Expression, int>? LineOf;
+
+			/// <summary>The first source line of the arms; null if any line is unknown.</summary>
+			int? MinLine(List<Arm> arms)
+			{
+				if (LineOf is null || arms.Count == 0)
+					return null;
+				int min = int.MaxValue;
+				foreach (var arm in arms)
+				{
+					int line = LineOf((arm.Result ?? arm.Thrown)!);
+					if (line < 0)
+						return null;
+					min = Math.Min(min, line);
+				}
+				return min;
+			}
+
+			/// <summary>
+			/// Both orders of "C => FIRST, SECOND" are valid when both sides catch everything they get; the source order
+			/// comes from the PDB lines, else from the shape of the condition (the decompiler inverts "!A" tests).
+			/// </summary>
+			bool SecondComesFirst(List<Arm> first, List<Arm> second, bool negative)
+			{
+				return MinLine(first) is int a && MinLine(second) is int b && a != b ? b < a : negative;
+			}
+
 			public List<Arm>? ParseStatement(Statement statement, out bool exhaustive)
 			{
 				if (statement is BlockStatement block)
@@ -406,9 +532,62 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					}
 					case IfElseStatement ifElse:
 						return ParseIf(ifElse, statements, index, out exhaustive);
+					case SwitchStatement switchStatement:
+						return ParseSwitch(switchStatement, statements, index, out exhaustive);
 					default:
 						return null;
 				}
+			}
+
+			/// <summary>
+			/// NetSpy: a switch on constants inside the decision tree (list patterns: "switch (values.Length)").
+			/// Each section is "subject == k1 || subject == k2"; 'default' takes what the cases didn't, so its arms go last.
+			/// Every section has to return or throw on all paths.
+			/// </summary>
+			List<Arm>? ParseSwitch(SwitchStatement switchStatement, List<Statement> statements, int index, out bool exhaustive)
+			{
+				exhaustive = false;
+				// only the compiler's own switch (on a temporary or a length); a user's switch statement stays one
+				bool compilerSwitch = switchStatement.Expression switch {
+					IdentifierExpression id => id.GetILVariable() is { HasGeneratedName: true },
+					MemberReferenceExpression { MemberName: "Length" or "Count" } => true,
+					_ => false
+				};
+				if (!compilerSwitch)
+					return null;
+				var cases = new List<(List<Arm> Arms, int Line, int Order)>();
+				List<Arm>? defaultArms = null;
+				foreach (var section in switchStatement.SwitchSections)
+				{
+					var body = section.Statements.ToList();
+					var arms = body.Count == 1 ? ParseStatement(body[0], out bool sectionExhaustive) : ParseList(body, 0, out sectionExhaustive);
+					if (arms is null || !sectionExhaustive)
+						return null;
+					if (section.CaseLabels.Any(l => l.Expression is null))
+					{
+						defaultArms = arms;
+						continue;
+					}
+					if (section.CaseLabels.Any(l => l.Condition is not null || !IsConstant(l.Expression!)))
+						return null;
+					var condition = section.CaseLabels
+						.Select(l => (Expression)new BinaryOperatorExpression(switchStatement.Expression.Clone(), BinaryOperatorType.Equality, l.Expression!.Clone()))
+						.Aggregate((a, b) => new BinaryOperatorExpression(a, BinaryOperatorType.ConditionalOr, b));
+					cases.Add((Prefix(arms, new ConditionItem(condition, negated: false)).ToList(), MinLine(arms) ?? int.MaxValue, cases.Count));
+				}
+				// the cases test different values: any order is valid, the source one is the best
+				var result = cases.OrderBy(c => c.Line).ThenBy(c => c.Order).SelectMany(c => c.Arms).ToList();
+				if (defaultArms is not null)
+				{
+					result.AddRange(defaultArms);
+					exhaustive = true;
+					return result;
+				}
+				var rest = ParseList(statements, index + 1, out exhaustive);
+				if (rest is null)
+					return null;
+				result.AddRange(rest);
+				return result;
 			}
 
 			List<Arm>? ParseIf(IfElseStatement ifElse, List<Statement> statements, int index, out bool exhaustive)
@@ -425,11 +604,11 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					var restArms = ParseList(statements, index + 1, out bool restExhaustive);
 					if (restArms is null)
 						return null;
-					if (negative && thenExhaustive && restExhaustive)
+					if (thenExhaustive && restExhaustive && SecondComesFirst(thenArms, restArms, negative))
 					{
 						// "if (!A) { THEN } REST" → "A => REST" first: REST catches every A input, so THEN arms need no guard
 						result.AddRange(Prefix(restArms, new ConditionItem(condition, negated: true)));
-						result.AddRange(thenArms);
+						result.AddRange(Prefix(thenArms, new ConditionItem(condition, negated: false, implied: true)));
 						exhaustive = true;
 						return result;
 					}
@@ -443,10 +622,11 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				if (elseArms is null)
 					return null;
 				// "if (!A) X else Y" is written as "if (A) Y else X"
-				var (first, firstExhaustive, second) = negative ? (elseArms, elseExhaustive, thenArms) : (thenArms, thenExhaustive, elseArms);
-				result.AddRange(Prefix(first, new ConditionItem(condition, negated: negative)));
+				bool swap = thenExhaustive && elseExhaustive ? SecondComesFirst(thenArms, elseArms, negative) : negative;
+				var (first, firstExhaustive, second) = swap ? (elseArms, elseExhaustive, thenArms) : (thenArms, thenExhaustive, elseArms);
+				result.AddRange(Prefix(first, new ConditionItem(condition, negated: swap)));
 				// if the first branch always returns, the second one needs no guard
-				result.AddRange(firstExhaustive ? second : Prefix(second, new ConditionItem(condition, negated: !negative)));
+				result.AddRange(firstExhaustive ? second : Prefix(second, new ConditionItem(condition, negated: !swap)));
 				if (thenExhaustive && elseExhaustive)
 				{
 					exhaustive = true;
@@ -506,6 +686,40 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			/// <summary>Names of locals that are this value (declared on the path or by a designation).</summary>
 			public readonly List<string> Names = new List<string>();
 			public string? Designation;
+			/// <summary>NetSpy: list pattern elements read as "x[i]" (by index) and "x[x.Length - i]" (by distance from the end).</summary>
+			public SortedDictionary<int, PNode>? Elements, ElementsFromEnd;
+			/// <summary>NetSpy: the "x[start..^end]" slice of a list pattern.</summary>
+			public PNode? Slice;
+			public int SliceStart, SliceEnd;
+			/// <summary>NetSpy: another arm reads elements of this value, so a test of its length is a list pattern too ("[]").</summary>
+			public bool ListMode;
+
+			public bool HasListParts => Elements is not null || ElementsFromEnd is not null || Slice is not null;
+
+			public PNode Element(int index, bool fromEnd)
+			{
+				var elements = fromEnd ? (ElementsFromEnd ??= new SortedDictionary<int, PNode>()) : (Elements ??= new SortedDictionary<int, PNode>());
+				if (!elements.TryGetValue(index, out var element))
+				{
+					element = new PNode { Parent = this };
+					elements.Add(index, element);
+				}
+				return element;
+			}
+
+			public PNode? SliceOf(int start, int end)
+			{
+				if (Slice is null)
+				{
+					Slice = new PNode { Parent = this };
+					SliceStart = start;
+					SliceEnd = end;
+				}
+				return SliceStart == start && SliceEnd == end ? Slice : null;
+			}
+
+			/// <summary>The "Length"/"Count" member, if the arm uses it.</summary>
+			public PNode? LengthMember => Members.FirstOrDefault(m => m.MemberName is "Length" or "Count");
 
 			public PNode Member(string name)
 			{
@@ -557,10 +771,30 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					tuple.Elements.AddRange(subjects.Select(s => new IdentifierExpression(s)));
 					subject = tuple;
 				}
+				// NetSpy: if an arm reads elements of a subject, the length tests of the other arms are list patterns too
+				foreach (var s in subjects)
+				{
+					var nodes = built.Select(b => b.Roots.TryGetValue(s, out var root) ? root : null).OfType<PNode>().ToList();
+					if (nodes.Any(n => n.HasListParts))
+						nodes.ForEach(n => n.ListMode = true);
+				}
+				try
+				{
+					return Emit(subject, subjects, built);
+				}
+				catch (PatternFailure failure)
+				{
+					Failure = failure.Message;
+					return null;
+				}
+			}
+
+			static SwitchExpression Emit(Expression subject, List<string> subjects, List<(Dictionary<string, PNode> Roots, List<Expression> When, Arm Arm)> built)
+			{
 				var switchExpression = new SwitchExpression { Expression = subject };
 				foreach (var (roots, when, arm) in built)
 				{
-					var patterns = subjects.Select(s => roots.TryGetValue(s, out var root) ? Emit(root) : null).ToList();
+					var patterns = subjects.Select(s => roots.TryGetValue(s, out var root) ? IntroduceSwitchExpressions.Emit(root) : null).ToList();
 					Expression pattern;
 					if (patterns.All(p => p is null))
 						pattern = new IdentifierExpression("_");
@@ -599,6 +833,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			public readonly Dictionary<string, PNode> Roots = new Dictionary<string, PNode>();
 			public readonly List<Expression> When = new List<Expression>();
 			readonly Dictionary<string, PNode> bound = new Dictionary<string, PNode>();
+			/// <summary>NetSpy: <see cref="GetNode"/> only finds existing nodes (for implied conditions).</summary>
+			bool lookupOnly;
 
 			public ArmBuilder(SwitchBuilder owner) => this.owner = owner;
 
@@ -703,13 +939,20 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 							return null;
 						if (!Roots.TryGetValue(id.Identifier, out node))
 						{
+							if (lookupOnly)
+								return null;
 							node = new PNode();
 							Roots.Add(id.Identifier, node);
 						}
 						owner.SeeRoot(id.Identifier);
 						return node;
 					case MemberReferenceExpression { TypeArguments.Count: 0 } member when member.GetSymbol() is IProperty or IField:
-						return GetNode(member.Target)?.Member(member.MemberName);
+						var container = GetNode(member.Target);
+						if (lookupOnly)
+							return container?.Members.FirstOrDefault(m => m.MemberName == member.MemberName);
+						return container?.Member(member.MemberName);
+					case IndexerExpression { Target: { } target, Arguments.Count: 1 } indexer:
+						return GetListPart(target, indexer.Arguments.Single());
 					case CastExpression cast:
 						var castNode = GetNode(cast.Expression);
 						if (castNode is null || castNode.Type is null)
@@ -722,12 +965,93 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 
 			/// <summary>
+			/// NetSpy: "x[2]", "x[n - 1]" (n = x.Length), "x[^1]" and "x[2..^1]" as list pattern parts of x.
+			/// A list pattern always tests the length first, so the length must have been read on the arm's path:
+			/// an element read without it isn't a list pattern (it could throw, a pattern can't).
+			/// </summary>
+			PNode? GetListPart(Expression target, Expression argument)
+			{
+				var list = GetNode(target);
+				if (list?.LengthMember is not { } length)
+					return null;
+				switch (argument)
+				{
+					case PrimitiveExpression { Value: int index } when index >= 0:
+						return Element(list, index, fromEnd: false);
+					case UnaryOperatorExpression { Operator: UnaryOperatorType.IndexFromEnd, Expression: PrimitiveExpression { Value: int fromEnd } } when fromEnd > 0:
+						return Element(list, fromEnd, fromEnd: true);
+					case BinaryOperatorExpression { Operator: BinaryOperatorType.Subtract, Left: { } count, Right: PrimitiveExpression { Value: int fromEnd } }
+						when fromEnd > 0 && IsLengthRead(count, length):
+						return Element(list, fromEnd, fromEnd: true);
+					case BinaryOperatorExpression { Operator: BinaryOperatorType.Range } range
+						when RangeBound(range.Left, fromEnd: false) is int start && RangeBound(range.Right, fromEnd: true) is int end:
+						if (lookupOnly)
+							return list.Slice is not null && list.SliceStart == start && list.SliceEnd == end ? list.Slice : null;
+						return list.SliceOf(start, end);
+					default:
+						return null;
+				}
+			}
+
+			PNode? Element(PNode list, int index, bool fromEnd)
+			{
+				if (!lookupOnly)
+					return list.Element(index, fromEnd);
+				var elements = fromEnd ? list.ElementsFromEnd : list.Elements;
+				return elements is not null && elements.TryGetValue(index, out var element) ? element : null;
+			}
+
+			/// <summary>"n" (a local bound to the length) or "x.Length" itself.</summary>
+			bool IsLengthRead(Expression expression, PNode length)
+			{
+				return expression switch {
+					IdentifierExpression id => bound.TryGetValue(id.Identifier, out var node) && node == length,
+					MemberReferenceExpression { MemberName: "Length" or "Count" } member => GetNode(member) == length,
+					_ => false
+				};
+			}
+
+			/// <summary>A range bound as a distance from the start (or from the end); null (no bound) = 0.</summary>
+			static int? RangeBound(Expression? bound, bool fromEnd)
+			{
+				switch (bound)
+				{
+					case null:
+						return 0;
+					case PrimitiveExpression { Value: int value } when !fromEnd && value >= 0:
+						return value;
+					case UnaryOperatorExpression { Operator: UnaryOperatorType.IndexFromEnd, Expression: PrimitiveExpression { Value: int value } } when fromEnd && value >= 0:
+						return value;
+					// "new Index(2)", "new Index(2, false)", "new Index(1, true)"
+					case ObjectCreateExpression { Arguments.Count: 1 or 2 } create when create.GetResolveResult().Type.IsKnownType(KnownTypeCode.Index)
+						&& create.Arguments.First() is PrimitiveExpression { Value: int value } && value >= 0:
+						bool isFromEnd = create.Arguments.Count == 2 && create.Arguments.Last() is PrimitiveExpression { Value: true };
+						if (create.Arguments.Count == 2 && create.Arguments.Last() is not PrimitiveExpression { Value: bool })
+							return null;
+						return isFromEnd == fromEnd ? value : null;
+					default:
+						return null;
+				}
+			}
+
+			/// <summary>
 			/// An implied relational condition replaces a weaker bound on the same side of the same value
 			/// ("&gt;= -10" and an implied "not &lt; 10" → "&gt;= 10"); it is never added on its own.
 			/// </summary>
 			void TightenBound(Expression condition, bool negated)
 			{
-				if (Convert(condition, negated) is not { } c || Relational(c.Pattern) is not var (op, constant, value))
+				// NetSpy: only looks at values the arm already has; an implied test must not add elements to a list pattern
+				(PNode Node, Expression Pattern)? converted;
+				lookupOnly = true;
+				try
+				{
+					converted = Convert(condition, negated);
+				}
+				finally
+				{
+					lookupOnly = false;
+				}
+				if (converted is not { } c || Relational(c.Pattern) is not var (op, constant, value))
 					return;
 				bool lower = op is UnaryOperatorType.PatternRelationalGreaterThan or UnaryOperatorType.PatternRelationalGreaterThanOrEqual;
 				for (int i = 0; i < c.Node.Atoms.Count; i++)
@@ -956,6 +1280,17 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 							BinaryOperatorType.GreaterThan => UnaryOperatorType.PatternRelationalGreaterThan,
 							_ => UnaryOperatorType.PatternRelationalGreaterThanOrEqual
 						};
+						// NetSpy: "not (<= 100)" is "> 100" (but not for float/double: NaN is neither)
+						if (negated && !valueType.IsKnownType(KnownTypeCode.Single) && !valueType.IsKnownType(KnownTypeCode.Double))
+						{
+							negated = false;
+							relational = relational switch {
+								UnaryOperatorType.PatternRelationalLessThan => UnaryOperatorType.PatternRelationalGreaterThanOrEqual,
+								UnaryOperatorType.PatternRelationalLessThanOrEqual => UnaryOperatorType.PatternRelationalGreaterThan,
+								UnaryOperatorType.PatternRelationalGreaterThan => UnaryOperatorType.PatternRelationalLessThanOrEqual,
+								_ => UnaryOperatorType.PatternRelationalLessThan
+							};
+						}
 						pattern = new UnaryOperatorExpression(relational, IntegralLiteral(constant, valueType));
 						break;
 					default:
@@ -1130,12 +1465,24 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		static Expression? Emit(PNode node)
 		{
 			var parts = new List<Expression>();
+			// NetSpy: list pattern (it takes over the length member)
+			PNode? listLength = null;
+			Expression? listPattern = null;
+			if (node.HasListParts || (node.ListMode && node.LengthMember is { Atoms.Count: > 0 }))
+			{
+				listLength = node.LengthMember;
+				listPattern = EmitList(node, listLength);
+				if (node.Designation is not null)
+					throw new PatternFailure("designated list pattern");
+			}
 			// sub-patterns
 			var positional = node.Positional?.Select(Emit).ToList();
 			bool keepPositional = positional is not null && (positional.Any(p => p is not null) || node.Positional!.Any(e => e.Designation is not null));
 			var members = new List<Expression>();
 			foreach (var member in node.Members)
 			{
+				if (member == listLength)
+					continue;
 				var sub = Emit(member);
 				if (sub is null)
 					continue;
@@ -1180,6 +1527,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					? new RecursivePatternExpression { Designation = new SingleVariableDesignation { Identifier = node.Designation } }
 					: new DeclarationExpression { Type = new SimpleType("var"), Designation = new SingleVariableDesignation { Identifier = node.Designation } });
 			}
+			if (listPattern is not null)
+				parts.Add(listPattern);
 			bool impliesNotNull = parts.Count > 0 || atoms.Any(a => a is not UnaryOperatorExpression { Operator: UnaryOperatorType.PatternNot });
 			if (node.NotNull && !impliesNotNull)
 				parts.Add(new UnaryOperatorExpression(UnaryOperatorType.PatternNot, new NullReferenceExpression()));
@@ -1187,6 +1536,91 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			if (parts.Count == 0)
 				return null;
 			return parts.Aggregate((a, b) => new BinaryOperatorExpression(a, BinaryOperatorType.PatternAnd, b));
+		}
+
+		/// <summary>A pattern that can't be written exactly: the switch is left as it is.</summary>
+		sealed class PatternFailure : Exception
+		{
+			public PatternFailure(string message) : base(message) { }
+		}
+
+		/// <summary>
+		/// NetSpy: C# 11 list pattern from the elements and the length test: "Length == 2" + x[0] → "[p0, _]";
+		/// no exact length → "[p0, .., q1]" (the slice is ".. var rest" when "x[1..^1]" is used).
+		/// </summary>
+		static Expression EmitList(PNode node, PNode? length)
+		{
+			if (length is not null && (length.Type is not null || length.NotNull || length.Members.Count > 0 || length.HasListParts
+				|| length.Designation is not null || length.Positional is not null))
+				throw new PatternFailure("list length used otherwise");
+			int? exact = null, atLeast = null;
+			foreach (var atom in length?.Atoms ?? new List<Expression>())
+			{
+				if (ConstantInt(atom) is int k && exact is null)
+					exact = k;
+				else if (atom is UnaryOperatorExpression { Operator: UnaryOperatorType.PatternRelationalGreaterThanOrEqual, Expression: { } min } && ConstantInt(min) is int m)
+					atLeast = Math.Max(atLeast ?? 0, m);
+				else if (atom is UnaryOperatorExpression { Operator: UnaryOperatorType.PatternRelationalGreaterThan, Expression: { } above } && ConstantInt(above) is int a)
+					atLeast = Math.Max(atLeast ?? 0, a + 1);
+				else
+					throw new PatternFailure("list length test " + atom);
+			}
+			var collection = new CollectionExpression();
+			if (exact is int count)
+			{
+				if (node.Slice is not null || count < 0 || (atLeast is int least && least > count))
+					throw new PatternFailure("exact length with slice");
+				var slots = new PNode?[count];
+				foreach (var pair in node.Elements ?? new SortedDictionary<int, PNode>())
+				{
+					if (pair.Key >= count)
+						throw new PatternFailure("element past the length");
+					slots[pair.Key] = pair.Value;
+				}
+				foreach (var pair in node.ElementsFromEnd ?? new SortedDictionary<int, PNode>())
+				{
+					int index = count - pair.Key;
+					if (index < 0 || slots[index] is not null)
+						throw new PatternFailure("element from the end");
+					slots[index] = pair.Value;
+				}
+				foreach (var slot in slots)
+					collection.Elements.Add(slot is null ? new IdentifierExpression("_") : Emit(slot) ?? DesignationOrDiscard(slot));
+				return collection;
+			}
+			int prefix = node.Elements is { Count: > 0 } elements ? elements.Keys.Max() + 1 : 0;
+			int suffix = node.ElementsFromEnd is { Count: > 0 } fromEndElements ? fromEndElements.Keys.Max() : 0;
+			if (node.Slice is not null)
+			{
+				if (node.SliceStart < prefix || node.SliceEnd < suffix)
+					throw new PatternFailure("slice overlaps elements");
+				prefix = node.SliceStart;
+				suffix = node.SliceEnd;
+			}
+			if (atLeast is int minimum && minimum != prefix + suffix)
+				throw new PatternFailure("list length bound");
+			for (int i = 0; i < prefix; i++)
+				collection.Elements.Add(ListElement(node.Elements, i));
+			Expression? slice = null;
+			if (node.Slice is { } sliceNode)
+				slice = Emit(sliceNode) ?? (sliceNode.Designation is null ? null : DesignationOrDiscard(sliceNode));
+			collection.Elements.Add(new SpreadElement { Expression = slice });
+			for (int i = suffix; i > 0; i--)
+				collection.Elements.Add(ListElement(node.ElementsFromEnd, i));
+			return collection;
+		}
+
+		static Expression ListElement(SortedDictionary<int, PNode>? elements, int key)
+		{
+			if (elements is null || !elements.TryGetValue(key, out var element))
+				return new IdentifierExpression("_");
+			return Emit(element) ?? DesignationOrDiscard(element);
+		}
+
+		static int? ConstantInt(Expression e)
+		{
+			var value = (e as PrimitiveExpression)?.Value ?? e.GetResolveResult()?.ConstantValue;
+			return value is int i ? i : null;
 		}
 
 		static Expression DesignationOrDiscard(PNode element)

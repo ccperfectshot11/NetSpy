@@ -702,8 +702,11 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 		{
 			StartNode(spreadElement);
 			WriteToken("..");
-			Space(); // ".. items", the .NET style
-			spreadElement.Expression.AcceptVisitor(this);
+			if (spreadElement.Expression is { } expression)
+			{
+				Space(); // ".. items", the .NET style
+				expression.AcceptVisitor(this);
+			}
 			EndNode(spreadElement);
 		}
 
