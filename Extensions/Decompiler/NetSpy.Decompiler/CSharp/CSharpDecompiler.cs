@@ -296,6 +296,7 @@ namespace NetSpy.Decompiler.CSharp
 				new CombineBooleanReturns(), // NetSpy: after the switch expressions (their arms are ifs too)
 				new IntroduceRangePatterns(), // NetSpy: "switch (c) { case 'a': ... return true; }" -> "c is >= 'a' and <= 'z'"
 				new IntroducePatternCombinators(), // NetSpy: "x == null || x is string t && t == \"c\"" -> "x is null or \"c\""
+				new IntroduceIndexFromEnd(), // NetSpy: "T t = x; t[t.Length - 1]" -> "x[^1]" (before the ternaries)
 				new IntroduceReturnTernaries(), // NetSpy: "if (c) return a; return b;" -> "return c ? a : b;" (PDB: one sequence point)
 				new CharLiteralsInArithmetic(), // NetSpy
 				new IntroduceNameof(), // NetSpy
