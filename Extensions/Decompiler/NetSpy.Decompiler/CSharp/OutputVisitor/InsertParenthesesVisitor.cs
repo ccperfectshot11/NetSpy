@@ -181,6 +181,17 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			}
 		}
 
+		/// <summary>
+		/// NetSpy: like <see cref="ParenthesizeIfRequired"/> for the readability parentheses around the operands of
+		/// "??" and "?:", but a negative literal stays bare: "x ?? -1", "c ? a : -1" (as the source writes it).
+		/// </summary>
+		static void ParenthesizeForReadability(Expression? expr, PrecedenceLevel minimumPrecedence)
+		{
+			if (expr is PrimitiveExpression)
+				return;
+			ParenthesizeIfRequired(expr, minimumPrecedence);
+		}
+
 		static void Parenthesize(Expression expr)
 		{
 			expr.ReplaceWith(e => new ParenthesizedExpression { Expression = e });
@@ -343,7 +354,7 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 					}
 					else
 					{
-						ParenthesizeIfRequired(binaryOperatorExpression.Right, PrecedenceLevel.NullableRewrap);
+						ParenthesizeForReadability(binaryOperatorExpression.Right, PrecedenceLevel.NullableRewrap);
 					}
 				}
 				else
@@ -484,8 +495,8 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			{
 				// Precedence of ?: can be confusing; so always put parentheses in nice-looking mode.
 				ParenthesizeIfRequired(conditionalExpression.Condition, PrecedenceLevel.NullableRewrap);
-				ParenthesizeIfRequired(conditionalExpression.TrueExpression, PrecedenceLevel.NullableRewrap);
-				ParenthesizeIfRequired(conditionalExpression.FalseExpression, PrecedenceLevel.NullableRewrap);
+				ParenthesizeForReadability(conditionalExpression.TrueExpression, PrecedenceLevel.NullableRewrap);
+				ParenthesizeForReadability(conditionalExpression.FalseExpression, PrecedenceLevel.NullableRewrap);
 			}
 			else
 			{
