@@ -76,6 +76,13 @@ namespace NetSpy.Decompiler.IL.ControlFlow
 		/// </summary>
 		public readonly List<Block> InnerBlocks = new List<Block>();
 
+		/// <summary>
+		/// NetSpy: targets of branches that can't be taken (the out-of-range section of a jump table after a range
+		/// check); they don't count as incoming edges of a block in the if-tree. The branches go away with the jump
+		/// table's block (an inner block).
+		/// </summary>
+		readonly List<Block> deadEdges = new List<Block>();
+
 		public Block RootBlock { get; private set; }
 
 		/// <summary>
@@ -96,6 +103,7 @@ namespace NetSpy.Decompiler.IL.ControlFlow
 			targetContainerToSectionIndex.Clear();
 			Sections.Clear();
 			InnerBlocks.Clear();
+			deadEdges.Clear();
 			ContainsILSwitch = false;
 			return AnalyzeBlock(block, LongSet.Universe, tailOnly: true);
 		}
@@ -128,7 +136,7 @@ namespace NetSpy.Decompiler.IL.ControlFlow
 			else
 			{
 				Debug.Assert(switchVar != null); // switchVar should always be determined by the top-level call
-				if (block.IncomingEdgeCount != 1 || block == RootBlock)
+				if (block.IncomingEdgeCount - deadEdges.Count(b => b == block) != 1 || block == RootBlock)
 					return false; // for now, let's only consider if-structures that form a tree
 				if (block.Parent != RootBlock.Parent)
 					return false; // all blocks should belong to the same container
@@ -195,11 +203,19 @@ namespace NetSpy.Decompiler.IL.ControlFlow
 		{
 			Debug.Assert(!inst.IsLifted);
 			long offset;
-			if (MatchSwitchVar(inst.Value))
+			// NetSpy: "switch (conv i8->u4 (value - K))" after a range check: a dense switch on a long
+			var switchValue = inst.Value;
+			bool truncated = false;
+			if (switchValue is Conv { CheckForOverflow: false, InputType: StackType.I8, TargetType: PrimitiveType.I4 or PrimitiveType.U4 } conv)
+			{
+				switchValue = conv.Argument;
+				truncated = true;
+			}
+			if (MatchSwitchVar(switchValue))
 			{
 				offset = 0;
 			}
-			else if (inst.Value is BinaryNumericInstruction bop)
+			else if (switchValue is BinaryNumericInstruction bop)
 			{
 				if (bop.CheckForOverflow)
 					return false;
@@ -226,9 +242,19 @@ namespace NetSpy.Decompiler.IL.ControlFlow
 			{ // unknown inst.Value
 				return false;
 			}
+			// the truncation changes nothing only if an earlier test kept the switched value in [0, int.MaxValue]
+			if (truncated && !inputValues.AddOffset(unchecked(-offset)).IsSubsetOf(new LongSet(LongInterval.Inclusive(0, int.MaxValue))))
+				return false;
 			foreach (var section in inst.Sections)
 			{
 				var matchValues = section.Labels.AddOffset(offset).IntersectWith(inputValues);
+				if (truncated && matchValues.IsEmpty)
+				{
+					// the out-of-range section: the range check already took those values
+					if (section.Body.MatchBranch(out var deadTarget))
+						deadEdges.Add(deadTarget);
+					continue;
+				}
 				if (!AllowUnreachableCases && matchValues.IsEmpty)
 					return false;
 				if (matchValues.Count() > 1 && section.Body.MatchBranch(out var targetBlock) && AnalyzeBlock(targetBlock, matchValues))

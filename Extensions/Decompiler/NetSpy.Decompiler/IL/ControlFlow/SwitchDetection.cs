@@ -140,6 +140,7 @@ namespace NetSpy.Decompiler.IL.ControlFlow
 			this.context = context;
 
 			analysis.AllowUnreachableCases = context.Settings.RemoveDeadCode;
+			InlineSwitchOffsetTemps(function);
 
 			foreach (var container in function.Descendants.OfType<BlockContainer>())
 			{
@@ -163,6 +164,43 @@ namespace NetSpy.Decompiler.IL.ControlFlow
 						container.SortBlocks(deleteUnreachableBlocks: true);
 					else
 						container.Blocks.RemoveAll(b => b.Instructions.Count == 0);
+				}
+			}
+		}
+
+		/// <summary>
+		/// NetSpy: a dense switch on a long keeps "value - K" on the stack for the range check and the jump table:
+		/// <code>
+		/// stloc S(binary.sub.i8(ldloc value, K))
+		/// if (comp.i8.unsigned(ldloc S &lt;= N)) br B
+		/// ...
+		/// B: switch (conv i8->u4 (ldloc S)) { ... }
+		/// </code>
+		/// Both reads of S become "value - K" again, so <see cref="SwitchAnalysis"/> sees the switch variable.
+		/// </summary>
+		static void InlineSwitchOffsetTemps(ILFunction function)
+		{
+			foreach (var block in function.Descendants.OfType<Block>().ToArray())
+			{
+				for (int i = 0; i + 1 < block.Instructions.Count; i++)
+				{
+					if (!block.Instructions[i].MatchStLoc(out var temp, out var value)
+						|| temp.Kind != VariableKind.StackSlot || temp.StoreCount != 1 || temp.AddressCount != 0
+						|| value is not BinaryNumericInstruction { Operator: BinaryNumericOperator.Add or BinaryNumericOperator.Sub, CheckForOverflow: false, IsLifted: false } offset
+						|| !offset.Left.MatchLdLoc(out var source) || !offset.Right.MatchLdcI(out _)
+						|| !block.Instructions[i + 1].MatchIfInstruction(out var condition, out var trueInst)
+						|| !trueInst.MatchBranch(out var switchBlock) || switchBlock.IncomingEdgeCount != 1
+						|| switchBlock.Instructions.Count != 1 || switchBlock.Instructions[0] is not SwitchInstruction switchInst)
+						continue;
+					var loads = temp.LoadInstructions.ToList();
+					if (loads.Count != 2 || !loads.All(l => l.IsDescendantOf(condition) || l.IsDescendantOf(switchInst.Value)))
+						continue;
+					// the source must have the same value at both reads
+					if (source.StoreInstructions.OfType<ILInstruction>().Any(s => s.IsDescendantOf(condition) || s.IsDescendantOf(switchInst)))
+						continue;
+					foreach (var load in loads)
+						load.ReplaceWith(offset.Clone());
+					block.Instructions.RemoveAt(i);
 				}
 			}
 		}

@@ -164,6 +164,26 @@ namespace NetSpy.Decompiler.CSharp
 			return new IfElseStatement(condition, trueStatement, falseStatement).WithILInstruction(inst);
 		}
 
+		/// <summary>
+		/// NetSpy: "case 100:" on a long/ulong/uint switch, like the source: an int constant converts implicitly,
+		/// so the "100L" suffix isn't needed.
+		/// </summary>
+		Expression CaseLabelValue(ConstantResolveResult label)
+		{
+			if (label.ConstantValue is long or ulong or uint && label.Type.Kind != TypeKind.Enum)
+			{
+				decimal value = System.Convert.ToDecimal(label.ConstantValue, System.Globalization.CultureInfo.InvariantCulture);
+				decimal min = label.ConstantValue is long ? int.MinValue : 0;
+				if (value >= min && value <= int.MaxValue)
+				{
+					var literal = new PrimitiveExpression((int)value);
+					literal.AddAnnotation(label);
+					return literal;
+				}
+			}
+			return exprBuilder.ConvertConstantValue(label, allowImplicitConversion: true);
+		}
+
 		internal IEnumerable<ConstantResolveResult> CreateTypedCaseLabel(long i, IType type, List<(string? Key, int Value)>? map = null)
 		{
 			object value;
@@ -254,7 +274,7 @@ namespace NetSpy.Decompiler.CSharp
 						Debug.Assert(values.Length > 0);
 						firstValueResolveResult = values[0];
 					}
-					astSection.CaseLabels.AddRange(values.Select(label => new CaseLabel(exprBuilder.ConvertConstantValue(label, allowImplicitConversion: true))));
+					astSection.CaseLabels.AddRange(values.Select(label => new CaseLabel(CaseLabelValue(label))));
 				}
 				switch (section.Body)
 				{

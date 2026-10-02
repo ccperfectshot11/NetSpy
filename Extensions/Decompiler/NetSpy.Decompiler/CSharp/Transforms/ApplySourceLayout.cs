@@ -116,7 +116,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			if (points.Count == 0)
 				return null;
 			var first = points.OrderBy(sp => sp.StartLine).ThenBy(sp => sp.StartColumn).First();
-			return new SourceLayoutAnnotation {
+			var layout = new SourceLayoutAnnotation {
 				StartLine = first.StartLine,
 				StartColumn = first.StartColumn,
 				EndLine = points.Max(sp => sp.EndLine),
@@ -124,6 +124,37 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				IsMultiLine = points.Count == 1 && points[0].StartLine != points[0].EndLine,
 				Document = first.DocumentUrl
 			};
+			if (statement is SwitchStatement switchStatement)
+				AdjustSwitchLines(switchStatement, layout, body, sequencePoints);
+			return layout;
+		}
+
+		/// <summary>
+		/// NetSpy: an optimized build has no sequence point for "switch (x)" and none for the "break;" that ends the
+		/// last section (it falls through to the code after the switch): the points only cover the sections' statements.
+		/// With the usual layout ("switch (x)", "{", one line per case label, the statements) the header is
+		/// <c>labels + 2</c> lines above the first statement, and the last "break;" one line below the last point.
+		/// </summary>
+		static void AdjustSwitchLines(SwitchStatement switchStatement, SourceLayoutAnnotation layout, BlockStatement body, List<DebugInfo.SequencePoint> sequencePoints)
+		{
+			var sections = switchStatement.SwitchSections
+				.Select(s => (Section: s, First: s.Statements.FirstOrDefault() is { } f ? GetLayout(f, body, sequencePoints) : null))
+				.ToList();
+			// sections in braces ("case 1: { ... }") have other line counts
+			if (sections.Count == 0 || sections.Any(s => s.First is null || s.Section.Statements.Any(st => st is BlockStatement)))
+				return;
+			var headerRanges = switchStatement.Expression.DescendantsAndSelf
+				.SelectMany(n => n.Annotations.OfType<ILInstruction>())
+				.SelectMany(i => i.ILRanges)
+				.Where(r => !r.IsEmpty)
+				.ToList();
+			bool hasHeaderPoint = sequencePoints.Any(sp => !IsBrace(sp) && headerRanges.Any(r => r.Start < sp.EndOffset && sp.Offset <= r.InclusiveEnd));
+			var firstSection = sections.OrderBy(s => s.First!.StartLine).First();
+			if (!hasHeaderPoint && firstSection.First!.StartLine == layout.StartLine)
+				layout.StartLine -= firstSection.Section.CaseLabels.Count + 2;
+			var lastSection = sections.OrderBy(s => s.First!.StartLine).Last().Section;
+			if (lastSection.Statements.LastOrDefault() is BreakStatement lastBreak && GetLayout(lastBreak, body, sequencePoints) is null)
+				layout.EndLine++;
 		}
 
 		/// <summary>Nodes inside lambdas and local functions are other methods, with other sequence points.</summary>

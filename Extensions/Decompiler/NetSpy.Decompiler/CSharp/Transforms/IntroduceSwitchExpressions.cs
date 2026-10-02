@@ -693,6 +693,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			public int SliceStart, SliceEnd;
 			/// <summary>NetSpy: another arm reads elements of this value, so a test of its length is a list pattern too ("[]").</summary>
 			public bool ListMode;
+			/// <summary>NetSpy: the type of the expression the value was read with (before any type test).</summary>
+			public IType? StaticType;
 
 			public bool HasListParts => Elements is not null || ElementsFromEnd is not null || Slice is not null;
 
@@ -941,7 +943,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						{
 							if (lookupOnly)
 								return null;
-							node = new PNode();
+							node = new PNode { StaticType = id.GetResolveResult().Type };
 							Roots.Add(id.Identifier, node);
 						}
 						owner.SeeRoot(id.Identifier);
@@ -950,7 +952,10 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						var container = GetNode(member.Target);
 						if (lookupOnly)
 							return container?.Members.FirstOrDefault(m => m.MemberName == member.MemberName);
-						return container?.Member(member.MemberName);
+						var memberNode = container?.Member(member.MemberName);
+						if (memberNode is not null)
+							memberNode.StaticType ??= member.GetResolveResult().Type;
+						return memberNode;
 					case IndexerExpression { Target: { } target, Arguments.Count: 1 } indexer:
 						return GetListPart(target, indexer.Arguments.Single());
 					case CastExpression cast:
@@ -1475,6 +1480,17 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				if (node.Designation is not null)
 					throw new PatternFailure("designated list pattern");
 			}
+			// NetSpy: the "" pattern on a string or a char span compiles to a length test: { Length: 0 } → ""
+			var atoms = RemoveRedundantAtoms(node.Atoms.Select(a => a.Clone()).ToList());
+			// (after a type test the source has "string { Length: 0 }": the test is the narrowing, not the constant)
+			if (listLength is null && node.LengthMember is { } emptyLength && node.Type is null && IsCharSequence(node.StaticType)
+				&& emptyLength.Atoms.Count == 1 && ConstantInt(emptyLength.Atoms[0]) == 0 && emptyLength.Designation is null
+				&& emptyLength.Type is null && emptyLength.Members.Count == 0 && emptyLength.Positional is null && !emptyLength.HasListParts
+				&& !atoms.Any(a => a is PrimitiveExpression { Value: string }))
+			{
+				listLength = emptyLength;
+				atoms.Add(new PrimitiveExpression(""));
+			}
 			// sub-patterns
 			var positional = node.Positional?.Select(Emit).ToList();
 			bool keepPositional = positional is not null && (positional.Any(p => p is not null) || node.Positional!.Any(e => e.Designation is not null));
@@ -1497,7 +1513,6 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					members.Add(new NamedArgumentExpression { Name = member.MemberName!, Expression = sub });
 				}
 			}
-			var atoms = RemoveRedundantAtoms(node.Atoms.Select(a => a.Clone()).ToList());
 			if (keepPositional || members.Count > 0)
 			{
 				var recursive = new RecursivePatternExpression { Type = node.TypeSyntax?.Clone(), IsPositional = keepPositional };
@@ -1615,6 +1630,13 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			if (elements is null || !elements.TryGetValue(key, out var element))
 				return new IdentifierExpression("_");
 			return Emit(element) ?? DesignationOrDiscard(element);
+		}
+
+		/// <summary>string, ReadOnlySpan&lt;char&gt; or Span&lt;char&gt;: the types a string constant pattern applies to.</summary>
+		static bool IsCharSequence(IType? type)
+		{
+			return type is not null && (type.IsKnownType(KnownTypeCode.String)
+				|| type is { Name: "ReadOnlySpan" or "Span", Namespace: "System", TypeArguments.Count: 1 } && type.TypeArguments[0].IsKnownType(KnownTypeCode.Char));
 		}
 
 		static int? ConstantInt(Expression e)
