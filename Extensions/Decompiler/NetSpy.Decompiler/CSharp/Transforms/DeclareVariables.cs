@@ -914,6 +914,10 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				{
 					case IfElseStatement:  // variable declared in if condition appears in parent scope
 					case ExpressionStatement:
+					// NetSpy: "return M(out var v) ? v : 0;", "var x = M(out var v) ? v : 0;", "throw ..." are valid too
+					case ReturnStatement:
+					case ThrowStatement:
+					case VariableDeclarationStatement:
 						return node == v.InsertionPoint.nextNode;
 					case Statement:
 						return false; // other statements (e.g. while) don't allow variables to be promoted to parent scope
