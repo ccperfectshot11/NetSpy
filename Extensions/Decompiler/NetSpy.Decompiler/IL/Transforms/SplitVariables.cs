@@ -47,8 +47,7 @@ namespace NetSpy.Decompiler.IL.Transforms
 		}
 
 		static bool IsCandidateVariable(ILVariable v)
-		{
-			switch (v.Kind)
+		{			switch (v.Kind)
 			{
 				case VariableKind.Local:
 					foreach (var ldloca in v.AddressInstructions)
@@ -228,7 +227,7 @@ namespace NetSpy.Decompiler.IL.Transforms
 			/// </summary>
 			readonly Dictionary<ILVariable, IInstructionWithVariableOperand> uninitVariableUsage = new Dictionary<ILVariable, IInstructionWithVariableOperand>();
 
-			public GroupStores(ILFunction scope, CancellationToken cancellationToken) : base(scope, IsCandidateVariable, cancellationToken)
+			public GroupStores(ILFunction scope, CancellationToken cancellationToken) : base(scope, IsCandidateVariable, cancellationToken, outArgumentsAreStores: true)
 			{
 			}
 
@@ -247,6 +246,13 @@ namespace NetSpy.Decompiler.IL.Transforms
 
 			protected internal override void VisitLdLoca(LdLoca inst)
 			{
+				// NetSpy: an 'out' argument doesn't read the variable: it starts a new value (the base handles the store),
+				// so a compiler-reused slot ("out _" here, a temporary there) splits into separate variables
+				if (IsOutArgument(inst) && IsAnalyzedVariable(inst.Variable))
+				{
+					base.VisitLdLoca(inst);
+					return;
+				}
 				base.VisitLdLoca(inst);
 				HandleLoad(inst);
 			}

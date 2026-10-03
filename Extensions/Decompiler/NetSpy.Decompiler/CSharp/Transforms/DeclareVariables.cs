@@ -648,6 +648,21 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			return !context.Settings.SeparateLocalVariableDeclarations;
 		}
 
+		/// <summary>
+		/// NetSpy: "_" is a discard only if nothing named "_" is in scope (a parameter, a local, a member of the type);
+		/// otherwise "out _" would assign to it.
+		/// </summary>
+		static bool DeclaresUnderscore(AstNode node)
+		{
+			var member = node.Ancestors.OfType<EntityDeclaration>().FirstOrDefault(e => e is not TypeDeclaration);
+			if (member is null)
+				return true;
+			if (member.DescendantsAndSelf.Any(n => n is ParameterDeclaration { Name: "_" } or VariableInitializer { Name: "_" }
+				|| (n is IdentifierExpression { Identifier: "_" } id && id.GetILVariable() is not null)))
+				return true;
+			return member.GetSymbol() is IEntity { DeclaringType: { } declaringType } && declaringType.GetMembers(m => m.Name == "_").Any();
+		}
+
 		void InsertVariableDeclarations(TransformContext context)
 		{
 			var replacements = new List<(AstNode OldNode, Func<AstNode> CreateNewNode, string StepDescription)>();
@@ -726,10 +741,18 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					// Note: ExpressionBuilder.HidesVariableWithName produces inaccurate results, because it
 					// does not take lambdas and local functions into account, that are defined in the same
 					// scope as v.
+					// NetSpy: not if another variable of the same name was merged into this declaration (it may be read)
 					if (context.Settings.Discards && v.ILVariable.LoadCount == 0
-						&& v.ILVariable.StoreCount == 0 && v.ILVariable.AddressCount == 1)
+						&& v.ILVariable.StoreCount == 0 && v.ILVariable.AddressCount == 1
+						&& !v.InvolvedInCollision && !v.RemovedDueToCollision)
 					{
 						name = "_";
+						// NetSpy: "out var _" is "out _" (as untyped), unless something in the method is named "_"
+						if (isOutVar && !DeclaresUnderscore(dirExpr))
+						{
+							replacements.Add((dirExpr, () => new DirectionExpression(FieldDirection.Out, new IdentifierExpression("_")).CopyAnnotationsFrom(dirExpr), "Declare out discard"));
+							continue;
+						}
 					}
 					else
 					{

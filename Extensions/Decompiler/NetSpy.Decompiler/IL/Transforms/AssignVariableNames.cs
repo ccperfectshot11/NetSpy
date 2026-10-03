@@ -333,6 +333,18 @@ namespace NetSpy.Decompiler.IL.Transforms
 				return AssignName(v);
 			}
 
+			/// <summary>NetSpy: like <see cref="AssignName"/>, but the slot keeps no name (the comparer maps by slot).</summary>
+			public string AssignNameWithoutSlot(ILVariable v)
+			{
+				bool hadName = variableMapping.TryGetValue(v, out var slotName);
+				string name = AssignName(v);
+				if (hadName)
+					variableMapping[v] = slotName;
+				else
+					variableMapping.Remove(v);
+				return name;
+			}
+
 			public string AssignName(ILVariable v)
 			{
 				// variable has no valid name
@@ -552,6 +564,24 @@ namespace NetSpy.Decompiler.IL.Transforms
 			parentContext.Add((MethodDefinitionHandle)function.ReducedMethod.MetadataToken, newName);
 		}
 
+		/// <summary>NetSpy: the discard variables of reused compiler slots that already have their name (by reference).</summary>
+		readonly HashSet<ILVariable> namedSlotVariables = new HashSet<ILVariable>();
+
+		/// <summary>
+		/// NetSpy: with a PDB, the user's locals have their names; a slot without one is a compiler temporary, and an
+		/// optimized build reuses it for unrelated values ("out _" here, a deconstruction temporary there).
+		/// A variable only passed to 'out' parameters and never read is a discard: sharing the slot's name would
+		/// merge it with the slot's other values (and it couldn't be written "out _").
+		/// </summary>
+		bool IsOutDiscardInReusedSlot(ILVariable v)
+		{
+			if (!v.HasGeneratedName || context?.DebugInfo is null || v.LoadCount != 0 || v.StoreCount != 0 || v.AddressCount == 0)
+				return false;
+			if (!v.AddressInstructions.All(FlowAnalysis.ReachingDefinitionsVisitor.IsOutArgument))
+				return false;
+			return v.Function.Variables.Any(other => other.Kind == VariableKind.Local && !other.HasGeneratedName);
+		}
+
 		Unit VisitChildren(ILInstruction inst, VariableScope context)
 		{
 			foreach (var child in inst.Children)
@@ -566,6 +596,13 @@ namespace NetSpy.Decompiler.IL.Transforms
 		{
 			if (inst is IInstructionWithVariableOperand { Variable: var v })
 			{
+				// NetSpy: an "out _" discard in a reused compiler slot gets a name of its own (once), not the slot's
+				if (v.Kind == VariableKind.Local && v.Index != null && IsOutDiscardInReusedSlot(v))
+				{
+					if (namedSlotVariables.Add(v))
+						v.Name = context.AssignNameWithoutSlot(v);
+					return VisitChildren(inst, context);
+				}
 				// if there is already a valid name for the variable slot, just use it
 				string name = context.TryGetExistingName(v);
 				if (!string.IsNullOrEmpty(name))

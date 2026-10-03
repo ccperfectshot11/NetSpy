@@ -23,6 +23,7 @@ using System.Linq;
 using System.Threading;
 
 using NetSpy.Decompiler.IL;
+using NetSpy.Decompiler.TypeSystem;
 using NetSpy.Decompiler.Util;
 
 namespace NetSpy.Decompiler.FlowAnalysis
@@ -247,6 +248,9 @@ namespace NetSpy.Decompiler.FlowAnalysis
 		/// <c>analyzedVariables[v.IndexInScope]</c> is true iff RD analysis is enabled for the variable.
 		/// </summary>
 		readonly BitSet analyzedVariables;
+
+		/// <summary>NetSpy: "ldloca v" passed to an 'out' parameter is a store of v.</summary>
+		readonly bool outArgumentsAreStores;
 		#endregion
 
 		#region Constructor
@@ -280,6 +284,20 @@ namespace NetSpy.Decompiler.FlowAnalysis
 		/// The analysis will track all variables in the scope for which <c>analyzedVariables[v.IndexInScope]</c> is true.
 		/// </summary>
 		public ReachingDefinitionsVisitor(ILFunction scope, BitSet analyzedVariables, CancellationToken cancellationToken)
+			: this(scope, analyzedVariables, cancellationToken, outArgumentsAreStores: false)
+		{
+		}
+
+		/// <summary>
+		/// NetSpy: with <paramref name="outArgumentsAreStores"/>, "ldloca v" passed to an 'out' parameter is a store
+		/// (a definition) of v, see <see cref="IsOutArgument"/>.
+		/// </summary>
+		public ReachingDefinitionsVisitor(ILFunction scope, Predicate<ILVariable> pred, CancellationToken cancellationToken, bool outArgumentsAreStores)
+			: this(scope, GetActiveVariableBitSet(scope, pred), cancellationToken, outArgumentsAreStores)
+		{
+		}
+
+		ReachingDefinitionsVisitor(ILFunction scope, BitSet analyzedVariables, CancellationToken cancellationToken, bool outArgumentsAreStores)
 		{
 			if (scope == null)
 				throw new ArgumentNullException(nameof(scope));
@@ -287,10 +305,12 @@ namespace NetSpy.Decompiler.FlowAnalysis
 				throw new ArgumentNullException(nameof(analyzedVariables));
 			this.scope = scope;
 			this.analyzedVariables = analyzedVariables;
+			this.cancellationToken = cancellationToken;
+			this.outArgumentsAreStores = outArgumentsAreStores;
 			base.flagsRequiringManualImpl |= InstructionFlags.MayWriteLocals;
 
 			// Fill `allStores` and `storeIndexMap` and `firstStoreIndexForVariable`.
-			var storesByVar = FindAllStoresByVariable(scope, analyzedVariables, cancellationToken);
+			var storesByVar = FindAllStoresByVariable(scope, analyzedVariables, cancellationToken, outArgumentsAreStores);
 			allStores = new ILInstruction[FirstStoreIndex + storesByVar.Sum(l => l != null ? l.Count : 0)];
 			firstStoreIndexForVariable = new int[scope.Variables.Count + 1];
 			int si = FirstStoreIndex;
@@ -302,6 +322,8 @@ namespace NetSpy.Decompiler.FlowAnalysis
 				if (stores != null)
 				{
 					int expectedStoreCount = scope.Variables[vi].StoreInstructions.Count;
+					if (outArgumentsAreStores)
+						expectedStoreCount += scope.Variables[vi].AddressInstructions.Count(IsOutArgument);
 					// Extra store for the uninitialized state.
 					expectedStoreCount += 1;
 					Debug.Assert(stores.Count == expectedStoreCount);
@@ -324,7 +346,32 @@ namespace NetSpy.Decompiler.FlowAnalysis
 		/// <summary>
 		/// Fill <c>allStores</c> and <c>storeIndexMap</c>.
 		/// </summary>
-		static List<ILInstruction>[] FindAllStoresByVariable(ILFunction scope, BitSet activeVariables, CancellationToken cancellationToken)
+		/// <summary>
+		/// NetSpy: "call M(..., ldloca v, ...)" for an 'out' parameter only writes v: the callee must assign it before
+		/// reading it. Not if a later argument also uses v (it is evaluated before the call, but after the ldloca).
+		/// </summary>
+		public static bool IsOutArgument(LdLoca ldloca)
+		{
+			if (ldloca.Parent is not CallInstruction call || ldloca.ChildIndex >= call.Arguments.Count || call.Arguments[ldloca.ChildIndex] != ldloca)
+				return false;
+			if (call.GetParameter(ldloca.ChildIndex) is not { ReferenceKind: ReferenceKind.Out })
+				return false;
+			for (int i = ldloca.ChildIndex + 1; i < call.Arguments.Count; i++)
+			{
+				if (call.Arguments[i].Descendants.OfType<IInstructionWithVariableOperand>().Any(v => v.Variable == ldloca.Variable))
+					return false;
+			}
+			return true;
+		}
+
+		protected internal override void VisitLdLoca(LdLoca inst)
+		{
+			base.VisitLdLoca(inst);
+			if (outArgumentsAreStores && IsOutArgument(inst))
+				HandleStore(inst, inst.Variable);
+		}
+
+		static List<ILInstruction>[] FindAllStoresByVariable(ILFunction scope, BitSet activeVariables, CancellationToken cancellationToken, bool outArgumentsAreStores)
 		{
 			// For each variable, find the list of ILInstructions storing to that variable
 			List<ILInstruction>[] storesByVar = new List<ILInstruction>[scope.Variables.Count];
@@ -335,7 +382,7 @@ namespace NetSpy.Decompiler.FlowAnalysis
 			}
 			foreach (var inst in scope.Descendants)
 			{
-				if (inst.HasDirectFlag(InstructionFlags.MayWriteLocals))
+				if (inst.HasDirectFlag(InstructionFlags.MayWriteLocals) || (outArgumentsAreStores && inst is LdLoca ldloca && IsOutArgument(ldloca)))
 				{
 					cancellationToken.ThrowIfCancellationRequested();
 					ILVariable v = ((IInstructionWithVariableOperand)inst).Variable;
