@@ -554,7 +554,7 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 							var syntaxTree = decompiler.DecompileTypes(declaredTypes);
 							if (partialParts != null)
 								RemoveOtherParts(syntaxTree, file.Key);
-							sourceImports?.Apply(syntaxTree, file.Key, ts.MainModule); // NetSpy: the original using directives
+							sourceImports?.Apply(syntaxTree, file.Key, ts.MainModule, Settings.CSharpFormattingOptions); // NetSpy: the original using directives
 
 							foreach (var node in syntaxTree.Descendants)
 							{

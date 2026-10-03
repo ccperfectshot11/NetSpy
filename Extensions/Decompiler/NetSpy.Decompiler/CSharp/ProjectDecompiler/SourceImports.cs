@@ -25,6 +25,7 @@ using System.Linq;
 using System.Reflection.Metadata;
 using System.Text;
 
+using NetSpy.Decompiler.CSharp.OutputVisitor;
 using NetSpy.Decompiler.CSharp.Syntax;
 using NetSpy.Decompiler.DebugInfo;
 using NetSpy.Decompiler.TypeSystem;
@@ -41,7 +42,7 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 		/// <summary>The global usings (empty if there were none, or if it can't be told).</summary>
 		public List<SourceImport> Global { get; } = new List<SourceImport>();
 
-		/// <summary>Project file name → its own using directives.</summary>
+		/// <summary>Project file name â†’ its own using directives.</summary>
 		public Dictionary<string, List<SourceImport>> Files { get; } = new Dictionary<string, List<SourceImport>>(StringComparer.OrdinalIgnoreCase);
 
 		/// <summary>The file the global usings are written to.</summary>
@@ -117,7 +118,7 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 		/// Replaces the usings the decompiler computed with the file's original ones; the namespaces the decompiled
 		/// code needs and that neither those nor the global usings import are kept (so it always compiles).
 		/// </summary>
-		public void Apply(SyntaxTree syntaxTree, string fileName, MetadataModule module)
+		public void Apply(SyntaxTree syntaxTree, string fileName, MetadataModule module, CSharpFormattingOptions formattingOptions)
 		{
 			if (!Files.TryGetValue(fileName, out var own))
 				return;
@@ -142,6 +143,96 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 					syntaxTree.InsertChildAfter(insertionPoint, directive, Slots.Member);
 				insertionPoint = directive;
 			}
+			UseTypeAliases(syntaxTree, Global.Concat(own).Where(i => i.Kind == SourceImportKind.TypeAlias && i.Alias != null), module,
+				directives.OfType<UsingAliasDeclaration>().ToList(), formattingOptions);
+		}
+
+		/// <summary>
+		/// NetSpy: writes "using" type aliases back where the source used them. The PDB keeps no trace of a type's
+		/// spelling, except through widths: a statement's sequence point is exactly as wide as its source text, so
+		/// "IntList x = ...;" and "List&lt;int&gt; x = ...;" can be told apart. In signatures (no sequence points) only a
+		/// tuple alias is used, when the tuple has the alias's element names (which the directive gets too: the
+		/// PDB's alias target is the plain ValueTuple).
+		/// </summary>
+		static void UseTypeAliases(SyntaxTree syntaxTree, IEnumerable<SourceImport> imports, MetadataModule module, List<UsingAliasDeclaration> ownDirectives,
+			CSharpFormattingOptions formattingOptions)
+		{
+			var aliases = new List<(string Name, IType Type)>();
+			foreach (var import in imports)
+			{
+				try
+				{
+					var type = module.ResolveType(import.Type, default);
+					if (type.Kind != TypeKind.Unknown)
+						aliases.Add((import.Alias!, type));
+				}
+				catch (BadImageFormatException)
+				{
+				}
+			}
+			if (aliases.Count == 0)
+				return;
+			var candidates = syntaxTree.Descendants.OfType<AstType>()
+				.Where(t => !t.Ancestors.Any(a => a is UsingAliasDeclaration or UsingDeclaration) && t.Parent is not AstType && t.Parent is not TupleTypeElement)
+				.Select(t => (Node: t, Type: t.GetResolveResult()?.Type))
+				.Where(c => c.Type is { Kind: not TypeKind.Unknown })
+				.ToList();
+			foreach (var (aliasName, aliasType) in aliases)
+			{
+				var matches = candidates.Where(c => NormalizeTypeVisitor.TypeErasure.EquivalentTypes(c.Type!, aliasType)).Select(c => c.Node).ToList();
+				// a tuple alias: the element names the signatures use
+				string?[]? names = null;
+				if (aliasType.Kind == TypeKind.Tuple)
+				{
+					var nameSets = matches.OfType<TupleAstType>().Select(t => t.Elements.Select(e => e.Name).ToArray())
+						.Where(n => n.All(x => x != null)).Select(n => string.Join(",", n)).Distinct().ToList();
+					if (nameSets.Count == 1)
+					{
+						names = nameSets[0].Split(',');
+						if (ownDirectives.FirstOrDefault(d => d.Alias == aliasName)?.Import is TupleAstType directiveTuple
+							&& directiveTuple.Elements.Count == names.Length)
+						{
+							int i = 0;
+							foreach (var element in directiveTuple.Elements)
+								element.Name = names[i++];
+						}
+					}
+				}
+				foreach (var node in matches)
+				{
+					if (node.Parent is null)
+						continue;
+					var statement = node.Ancestors.OfType<Statement>().FirstOrDefault(s => s.Annotation<Transforms.SourceLayoutAnnotation>() is not null);
+					if (statement?.Annotation<Transforms.SourceLayoutAnnotation>() is { Width: > 0 } layout
+						&& !node.Ancestors.Any(a => a is LambdaExpression or AnonymousMethodExpression))
+					{
+						// replace, and keep it only if the statement now has the source's width (and didn't before)
+						int before = Width(statement, formattingOptions);
+						// equal widths ("(int, int) p" / "Coordinate p"): only a named tuple alias is preferred
+						if (before == layout.Width && !(names is not null && node is TupleAstType unnamed && unnamed.Elements.All(e => e.Name is null)))
+							continue;
+						var alias = new SimpleType(aliasName);
+						alias.CopyAnnotationsFrom(node);
+						node.ReplaceWith(alias);
+						if (Width(statement, formattingOptions) != layout.Width)
+							alias.ReplaceWith(node);
+					}
+					else if (names is not null && statement is null && node is TupleAstType tuple
+						&& tuple.Elements.Select(e => e.Name).SequenceEqual(names))
+					{
+						var alias = new SimpleType(aliasName);
+						alias.CopyAnnotationsFrom(node);
+						node.ReplaceWith(alias);
+					}
+				}
+			}
+		}
+
+		/// <summary>The length of a statement written on one line with the output's formatting (-1 if it takes several).</summary>
+		static int Width(Statement statement, CSharpFormattingOptions formattingOptions)
+		{
+			var text = statement.ToString(formattingOptions).Trim();
+			return text.IndexOf('\n') >= 0 ? -1 : text.Length;
 		}
 
 		/// <summary>The text of the global usings file.</summary>

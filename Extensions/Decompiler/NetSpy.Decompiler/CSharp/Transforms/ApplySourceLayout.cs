@@ -122,7 +122,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				EndLine = points.Max(sp => sp.EndLine),
 				IsSingleLine = points.All(sp => sp.StartLine == sp.EndLine),
 				IsMultiLine = points.Count == 1 && points[0].StartLine != points[0].EndLine,
-				Document = first.DocumentUrl
+				Document = first.DocumentUrl,
+				Width = first.StartLine == first.EndLine ? first.EndColumn - first.StartColumn : -1
 			};
 			if (statement is SwitchStatement switchStatement)
 				AdjustSwitchLines(switchStatement, layout, body, sequencePoints);
@@ -308,6 +309,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		public bool IsSingleLine;
 		/// <summary>The original was one statement written on several lines.</summary>
 		public bool IsMultiLine;
+		/// <summary>NetSpy: the source width of the statement's own (first) sequence point if it is on one line, else -1.</summary>
+		public int Width = -1;
 	}
 
 	/// <summary>NetSpy: how the original wrote a member's body ("=> expr" or a block), from the PDB.</summary>
