@@ -253,6 +253,17 @@ namespace NetSpy.Decompiler.TypeSystem
 			return base.VisitByReferenceType(type);
 		}
 
+		/// <summary>
+		/// NetSpy: a type that is already a tuple (a local's type from the signature) gets the element names from the
+		/// PDB too: they're applied to its underlying ValueTuple type, like for a type from metadata.
+		/// </summary>
+		public override IType VisitTupleType(TupleType type)
+		{
+			if (tupleElementNames != null && type.UnderlyingType is ParameterizedType underlying)
+				return VisitParameterizedType(underlying);
+			return base.VisitTupleType(type);
+		}
+
 		public override IType VisitParameterizedType(ParameterizedType type)
 		{
 			bool useTupleTypes = (options & TypeSystemOptions.Tuple) != 0;

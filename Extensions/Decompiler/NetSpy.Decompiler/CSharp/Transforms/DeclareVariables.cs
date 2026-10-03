@@ -580,6 +580,22 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// NetSpy: the initializer names the variable's exact type ("new T()", "(T)x", "x as T", "default(T)",
 		/// "new T[] { }"), so "var" infers the same type and reads as in modern source code.
 		/// </summary>
+		/// <summary>
+		/// NetSpy: "List&lt;(int Id, string Name)&gt; l = new List&lt;(int, string)&gt; { ... }": the names (from the PDB) belong
+		/// in the creation too, then the type is apparent: "var l = new List&lt;(int Id, string Name)&gt; { ... }".
+		/// </summary>
+		static bool NameTupleElements(Expression initializer, IType variableType, TransformContext context)
+		{
+			if (initializer is not ObjectCreateExpression { Type: not null } creation
+				|| creation.GetResolveResult() is not { Type: var type } || type.Kind == TypeKind.Unknown
+				|| !NormalizeTypeVisitor.TypeErasure.EquivalentTypes(type, variableType) || SameTupleElementNames(type, variableType))
+				return false;
+			var named = context.TypeSystemAstBuilder.ConvertType(variableType);
+			named.CopyAnnotationsFrom(creation.Type);
+			creation.Type = named;
+			return true;
+		}
+
 		static bool IsTypeApparent(Expression initializer, IType variableType)
 		{
 			bool namesType = initializer switch {
@@ -680,7 +696,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						type = new SimpleType("var");
 					}
 					else if (context.Settings.ImplicitlyTypedLocals && v.ILVariable.Kind != VariableKind.PinnedLocal
-						&& v.Type.Kind != TypeKind.ByReference && IsTypeApparent(assignment.Right, v.Type))
+						&& v.Type.Kind != TypeKind.ByReference && (IsTypeApparent(assignment.Right, v.Type) || NameTupleElements(assignment.Right, v.Type, context)))
 					{
 						// NetSpy: "var x = new T();" (modern style: var when the type is apparent from the initializer)
 						type = new SimpleType("var");
