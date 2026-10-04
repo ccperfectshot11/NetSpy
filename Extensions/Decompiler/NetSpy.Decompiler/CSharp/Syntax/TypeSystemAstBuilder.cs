@@ -260,6 +260,11 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 		/// Controls whether C# 14 "extension" declarations are supported.
 		/// </summary>
 		public bool SupportExtensionDeclarations { get; set; }
+
+		/// <summary>
+		/// NetSpy: parameter default values of value types are written as the C# 7.1 "default" literal.
+		/// </summary>
+		public bool UseDefaultLiteralsForParameters { get; set; }
 		#endregion
 
 		#region Convert Type
@@ -1954,6 +1959,13 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 				try
 				{
 					decl.DefaultExpression = ConvertConstantValue(parameterType, parameter.GetConstantValue(throwOnInvalidMetadata: true));
+					// NetSpy: "CancellationToken token = default" (the parameter type gives the literal its type)
+					if (UseDefaultLiteralsForParameters && decl.DefaultExpression is DefaultValueExpression { Type: not null } typed)
+					{
+						var literal = new DefaultValueExpression();
+						literal.CopyAnnotationsFrom(typed);
+						decl.DefaultExpression = literal;
+					}
 				}
 				catch (BadImageFormatException ex)
 				{

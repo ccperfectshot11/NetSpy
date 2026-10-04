@@ -51,6 +51,7 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 		public const string BitwiseAndToken = "&=";
 		public const string BitwiseOrToken = "|=";
 		public const string ExclusiveOrToken = "^=";
+		public const string NullCoalescingToken = "??=";
 
 		// Simple assignment convenience: Operator defaults to Assign. The (left, op, right) form is generated.
 		public AssignmentExpression(Expression left, Expression right)
@@ -95,6 +96,8 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 					return BitwiseOrToken;
 				case AssignmentOperatorType.ExclusiveOr:
 					return ExclusiveOrToken;
+				case AssignmentOperatorType.NullCoalescing:
+					return NullCoalescingToken;
 				default:
 					throw new NotSupportedException("Invalid value for AssignmentOperatorType");
 			}
@@ -132,6 +135,8 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 					return BinaryOperatorType.BitwiseOr;
 				case AssignmentOperatorType.ExclusiveOr:
 					return BinaryOperatorType.ExclusiveOr;
+				case AssignmentOperatorType.NullCoalescing:
+					return BinaryOperatorType.NullCoalescing;
 				default:
 					throw new NotSupportedException("Invalid value for AssignmentOperatorType");
 			}
@@ -165,6 +170,8 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 					return ExpressionType.OrAssign;
 				case AssignmentOperatorType.ExclusiveOr:
 					return ExpressionType.ExclusiveOrAssign;
+				case AssignmentOperatorType.NullCoalescing:
+					return ExpressionType.Extension;
 				default:
 					throw new NotSupportedException("Invalid value for AssignmentOperatorType");
 			}
@@ -232,6 +239,8 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 		BitwiseOr,
 		/// <summary>left ^= right</summary>
 		ExclusiveOr,
+		/// <summary>left ??= right (NetSpy)</summary>
+		NullCoalescing,
 
 		/// <summary>Any operator (for pattern matching)</summary>
 		Any
