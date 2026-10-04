@@ -273,6 +273,11 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 
 		protected virtual void NewLine()
 		{
+			if (singleLineDepth > 0)
+			{
+				Space();
+				return;
+			}
 			writer.NewLine();
 			isAtStartOfLine = true;
 			isAfterSpace = false;
@@ -563,12 +568,30 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 				EndNode(statement);
 				EndNode(body);
 			}
+			else if (body.Annotation<Transforms.SingleLineBlockAnnotation>() is not null && body.Statements.Count == 1)
+			{
+				// NetSpy: "get { return x; }"
+				StartNode(body);
+				Space();
+				WriteToken("{");
+				Space();
+				singleLineDepth++;
+				body.Statements.Single().AcceptVisitor(this);
+				singleLineDepth--;
+				Space();
+				WriteToken("}");
+				EndNode(body);
+				NewLine();
+			}
 			else
 			{
 				WriteBlock(body, style);
 				NewLine();
 			}
 		}
+
+		/// <summary>NetSpy: inside a block written on one line, line breaks are spaces.</summary>
+		int singleLineDepth;
 
 		protected virtual void WriteAttributes(IEnumerable<AttributeSection> attributes)
 		{

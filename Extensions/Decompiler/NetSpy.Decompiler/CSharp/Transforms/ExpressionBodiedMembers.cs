@@ -18,6 +18,8 @@
 
 #nullable enable
 
+using System.Linq;
+
 using NetSpy.Decompiler.CSharp.Syntax;
 
 namespace NetSpy.Decompiler.CSharp.Transforms
@@ -75,6 +77,19 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		{
 			if (body is null || body.Statements.Count != 1 || GetExpression(body) is not { } expression)
 				return;
+			// NetSpy: accessors: the PDB columns said which of "=> x", "{ return x; }" or a block it was
+			switch (AnnotateAccessorStyles.StyleOf(body))
+			{
+				case AccessorStyle.ExpressionBody:
+					body.AddAnnotation(ExpressionBodyAnnotation.Instance);
+					return;
+				case AccessorStyle.SingleLineBlock:
+					if (!body.Statements.Single().ToString().Trim().Contains("\n"))
+						body.AddAnnotation(SingleLineBlockAnnotation.Instance);
+					return;
+				case AccessorStyle.Block:
+					return;
+			}
 			// the PDB says how the original was written
 			if (body.Annotation<BodyStyleAnnotation>() is { } style)
 			{
@@ -116,6 +131,18 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 	/// <summary>
 	/// NetSpy: the annotated method body is written as "=> expr;".
 	/// </summary>
+	/// <summary>
+	/// NetSpy: the annotated body is written on one line: "{ return x; }".
+	/// </summary>
+	public sealed class SingleLineBlockAnnotation
+	{
+		public static readonly SingleLineBlockAnnotation Instance = new SingleLineBlockAnnotation();
+
+		SingleLineBlockAnnotation()
+		{
+		}
+	}
+
 	public sealed class ExpressionBodyAnnotation
 	{
 		public static readonly ExpressionBodyAnnotation Instance = new ExpressionBodyAnnotation();

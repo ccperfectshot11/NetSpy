@@ -69,6 +69,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// <summary>A get-only property/indexer whose getter now is "return x;": "=> x" (like NormalizeBlockStatements).</summary>
 		void UseExpressionBody(Accessor getter)
 		{
+			if (AnnotateAccessorStyles.StyleOf(getter.Body) is { } style && style != AccessorStyle.PropertyExpressionBody)
+				return;
 			if (getter.Attributes.Count != 0 || (getter.Modifiers & ~Modifiers.Readonly) != 0
 				|| getter.Body?.Statements.SingleOrDefault() is not ReturnStatement { Expression: { } value })
 				return;

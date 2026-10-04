@@ -287,6 +287,7 @@ namespace NetSpy.Decompiler.CSharp
 				new IntroduceExtensionMemberAccess(), // NetSpy: C# 14 extension properties / static extension members
 				new IntroduceQueryExpressions(), // must run after IntroduceExtensionMethods
 				new CombineQueryExpressions(),
+				new AnnotateAccessorStyles(), // NetSpy: PDB columns tell how each accessor was written (before NormalizeBlockStatements)
 				new NormalizeBlockStatements(),
 				new FlattenSwitchBlocks(),
 				new RenameVisualBasicAnonymousTypes(), // must run before FixNameCollisions

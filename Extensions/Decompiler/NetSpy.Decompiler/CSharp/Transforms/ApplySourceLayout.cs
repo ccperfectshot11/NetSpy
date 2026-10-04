@@ -254,7 +254,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// Where block-body statements start in <paramref name="document"/> for types nested as deep as
 		/// <paramref name="type"/>: the most common first column of methods with several statements.
 		/// </summary>
-		static int? DocumentBlockColumn(TransformContext context, DebugInfo.IDebugInfoProvider provider, ITypeDefinition type, string document)
+		internal static int? DocumentBlockColumn(TransformContext context, DebugInfo.IDebugInfoProvider provider, ITypeDefinition type, string document)
 		{
 			var module = context.TypeSystem.MainModule;
 			int depth = Depth(type);

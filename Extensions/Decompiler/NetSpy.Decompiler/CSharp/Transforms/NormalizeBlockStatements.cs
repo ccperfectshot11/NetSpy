@@ -243,6 +243,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			if (propertyDeclaration.Getter is not { } getter)
 				return;
+			// NetSpy: the PDB says the original wrote the getter itself
+			if (AnnotateAccessorStyles.StyleOf(getter.Body) is { } style && style != AccessorStyle.PropertyExpressionBody)
+				return;
 			if ((getter.Modifiers & ~movableModifiers) != 0)
 				return;
 			context.Step("Use expression-bodied property", propertyDeclaration);
@@ -258,6 +261,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			if (!m.Success)
 				return;
 			if (indexerDeclaration.Getter is not { } getter)
+				return;
+			if (AnnotateAccessorStyles.StyleOf(getter.Body) is { } style && style != AccessorStyle.PropertyExpressionBody)
 				return;
 			if ((getter.Modifiers & ~movableModifiers) != 0)
 				return;
