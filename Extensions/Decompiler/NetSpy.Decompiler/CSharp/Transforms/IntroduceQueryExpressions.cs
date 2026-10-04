@@ -111,7 +111,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 
 		void DecompileQueries(AstNode node)
 		{
-			Expression? query = DecompileQuery(node as InvocationExpression);
+			Expression? query = WasMethodSyntax(node as InvocationExpression) ? null : DecompileQuery(node as InvocationExpression);
 			if (query != null)
 			{
 				if (node.Parent is ExpressionStatement && CanUseDiscardAssignment())
@@ -127,6 +127,23 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				next = child.NextSibling;
 				DecompileQueries(child);
 			}
+		}
+
+		/// <summary>
+		/// NetSpy: a query's clauses each start a line of their own; method syntax ("xs.Select(x => ...)") is usually on
+		/// one line. If every lambda of the call chain is on the statement's first line (PDB), the source used method syntax.
+		/// </summary>
+		bool WasMethodSyntax(InvocationExpression? invocation)
+		{
+			if (invocation is null || invocation.Target is not MemberReferenceExpression || !context.Settings.SourceLayoutFromPdb
+				|| invocation.Ancestors.OfType<Statement>().FirstOrDefault() is not { } statement)
+				return false;
+			var lambdas = invocation.Descendants.OfType<LambdaExpression>()
+				.Where(l => !l.Ancestors.TakeWhile(a => a != invocation).Any(a => a is LambdaExpression)).ToList();
+			if (lambdas.Count == 0)
+				return false;
+			int line = ApplySourceLayout.StatementLine(statement, context);
+			return line > 0 && lambdas.All(l => ApplySourceLayout.LambdaLine(l, context) == line);
 		}
 
 		bool CanUseDiscardAssignment()

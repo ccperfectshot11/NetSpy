@@ -220,6 +220,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				AddDeclarationSite(declaration, sites);
 			foreach (var node in statement.DescendantsAndSelf)
 			{
+				if (node is PrimitiveExpression { Value: string name })
+					AddNameofSite((PrimitiveExpression)node, name, statement, sites);
 				switch (node)
 				{
 					case AssignmentExpression assignment:
@@ -228,6 +230,12 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						break;
 					case ConditionalExpression or VariableInitializer:
 						AddMinimalParenthesesSite(node, sites);
+						break;
+					case MemberReferenceExpression member:
+						AddNullForgivingSite(member, sites);
+						break;
+					case OutVarDeclarationExpression outVar:
+						AddOutVarTypeSite(outVar, sites);
 						break;
 					case PrimitiveExpression literal:
 						AddIntegralLiteralSite(literal, sites);
@@ -251,6 +259,74 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			var site = new Site();
 			sites.Add(site);
 			return site;
+		}
+
+		/// <summary>
+		/// "\"Name\"" → "nameof(Name)" (a member of the current type, a parameter or a local) or "nameof(T.Name)"
+		/// (a member of a type the statement uses).
+		/// </summary>
+		void AddNameofSite(PrimitiveExpression literal, string name, Statement statement, List<Site> sites)
+		{
+			if (name.Length == 0 || !(char.IsLetter(name[0]) || name[0] == '_') || !name.All(c => char.IsLetterOrDigit(c) || c == '_'))
+				return;
+			var site = new Site();
+			var currentType = statement.Ancestors.OfType<TypeDeclaration>().FirstOrDefault()?.GetSymbol() as ITypeDefinition;
+			var member = statement.Ancestors.OfType<EntityDeclaration>().FirstOrDefault(e => e is not TypeDeclaration);
+			bool inScope = currentType?.GetMembers(m => m.Name == name).Any() == true
+				|| member?.Descendants.OfType<ParameterDeclaration>().Any(p => p.Name == name) == true
+				|| member?.Descendants.OfType<VariableInitializer>().Any(v => v.Name == name) == true;
+			if (inScope)
+				site.Alternatives.Add(() => ReplaceWithNameof(literal, new IdentifierExpression(name)));
+			var types = statement.Descendants.Select(n => n switch {
+				TypeOfExpression t => t.Type,
+				TypeReferenceExpression t => t.Type,
+				_ => null
+			}).OfType<AstType>().Select(t => (Syntax: t, Type: t.GetResolveResult()?.Type)).Where(t => t.Type is { Kind: not TypeKind.Unknown })
+				.GroupBy(t => t.Type).Select(g => g.First()).ToList();
+			foreach (var (syntax, type) in types)
+			{
+				if (type!.GetMembers(m => m.Name == name).Any())
+					site.Alternatives.Add(() => ReplaceWithNameof(literal, new MemberReferenceExpression(new TypeReferenceExpression(syntax.Clone()), name)));
+			}
+			if (site.Alternatives.Count > 0)
+				sites.Add(site);
+		}
+
+		static Action ReplaceWithNameof(PrimitiveExpression literal, Expression argument)
+		{
+			var nameof = new InvocationExpression(new IdentifierExpression("nameof"), argument);
+			nameof.CopyAnnotationsFrom(literal);
+			literal.ReplaceWith(nameof);
+			return () => nameof.ReplaceWith(literal);
+		}
+
+		/// <summary>"M().P" → "M()!.P" (the source's null-forgiving operator; no IL).</summary>
+		static void AddNullForgivingSite(MemberReferenceExpression member, List<Site> sites)
+		{
+			if (member.Target is not (InvocationExpression or MemberReferenceExpression) || member.Target.GetResolveResult()?.Type is not { IsReferenceType: true })
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var target = member.Target;
+				var placeholder = new UnaryOperatorExpression(UnaryOperatorType.SuppressNullableWarning, target.Detach());
+				placeholder.CopyAnnotationsFrom(target);
+				member.Target = placeholder;
+				return () => member.Target = ((UnaryOperatorExpression)member.Target).Expression.Detach();
+			});
+		}
+
+		/// <summary>"out var x" / "out T x".</summary>
+		void AddOutVarTypeSite(OutVarDeclarationExpression outVar, List<Site> sites)
+		{
+			var type = outVar.Variable.Annotation<ILVariableResolveResult>()?.Variable.Type;
+			if (type is null || type.Kind is TypeKind.Unknown or TypeKind.ByReference || type.ContainsAnonymousType())
+				return;
+			AstType alternative = outVar.Type.IsVar() ? context.TypeSystemAstBuilder.ConvertType(type) : new SimpleType("var");
+			Add(sites).Alternatives.Add(() => {
+				var old = outVar.Type;
+				alternative.CopyAnnotationsFrom(old);
+				old.ReplaceWith(alternative);
+				return () => alternative.ReplaceWith(old);
+			});
 		}
 
 		/// <summary>"c ? a : (b ?? d)" → "c ? a : b ?? d", "x = (c ? a : b)" → "x = c ? a : b" (no readability parentheses).</summary>
@@ -446,9 +522,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			for (int i = 0; i < list.Count; i++)
 			{
 				var parameter = parameters[i + offset];
-				if (parameter.IsOptional && parameter.HasConstantValueInSignature && !parameter.IsParams
-					&& list[i].GetResolveResult() is { IsCompileTimeConstant: true } argument
-					&& ConstantsEqual(argument.ConstantValue, parameter.GetConstantValue()))
+				if (parameter.IsOptional && !parameter.IsParams && IsDefaultArgument(list[i], parameter))
 					omittable.Add(i);
 			}
 			// trailing ones are left out by the decompiler already; a subset that is a strict prefix-free choice
@@ -479,6 +553,26 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					};
 				});
 			}
+		}
+
+		/// <summary>
+		/// The argument is what the compiler passes for the optional parameter when it is left out: its default value,
+		/// the [DefaultParameterValue] value, or Type.Missing for an [Optional] object parameter without one.
+		/// </summary>
+		static bool IsDefaultArgument(Expression argument, IParameter parameter)
+		{
+			var resolved = argument.GetResolveResult();
+			if (parameter.HasConstantValueInSignature)
+				return resolved is { IsCompileTimeConstant: true } && ConstantsEqual(resolved.ConstantValue, parameter.GetConstantValue());
+			var defaultValue = parameter.GetAttributes()
+				.FirstOrDefault(a => a.AttributeType.FullName == "System.Runtime.InteropServices.DefaultParameterValueAttribute");
+			if (defaultValue is not null)
+			{
+				return defaultValue.FixedArguments.Length == 1 && resolved is { IsCompileTimeConstant: true }
+					&& ConstantsEqual(resolved.ConstantValue, defaultValue.FixedArguments[0].Value);
+			}
+			return parameter.Type.IsKnownType(KnownTypeCode.Object)
+				&& argument.GetSymbol() is IField { Name: "Missing", DeclaringType.FullName: "System.Type" };
 		}
 
 		/// <summary>The parameter an argument (or a node right inside one) is passed to.</summary>

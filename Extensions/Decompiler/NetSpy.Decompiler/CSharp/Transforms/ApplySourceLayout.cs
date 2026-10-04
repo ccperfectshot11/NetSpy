@@ -18,6 +18,7 @@
 
 #nullable enable
 
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection.Metadata;
@@ -165,6 +166,47 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			var lastSection = sections.OrderBy(s => s.First!.StartLine).Last().Section;
 			if (lastSection.Statements.LastOrDefault() is BreakStatement lastBreak && GetLayout(lastBreak, body, sequencePoints) is null)
 				layout.EndLine++;
+		}
+
+		/// <summary>
+		/// NetSpy: the source line a statement starts on (from its method's sequence points), for transforms that run
+		/// before this one; -1 if unknown.
+		/// </summary>
+		internal static int StatementLine(Statement statement, TransformContext context)
+		{
+			if (!context.Settings.SourceLayoutFromPdb || context.DecompileRun.DebugInfoProvider is not { } provider)
+				return -1;
+			var entity = statement.Ancestors.OfType<EntityDeclaration>().FirstOrDefault();
+			var body = statement.Ancestors.OfType<BlockStatement>().LastOrDefault();
+			var method = entity?.Annotation<ILFunction>()?.MoveNextMethod ?? entity?.GetSymbol() as IMethod;
+			if (body is null || method is null || method.MetadataToken.IsNil || method.MetadataToken.Kind != HandleKind.MethodDefinition)
+				return -1;
+			try
+			{
+				var points = provider.GetSequencePoints((MethodDefinitionHandle)method.MetadataToken).Where(sp => !sp.IsHidden).ToList();
+				return GetLayout(statement, body, points)?.StartLine ?? -1;
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return -1;
+			}
+		}
+
+		/// <summary>NetSpy: the first source line of a lambda's own method; -1 if unknown.</summary>
+		internal static int LambdaLine(AstNode lambda, TransformContext context)
+		{
+			if (context.DecompileRun.DebugInfoProvider is not { } provider || lambda.Annotation<ILFunction>()?.Method is not { } method
+				|| method.MetadataToken.IsNil || method.MetadataToken.Kind != HandleKind.MethodDefinition)
+				return -1;
+			try
+			{
+				var points = provider.GetSequencePoints((MethodDefinitionHandle)method.MetadataToken).Where(sp => !sp.IsHidden).ToList();
+				return points.Count == 0 ? -1 : points.Min(sp => sp.StartLine);
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return -1;
+			}
 		}
 
 		/// <summary>Nodes inside lambdas and local functions are other methods, with other sequence points.</summary>
