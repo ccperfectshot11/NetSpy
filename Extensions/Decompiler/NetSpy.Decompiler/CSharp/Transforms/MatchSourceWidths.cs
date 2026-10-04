@@ -61,18 +61,51 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			this.context = context;
 			this.formatting = context.Settings.CSharpFormattingOptions;
-			foreach (var statement in rootNode.Descendants.OfType<Statement>().ToList())
+			foreach (var node in rootNode.Descendants.OfType<Statement>().ToList())
 			{
+				var statement = node;
 				if (statement is BlockStatement || statement.Annotation<SourceLayoutAnnotation>() is not { Width: > 0 } layout)
 					continue;
-				if (statement is not (ExpressionStatement or VariableDeclarationStatement or ReturnStatement or ThrowStatement))
+				int target = layout.Width;
+				// "using (T r = e)": the sequence point is "T r = e" (no ';'); "using T r = e;" has it all
+				if (statement is UsingStatement { ResourceAcquisition: VariableDeclarationStatement resource } usingStatement)
+				{
+					target += usingStatement.IsEnhanced ? -((usingStatement.IsAsync ? "await using " : "using ").Length) : 1;
+					statement = resource;
+				}
+				else if (statement is not (ExpressionStatement or VariableDeclarationStatement or ReturnStatement or ThrowStatement))
+				{
 					continue;
+				}
 				// a string the source may have written as a raw or verbatim string has an unknown source width
 				if (statement.Descendants.Any(n => n is PrimitiveExpression { Value: string text } && text.IndexOfAny(Escaped) >= 0
 					|| n is InterpolatedStringText { Text: var part } && part.IndexOfAny(EscapedInInterpolation) >= 0))
 					continue;
-				Process(statement, layout.Width);
+				Process(statement, target);
 			}
+			if (context.Settings.ImplicitlyTypedLocals)
+			{
+				foreach (var foreachStatement in rootNode.Descendants.OfType<ForeachStatement>().ToList())
+					ProcessForeachVariable(foreachStatement);
+			}
+		}
+
+		/// <summary>"foreach (var x in e)" / "foreach (T x in e)": the variable has a sequence point of its own.</summary>
+		void ProcessForeachVariable(ForeachStatement foreachStatement)
+		{
+			if (foreachStatement.Annotation<SourceLayoutAnnotation>() is not { ForeachVariableWidth: > 0 } layout
+				|| foreachStatement.VariableDesignation is not SingleVariableDesignation designation
+				|| designation.Annotation<ILVariableResolveResult>()?.Variable.Type is not { } type || type.Kind is TypeKind.Unknown or TypeKind.ByReference || type.ContainsAnonymousType())
+				return;
+			int current = foreachStatement.VariableType.ToString(formatting).Length + 1 + designation.Identifier.Length;
+			if (current == layout.ForeachVariableWidth)
+				return;
+			AstType alternative = foreachStatement.VariableType.IsVar() ? context.TypeSystemAstBuilder.ConvertType(type) : new SimpleType("var");
+			if (alternative.ToString(formatting).Length + 1 + designation.Identifier.Length != layout.ForeachVariableWidth)
+				return;
+			context.Step("Match foreach variable width", foreachStatement);
+			alternative.CopyAnnotationsFrom(foreachStatement.VariableType);
+			foreachStatement.VariableType = alternative;
 		}
 
 		void Process(Statement statement, int target)

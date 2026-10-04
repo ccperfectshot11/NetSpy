@@ -127,6 +127,15 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			};
 			if (statement is SwitchStatement switchStatement)
 				AdjustSwitchLines(switchStatement, layout, body, sequencePoints);
+			if (statement is ForeachStatement foreachStatement)
+			{
+				// the iteration variable's own sequence point ("var x") ends right before the one of "in"
+				var line = points.Where(sp => sp.StartLine == first.StartLine && sp.EndLine == first.StartLine).ToList();
+				var inKeyword = line.Where(sp => sp.EndColumn - sp.StartColumn == 2).ToList();
+				var variable = line.Where(sp => inKeyword.Any(k => k.StartColumn == sp.EndColumn + 1)).ToList();
+				if (variable.Count == 1)
+					layout.ForeachVariableWidth = variable[0].EndColumn - variable[0].StartColumn;
+			}
 			return layout;
 		}
 
@@ -311,6 +320,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		public bool IsMultiLine;
 		/// <summary>NetSpy: the source width of the statement's own (first) sequence point if it is on one line, else -1.</summary>
 		public int Width = -1;
+		/// <summary>NetSpy: for a foreach, the width of the iteration variable's sequence point ("var x"), else -1.</summary>
+		public int ForeachVariableWidth = -1;
 	}
 
 	/// <summary>NetSpy: how the original wrote a member's body ("=> expr" or a block), from the PDB.</summary>
