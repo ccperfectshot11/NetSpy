@@ -28,6 +28,7 @@ using System.Text;
 using NetSpy.Decompiler.CSharp.OutputVisitor;
 using NetSpy.Decompiler.CSharp.Syntax;
 using NetSpy.Decompiler.DebugInfo;
+using NetSpy.Decompiler.Semantics;
 using NetSpy.Decompiler.TypeSystem;
 
 namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
@@ -129,7 +130,8 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 			foreach (var node in existing)
 			{
 				node.Remove();
-				if (node is UsingDeclaration { IsStatic: false } u && !imported.Contains(u.Namespace))
+				// NetSpy: a namespace the original file didn't import: its types were written fully qualified
+				if (node is UsingDeclaration { IsStatic: false } u && !imported.Contains(u.Namespace) && !QualifyNamespace(syntaxTree, u.Namespace))
 					directives.Add(node);
 				else if (node is UsingAliasDeclaration a && !aliases.Contains(a.Alias))
 					directives.Add(node);
@@ -145,6 +147,96 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 			}
 			UseTypeAliases(syntaxTree, Global.Concat(own).Where(i => i.Kind == SourceImportKind.TypeAlias && i.Alias != null), module,
 				directives.OfType<UsingAliasDeclaration>().ToList(), formattingOptions);
+			UseStaticImports(syntaxTree, Global.Concat(own).Where(i => i.Kind == SourceImportKind.Type), module, formattingOptions);
+		}
+
+		/// <summary>
+		/// NetSpy: writes the types of <paramref name="ns"/> fully qualified ("System.Runtime.CompilerServices.MethodImpl"),
+		/// so the file needs no using directive for it, like the original. Not done (false) if the code also needs the
+		/// namespace for something a qualified name can't give (extension methods, query expressions) or the type
+		/// references aren't simple names.
+		/// </summary>
+		static bool QualifyNamespace(SyntaxTree syntaxTree, string ns)
+		{
+			if (ns.Length == 0)
+				return false;
+			foreach (var node in syntaxTree.Descendants)
+			{
+				if (node is QueryExpression && ns == "System.Linq")
+					return false;
+				if (node is InvocationExpression invocation && invocation.GetResolveResult() is CSharpInvocationResolveResult { IsExtensionMethodInvocation: true } call
+					&& call.Member.DeclaringType.Namespace == ns)
+					return false;
+			}
+			var types = new List<SimpleType>();
+			foreach (var type in syntaxTree.Descendants.OfType<AstType>())
+			{
+				if (type.Ancestors.Any(a => a is UsingDeclaration or UsingAliasDeclaration))
+					continue;
+				if (type.GetResolveResult()?.Type is not { } resolved || resolved.GetDefinition() is not { } definition
+					|| definition.Namespace != ns || definition.DeclaringTypeDefinition is not null)
+					continue;
+				if (type is not SimpleType { TypeArguments.Count: 0 } simple || type.Parent is MemberType)
+					return false;
+				types.Add(simple);
+			}
+			if (types.Count == 0)
+				return false;
+			foreach (var simple in types)
+			{
+				var qualified = AstType.Create(ns + "." + simple.Identifier);
+				qualified.CopyAnnotationsFrom(simple);
+				simple.ReplaceWith(qualified);
+			}
+			return true;
+		}
+
+		/// <summary>
+		/// NetSpy: "using static T;" lets the source call T's static members without "T.": a member access is written
+		/// that way when the statement then has exactly the width of its PDB sequence point.
+		/// </summary>
+		static void UseStaticImports(SyntaxTree syntaxTree, IEnumerable<SourceImport> imports, MetadataModule module, CSharpFormattingOptions formattingOptions)
+		{
+			var types = new List<IType>();
+			foreach (var import in imports)
+			{
+				try
+				{
+					var type = module.ResolveType(import.Type, default);
+					if (type.Kind != TypeKind.Unknown)
+						types.Add(type);
+				}
+				catch (BadImageFormatException)
+				{
+				}
+			}
+			if (types.Count == 0)
+				return;
+			foreach (var member in syntaxTree.Descendants.OfType<MemberReferenceExpression>().ToList())
+			{
+				if (member.Parent is null || member.Target is not TypeReferenceExpression target
+					|| StaticTarget(target) is not { } targetType || !types.Any(t => t.Equals(targetType))
+					|| (member.GetSymbol() ?? (member.Parent as InvocationExpression)?.GetSymbol()) is not IMember { IsStatic: true } symbol
+					|| symbol is IMethod { IsExtensionMethod: true })
+					continue;
+				// the name must not mean anything else where it is used
+				var currentType = member.Ancestors.OfType<TypeDeclaration>().FirstOrDefault()?.GetSymbol() as ITypeDefinition;
+				if (currentType is null || currentType.GetMembers(m => m.Name == member.MemberName).Any()
+					|| member.Ancestors.OfType<TypeDeclaration>().Any(t => (t.GetSymbol() as ITypeDefinition)?.GetMembers(m => m.Name == member.MemberName).Any() == true))
+					continue;
+				var statement = member.Ancestors.OfType<Statement>().FirstOrDefault(s => s.Annotation<Transforms.SourceLayoutAnnotation>() is not null);
+				if (statement?.Annotation<Transforms.SourceLayoutAnnotation>() is not { Width: > 0 } layout)
+					continue;
+				int before = Width(statement, formattingOptions);
+				if (before == layout.Width)
+					continue;
+				var identifier = new IdentifierExpression(member.MemberName);
+				identifier.TypeArguments.AddRange(member.TypeArguments.Select(t => t.Clone()));
+				identifier.CopyAnnotationsFrom(member);
+				member.ReplaceWith(identifier);
+				if (Width(statement, formattingOptions) != layout.Width)
+					identifier.ReplaceWith(member);
+			}
 		}
 
 		/// <summary>
@@ -228,10 +320,25 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 			}
 		}
 
+		/// <summary>The type a "T." member access is on ("string" has no type annotation of its own).</summary>
+		static IType? StaticTarget(TypeReferenceExpression target)
+		{
+			if (target.Type.GetResolveResult()?.Type is { Kind: not TypeKind.Unknown } type)
+				return type;
+			return target.GetResolveResult()?.Type is { Kind: not TypeKind.Unknown } expressionType ? expressionType : null;
+		}
+
 		/// <summary>The length of a statement written on one line with the output's formatting (-1 if it takes several).</summary>
 		static int Width(Statement statement, CSharpFormattingOptions formattingOptions)
 		{
-			var text = statement.ToString(formattingOptions).Trim();
+			// "=> expr": the sequence point covers the expression only
+			AstNode measured = statement;
+			if (statement.Parent is BlockStatement body && body.Annotation<Transforms.ExpressionBodyAnnotation>() is not null
+				&& Transforms.ExpressionBodiedMembers.GetExpression(body) is { } expression)
+				measured = expression;
+			var clone = measured.Clone();
+			clone.AcceptVisitor(new InsertParenthesesVisitor { InsertParenthesesForReadability = true });
+			var text = clone.ToString(formattingOptions).Trim();
 			return text.IndexOf('\n') >= 0 ? -1 : text.Length;
 		}
 

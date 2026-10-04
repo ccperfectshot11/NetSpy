@@ -59,6 +59,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 			foreach (var invocation in rootNode.Descendants.OfType<InvocationExpression>().ToList())
 				RemoveCallerArgumentExpression(invocation);
+			foreach (var assignment in rootNode.Descendants.OfType<AssignmentExpression>().ToList())
+				IntroduceDelegateCompoundAssignment(assignment);
 			if (context.Settings.SourceLayoutFromPdb && context.DecompileRun.DebugInfoProvider is { } provider)
 			{
 				foreach (var block in rootNode.Descendants.OfType<BlockStatement>().ToList())
@@ -96,6 +98,20 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			var statement = new ExpressionStatement(new AssignmentExpression(target.Detach(), assignment.Right.Detach()) { Operator = AssignmentOperatorType.NullCoalescing });
 			statement.CopyAnnotationsFrom(ifElse);
 			ifElse.ReplaceWith(statement);
+		}
+
+		/// <summary>"d = (T)Delegate.Combine(d, v)" → "d += v" (and Remove → "-="): what the compiler makes of them.</summary>
+		void IntroduceDelegateCompoundAssignment(AssignmentExpression assignment)
+		{
+			if (assignment.Operator != AssignmentOperatorType.Assign || !IsSimpleTarget(assignment.Left)
+				|| assignment.Right is not CastExpression { Expression: InvocationExpression { Arguments.Count: 2 } call } cast
+				|| call.GetSymbol() is not IMethod { Name: "Combine" or "Remove", DeclaringType.FullName: "System.Delegate", IsStatic: true } method
+				|| !call.Arguments.First().IsMatch(assignment.Left)
+				|| !NormalizeTypeVisitor.IgnoreNullability.EquivalentTypes(cast.GetResolveResult().Type, assignment.Left.GetResolveResult().Type))
+				return;
+			context.Step("Use delegate compound assignment", assignment);
+			assignment.Operator = method.Name == "Combine" ? AssignmentOperatorType.Add : AssignmentOperatorType.Subtract;
+			assignment.Right = call.Arguments.Last().Detach();
 		}
 
 		/// <summary>A local, a parameter or a field of this/a local/a type: reading it twice is the same as once.</summary>
