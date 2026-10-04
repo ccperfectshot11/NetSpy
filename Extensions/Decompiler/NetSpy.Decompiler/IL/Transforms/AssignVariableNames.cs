@@ -621,8 +621,9 @@ namespace NetSpy.Decompiler.IL.Transforms
 					case VariableKind.NamedArgument:
 						context.ReserveVariableName(v.Name);
 						break;
-					case VariableKind.UsingLocal when v.AddressCount == 0 && v.LoadCount == 0:
+					case VariableKind.UsingLocal when v.AddressCount == 0 && v.LoadCount == 0 && v.HasGeneratedName:
 						// using variables that are not read, will not be declared in source source
+						// (NetSpy: unless the PDB names them: then the source declared them)
 						break;
 					case VariableKind.DisplayClassLocal:
 						v.Name = context.NextDisplayClassLocal();

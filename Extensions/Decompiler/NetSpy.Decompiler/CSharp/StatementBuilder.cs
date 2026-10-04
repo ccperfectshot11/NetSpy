@@ -614,7 +614,8 @@ namespace NetSpy.Decompiler.CSharp
 			}
 			else
 			{
-				if (var.LoadCount > 0 || var.AddressCount > 0)
+				// NetSpy: a variable the source named (PDB) is declared even if nothing reads it ("using var scope = ...;")
+				if (var.LoadCount > 0 || var.AddressCount > 0 || (!var.HasGeneratedName && var.Name is { Length: > 0 }))
 				{
 					var type = settings.AnonymousTypes && var.Type.ContainsAnonymousType() ? new SimpleType("var") : exprBuilder.ConvertType(var.Type);
 					if (!type.IsVar())
