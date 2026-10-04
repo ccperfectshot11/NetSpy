@@ -149,6 +149,10 @@ namespace NetSpy.Decompiler.IL.Transforms
 			// The initializer would be empty, there's nothing to do here.
 			if (initializerItemsCount <= 0)
 				return;
+			// NetSpy: an initializer is one expression; separate statements ("var t = new T(); t.P = x;") each start a
+			// sequence point, also when the optimizer removed the local
+			if (StartsStatement(block.Instructions, pos + 1, pos + initializerItemsCount, context))
+				return;
 			context.Step("CollectionOrObjectInitializer", inst);
 			// Create a new block and final slot (initializer target variable)
 			var initializerBlock = new Block(blockKind);
@@ -228,6 +232,37 @@ namespace NetSpy.Decompiler.IL.Transforms
 		readonly List<AccessPathElement> currentPath = new List<AccessPathElement>();
 		bool isCollection;
 		readonly Stack<HashSet<AccessPathElement>> pathStack = new Stack<HashSet<AccessPathElement>>();
+
+		/// <summary>
+		/// NetSpy: true if a visible sequence point of the method starts in the IL of instructions[first..last]
+		/// (the would-be initializer items were statements of their own).
+		/// </summary>
+		static bool StartsStatement(InstructionCollection<ILInstruction> instructions, int first, int last, StatementTransformContext context)
+		{
+			if (context.DebugInfo is not { } provider || !context.Settings.SourceLayoutFromPdb)
+				return false;
+			var method = context.Function.MoveNextMethod ?? context.Function.Method;
+			if (method is null || method.MetadataToken.IsNil || method.MetadataToken.Kind != System.Reflection.Metadata.HandleKind.MethodDefinition)
+				return false;
+			IList<DebugInfo.SequencePoint> points;
+			try
+			{
+				points = provider.GetSequencePoints((System.Reflection.Metadata.MethodDefinitionHandle)method.MetadataToken);
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return false;
+			}
+			for (int i = first; i <= last; i++)
+			{
+				foreach (var range in instructions[i].Descendants.SelectMany(d => d.ILRanges))
+				{
+					if (!range.IsEmpty && points.Any(sp => !sp.IsHidden && sp.Offset == range.Start))
+						return true;
+				}
+			}
+			return false;
+		}
 
 		bool IsPartOfInitializer(InstructionCollection<ILInstruction> instructions, int pos, ILVariable target, IType rootType, ref BlockKind blockKind, ref bool initializerContainsInitOnlyItems, StatementTransformContext context)
 		{
