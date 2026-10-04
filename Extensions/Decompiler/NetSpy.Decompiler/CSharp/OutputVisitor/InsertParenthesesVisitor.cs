@@ -25,6 +25,19 @@ using NetSpy.Decompiler.CSharp.Syntax;
 namespace NetSpy.Decompiler.CSharp.OutputVisitor
 {
 	/// <summary>
+	/// NetSpy: the annotated node gets only the parentheses its children need, none for readability
+	/// (the PDB showed the source didn't have them).
+	/// </summary>
+	public sealed class MinimalParenthesesAnnotation
+	{
+		public static readonly MinimalParenthesesAnnotation Instance = new MinimalParenthesesAnnotation();
+
+		MinimalParenthesesAnnotation()
+		{
+		}
+	}
+
+	/// <summary>
 	/// Inserts the parentheses into the AST that are needed to ensure the AST can be printed correctly.
 	/// For example, if the AST contains
 	/// BinaryOperatorExpresson(2, Mul, BinaryOperatorExpression(1, Add, 1))); printing that AST
@@ -491,7 +504,8 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			// (a ? b : c ? d : e) == (a ? b : (c ? d : e))
 			// (a ? b ? c : d : e) == (a ? (b ? c : d) : e)
 			// Only ((a ? b : c) ? d : e) strictly needs the additional parentheses
-			if (InsertParenthesesForReadability && !IsConditionalRefExpression(conditionalExpression))
+			if (InsertParenthesesForReadability && !IsConditionalRefExpression(conditionalExpression)
+				&& conditionalExpression.Annotation<MinimalParenthesesAnnotation>() is null)
 			{
 				// NetSpy: the condition only gets the parentheses it needs ("a > b ? x : y", as the source writes it)
 				ParenthesizeIfRequired(conditionalExpression.Condition, PrecedenceLevel.Conditional + 1);
@@ -528,7 +542,10 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			// has conditional precedence and would otherwise re-parse as cond ? ref a : (ref b = value),
 			// so the target needs precedence above ?: to keep its parentheses.
 			ParenthesizeIfRequired(assignmentExpression.Left, PrecedenceLevel.Conditional + 1);
-			HandleAssignmentRHS(assignmentExpression.Right);
+			if (assignmentExpression.Annotation<MinimalParenthesesAnnotation>() is not null)
+				ParenthesizeIfRequired(assignmentExpression.Right, PrecedenceLevel.Assignment);
+			else
+				HandleAssignmentRHS(assignmentExpression.Right);
 			base.VisitAssignmentExpression(assignmentExpression);
 		}
 
@@ -547,7 +564,12 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 		public override void VisitVariableInitializer(VariableInitializer variableInitializer)
 		{
 			if (variableInitializer.Initializer is not null)
-				HandleAssignmentRHS(variableInitializer.Initializer);
+			{
+				if (variableInitializer.Annotation<MinimalParenthesesAnnotation>() is not null)
+					ParenthesizeIfRequired(variableInitializer.Initializer, PrecedenceLevel.Assignment);
+				else
+					HandleAssignmentRHS(variableInitializer.Initializer);
+			}
 			base.VisitVariableInitializer(variableInitializer);
 		}
 

@@ -115,7 +115,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			var sites = new List<Site>();
 			CollectSites(statement, sites);
-			if (sites.Count == 0 || sites.Count > MaxSites)
+			if (sites.Count == 0 || sites.Count > 4 * MaxSites)
 				return;
 			// the effect of each alternative on its own
 			foreach (var site in sites)
@@ -128,6 +128,10 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					site.Deltas.Add(w < 0 ? int.MinValue : w - width);
 				}
 			}
+			// places whose spelling changes nothing don't count
+			sites.RemoveAll(s => s.Deltas.All(d => d == 0 || d == int.MinValue));
+			if (sites.Count == 0 || sites.Count > MaxSites)
+				return;
 			// the combinations with the fewest changes that close the gap
 			var best = new List<int[]>();
 			int bestCount = int.MaxValue;
@@ -220,6 +224,10 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				{
 					case AssignmentExpression assignment:
 						AddCompoundAssignmentSite(assignment, sites);
+						AddMinimalParenthesesSite(assignment, sites);
+						break;
+					case ConditionalExpression or VariableInitializer:
+						AddMinimalParenthesesSite(node, sites);
 						break;
 					case PrimitiveExpression literal:
 						AddIntegralLiteralSite(literal, sites);
@@ -243,6 +251,17 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			var site = new Site();
 			sites.Add(site);
 			return site;
+		}
+
+		/// <summary>"c ? a : (b ?? d)" → "c ? a : b ?? d", "x = (c ? a : b)" → "x = c ? a : b" (no readability parentheses).</summary>
+		static void AddMinimalParenthesesSite(AstNode node, List<Site> sites)
+		{
+			if (node.Annotation<MinimalParenthesesAnnotation>() is not null)
+				return;
+			Add(sites).Alternatives.Add(() => {
+				node.AddAnnotation(MinimalParenthesesAnnotation.Instance);
+				return () => node.RemoveAnnotations<MinimalParenthesesAnnotation>();
+			});
 		}
 
 		/// <summary>"x += y" → "x = x + y" (statement level, simple targets, types where both mean the same).</summary>

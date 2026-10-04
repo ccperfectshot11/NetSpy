@@ -2739,6 +2739,14 @@ namespace NetSpy.Decompiler.CSharp
 						{
 							long initValue = (long)CSharpPrimitiveCast.Cast(TypeCode.Int64, constantValue, false);
 							enumDec.Initializer = typeSystemAstBuilder.ConvertEnumValue(decompilationContext.CurrentTypeDefinition, initValue, field);
+							// NetSpy: "Red = -1" in a long enum: an int constant converts implicitly, the "L" suffix isn't needed
+							if (enumDec.Initializer is PrimitiveExpression { Value: long or ulong or uint } literal
+								&& initValue >= (underlyingTypeCode is TypeCode.UInt32 or TypeCode.UInt64 ? 0 : int.MinValue) && initValue <= int.MaxValue)
+							{
+								var integer = new PrimitiveExpression((int)initValue);
+								integer.CopyAnnotationsFrom(literal);
+								enumDec.Initializer = integer;
+							}
 						}
 						else
 						{
