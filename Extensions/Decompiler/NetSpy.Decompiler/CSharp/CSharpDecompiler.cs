@@ -309,6 +309,7 @@ namespace NetSpy.Decompiler.CSharp
 				new IntroduceCollectionSpreads(), // NetSpy: hand-built arrays/lists -> [a, .. b]
 				new SplitMergedStatements(), // NetSpy: before the layout (the new statements get their lines)
 				new ApplySourceLayout(), // NetSpy: PDB layout (after all statement changes)
+				new MatchSourceWidths(), // NetSpy: equivalent spellings chosen by the PDB statement widths (after ApplySourceLayout)
 				new IntroduceTopLevelStatements(IntroduceTopLevelStatements.Phase.Move), // NetSpy
 				new RestoreFileLocalTypes(), // NetSpy
 				new ExpressionBodiedMembers(), // NetSpy: must be last (marks final bodies)

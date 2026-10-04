@@ -303,6 +303,10 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 				return 0;
 			if (expr.GetParent(n => n is Statement || n is LambdaExpression || n is InterpolatedStringContent) is InterpolatedStringContent)
 				return 0;
+			// NetSpy: the original wrote the whole statement on one line (PDB)
+			if (expr.GetParent(n => n is Statement && n.Annotation<Transforms.SourceLayoutAnnotation>() is not null)
+				?.Annotation<Transforms.SourceLayoutAnnotation>() is { } layout && layout.StartLine == layout.EndLine)
+				return 0;
 			return callChainLength;
 		}
 
@@ -1261,9 +1265,14 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 		{
 			StartNode(objectCreateExpression);
 			WriteKeyword(ObjectCreateExpression.NewKeyword);
-			Space();
-			objectCreateExpression.Type.AcceptVisitor(this);
-			bool useParenthesis = objectCreateExpression.Arguments.Any() || objectCreateExpression.Initializer is null;
+			// NetSpy: target-typed "new(...)"
+			bool targetTyped = objectCreateExpression.Annotation<Transforms.TargetTypedNewAnnotation>() is not null;
+			if (!targetTyped)
+			{
+				Space();
+				objectCreateExpression.Type.AcceptVisitor(this);
+			}
+			bool useParenthesis = targetTyped || objectCreateExpression.Arguments.Any() || objectCreateExpression.Initializer is null;
 			if (useParenthesis)
 			{
 				Space(policy.SpaceBeforeMethodCallParentheses);
