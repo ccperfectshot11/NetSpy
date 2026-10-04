@@ -59,6 +59,12 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			base.VisitMethodDeclaration(methodDeclaration);
 		}
 
+		public override void VisitOperatorDeclaration(OperatorDeclaration operatorDeclaration)
+		{
+			Process(operatorDeclaration.Body, operatorDeclaration.GetSymbol() as IMethod);
+			base.VisitOperatorDeclaration(operatorDeclaration);
+		}
+
 		public override void VisitAccessor(Accessor accessor)
 		{
 			if (Process(accessor.Body, accessor.GetSymbol() as IMethod))
@@ -121,9 +127,34 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 			context.Step("Introduce return ternary", body);
 			body.Statements.Clear();
-			body.Statements.Add(new ReturnStatement(new ConditionalExpression(test, first, second)));
+			body.Statements.Add(new ReturnStatement(Logical(test, first, second) ?? new ConditionalExpression(test, first, second)));
 			return true;
 		}
+
+		/// <summary>
+		/// "c ? x : false" is "c &amp;&amp; x", "c ? x : true" is "!c || x", "c ? true : x" is "c || x", "c ? false : x" is "!c &amp;&amp; x"
+		/// (for bool values: what "return a &amp;&amp; b;" compiles to).
+		/// </summary>
+		static Expression? Logical(Expression test, Expression whenTrue, Expression whenFalse)
+		{
+			if (!IsBool(whenTrue) || !IsBool(whenFalse))
+				return null;
+			switch (whenFalse, whenTrue)
+			{
+				case (PrimitiveExpression { Value: false }, _):
+					return new BinaryOperatorExpression(test, BinaryOperatorType.ConditionalAnd, whenTrue);
+				case (PrimitiveExpression { Value: true }, _):
+					return new BinaryOperatorExpression(Negate(test), BinaryOperatorType.ConditionalOr, whenTrue);
+				case (_, PrimitiveExpression { Value: true }):
+					return new BinaryOperatorExpression(test, BinaryOperatorType.ConditionalOr, whenFalse);
+				case (_, PrimitiveExpression { Value: false }):
+					return new BinaryOperatorExpression(Negate(test), BinaryOperatorType.ConditionalAnd, whenFalse);
+				default:
+					return null;
+			}
+		}
+
+		static bool IsBool(Expression e) => e.GetResolveResult().Type.IsKnownType(KnownTypeCode.Boolean);
 
 		/// <summary>"if (c) { return a; } return b;" or "if (c) { return a; } else { return b; }"</summary>
 		static bool MatchIfReturn(BlockStatement body, out IfElseStatement ifElse, out Expression whenTrue, out Expression whenFalse)
