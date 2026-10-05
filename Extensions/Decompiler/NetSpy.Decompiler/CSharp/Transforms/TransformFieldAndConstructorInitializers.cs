@@ -93,6 +93,29 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 		}
 
+		/// <summary>
+		/// NetSpy: "C(int value) => Value = value;" has a sequence point exactly as wide as "Value = value" (the assignment
+		/// statement); a primary constructor's member initializer has one over the whole member declaration.
+		/// </summary>
+		static bool AssignsAsStatements(IMethod ctor, IEnumerable<(IMember Member, Expression Value)> assignments, TransformContext context)
+		{
+			if (!context.Settings.SourceLayoutFromPdb || context.DecompileRun.DebugInfoProvider is not { } provider
+				|| ctor.MetadataToken.IsNil || ctor.MetadataToken.Kind != System.Reflection.Metadata.HandleKind.MethodDefinition)
+				return false;
+			try
+			{
+				var widths = provider.GetSequencePoints((System.Reflection.Metadata.MethodDefinitionHandle)ctor.MetadataToken)
+					.Where(sp => !sp.IsHidden && sp.StartLine == sp.EndLine).Select(sp => sp.EndColumn - sp.StartColumn).ToList();
+				return assignments.Any(a => a.Value is IdentifierExpression id
+					&& (widths.Contains(a.Member.Name.Length + " = ".Length + id.Identifier.Length)
+						|| widths.Contains("this.".Length + a.Member.Name.Length + " = ".Length + id.Identifier.Length)));
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return false;
+			}
+		}
+
 		internal static bool IsGeneratedPrimaryConstructorBackingField(IField field)
 		{
 			var name = field.Name;
@@ -444,7 +467,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						// NetSpy: a constructor written with a block body has a sequence point for its closing brace,
 						// a primary constructor never has one ("<x>P" backing fields prove a primary constructor though)
 						if (transformToPrimaryConstructor && BackingFieldToPrimaryConstructorParameterVariableMap == null
-							&& WrittenAsConstructor(ctorMethod, context))
+							&& (WrittenAsConstructor(ctorMethod, context)
+								|| AssignsAsStatements(ctorMethod, initializer.Statements.Select(s => (s.Member, s.Initializer)), context)))
 						{
 							transformToPrimaryConstructor = false;
 						}

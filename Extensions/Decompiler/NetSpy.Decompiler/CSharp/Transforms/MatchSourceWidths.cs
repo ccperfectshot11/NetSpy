@@ -88,6 +88,36 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				foreach (var foreachStatement in rootNode.Descendants.OfType<ForeachStatement>().ToList())
 					ProcessForeachVariable(foreachStatement);
 			}
+			// "T P => expr;": the getter's single sequence point is the expression
+			foreach (var member in rootNode.Descendants.OfType<EntityDeclaration>().ToList())
+			{
+				var expressionBody = member switch {
+					PropertyDeclaration p => p.ExpressionBody,
+					IndexerDeclaration i => i.ExpressionBody,
+					_ => null
+				};
+				if (expressionBody is null || (member.GetSymbol() as IProperty)?.Getter is not { } getter || GetterWidth(getter) is not int width)
+					continue;
+				if (expressionBody.DescendantsAndSelf.Any(n => n is PrimitiveExpression { Value: string text } && text.IndexOfAny(Escaped) >= 0))
+					continue;
+				Process(expressionBody, width);
+			}
+		}
+
+		int? GetterWidth(IMethod getter)
+		{
+			if (context.DecompileRun.DebugInfoProvider is not { } provider || getter.MetadataToken.IsNil
+				|| getter.MetadataToken.Kind != System.Reflection.Metadata.HandleKind.MethodDefinition)
+				return null;
+			try
+			{
+				var points = provider.GetSequencePoints((System.Reflection.Metadata.MethodDefinitionHandle)getter.MetadataToken).Where(sp => !sp.IsHidden).ToList();
+				return points.Count == 1 && points[0].StartLine == points[0].EndLine ? points[0].EndColumn - points[0].StartColumn : null;
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return null;
+			}
 		}
 
 		/// <summary>"foreach (var x in e)" / "foreach (T x in e)": the variable has a sequence point of its own.</summary>
@@ -108,7 +138,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			foreachStatement.VariableType = alternative;
 		}
 
-		void Process(Statement statement, int target)
+		void Process(AstNode statement, int target)
 		{
 			int width = Measure(MeasuredNode(statement));
 			if (width < 0 || width == target)
@@ -186,7 +216,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		}
 
 		/// <summary>The node the sequence point covers: the expression of "=> expr" bodies, else the statement.</summary>
-		static AstNode MeasuredNode(Statement statement)
+		static AstNode MeasuredNode(AstNode statement)
 		{
 			if (statement.Parent is BlockStatement { Statements.Count: 1 } body
 				&& (body.Annotation<BodyStyleAnnotation>()?.IsExpressionBody == true
@@ -218,7 +248,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 
 		#region Sites
 
-		void CollectSites(Statement statement, List<Site> sites)
+		void CollectSites(AstNode statement, List<Site> sites)
 		{
 			if (statement is VariableDeclarationStatement declaration)
 				AddDeclarationSite(declaration, sites);
@@ -272,6 +302,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						break;
 					case ObjectCreateExpression creation:
 						AddOmittedArgumentsSite(creation, creation.Arguments, sites);
+						AddReturnedTargetTypedNewSite(creation, sites);
 						break;
 				}
 			}
@@ -288,7 +319,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// "\"Name\"" → "nameof(Name)" (a member of the current type, a parameter or a local) or "nameof(T.Name)"
 		/// (a member of a type the statement uses).
 		/// </summary>
-		void AddNameofSite(PrimitiveExpression literal, string name, Statement statement, List<Site> sites)
+		void AddNameofSite(PrimitiveExpression literal, string name, AstNode statement, List<Site> sites)
 		{
 			if (name.Length == 0 || !(char.IsLetter(name[0]) || name[0] == '_') || !name.All(c => char.IsLetterOrDigit(c) || c == '_'))
 				return;
@@ -407,6 +438,26 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				var parenthesized = new ParenthesizedExpression { Expression = inner.Detach() };
 				direction.Expression = parenthesized;
 				return () => direction.Expression = ((ParenthesizedExpression)direction.Expression).Expression.Detach();
+			});
+		}
+
+		/// <summary>"return new T(x);" / "=> new T(x)" → "new(x)" when T is the member's return type.</summary>
+		void AddReturnedTargetTypedNewSite(ObjectCreateExpression creation, List<Site> sites)
+		{
+			if (context.Settings.GetMinimumRequiredVersion() < LanguageVersion.CSharp9_0 || creation.Annotation<TargetTypedNewAnnotation>() is not null
+				|| creation.Initializer is not null && !creation.Arguments.Any())
+				return;
+			bool returned = creation.Parent is ReturnStatement
+				|| creation.Parent is PropertyDeclaration or IndexerDeclaration && creation.Slot?.Name == "ExpressionBody";
+			if (!returned || creation.GetResolveResult()?.Type is not { Kind: not TypeKind.Unknown } type)
+				return;
+			var member = creation.Ancestors.OfType<EntityDeclaration>().FirstOrDefault()?.GetSymbol() as IMember;
+			if (member is null || creation.Ancestors.Any(a => a is LambdaExpression or AnonymousMethodExpression or LocalFunctionDeclarationStatement)
+				|| !NormalizeTypeVisitor.IgnoreNullability.EquivalentTypes(member.ReturnType, type))
+				return;
+			Add(sites).Alternatives.Add(() => {
+				creation.AddAnnotation(TargetTypedNewAnnotation.Instance);
+				return () => creation.RemoveAnnotations<TargetTypedNewAnnotation>();
 			});
 		}
 
