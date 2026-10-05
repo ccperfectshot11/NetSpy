@@ -73,7 +73,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					target += usingStatement.IsEnhanced ? -((usingStatement.IsAsync ? "await using " : "using ").Length) : 1;
 					statement = resource;
 				}
-				else if (statement is not (ExpressionStatement or VariableDeclarationStatement or ReturnStatement or ThrowStatement))
+				else if (statement is not (ExpressionStatement or VariableDeclarationStatement or ReturnStatement or ThrowStatement or IfElseStatement { Condition: not null }))
 				{
 					continue;
 				}
@@ -165,6 +165,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				choice[index] = -1;
 			}
 			Search(0, target - width, 0);
+			if (Environment.GetEnvironmentVariable("NETSPY_TMP") == "1")
+				Console.Error.WriteLine($"[width] {width}->{target} sites=[{string.Join(" ", sites.Select(s => string.Join("/", s.Deltas)))}] best={best.Count}x{bestCount}: {statement.ToString().Split('\n')[0].Trim()}");
 			if (best.Count != 1 || bestCount == 0)
 				return;
 			// apply it, and keep it only if the statement now has exactly the source's width
@@ -206,7 +208,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		{
 			var clone = node.Clone();
 			clone.AcceptVisitor(new InsertParenthesesVisitor { InsertParenthesesForReadability = true });
-			var text = clone.ToString(formatting).Trim();
+			var text = clone is IfElseStatement { Condition: { } condition }
+				? "if (" + condition.ToString(formatting).Trim() + ")"
+				: clone.ToString(formatting).Trim();
 			if (node is Expression && node.Parent is ThrowStatement)
 				text = "throw " + text;
 			return text.IndexOf('\n') >= 0 ? -1 : text.Length;
@@ -218,7 +222,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		{
 			if (statement is VariableDeclarationStatement declaration)
 				AddDeclarationSite(declaration, sites);
-			foreach (var node in statement.DescendantsAndSelf)
+			// an if: only its condition is in the sequence point
+			AstNode root = statement is IfElseStatement { Condition: { } condition } ? condition : statement;
+			foreach (var node in root.DescendantsAndSelf)
 			{
 				if (node is PrimitiveExpression { Value: string name })
 					AddNameofSite((PrimitiveExpression)node, name, statement, sites);
@@ -227,12 +233,20 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					case AssignmentExpression assignment:
 						AddCompoundAssignmentSite(assignment, sites);
 						AddMinimalParenthesesSite(assignment, sites);
+						AddDeconstructionSite(assignment, sites);
+						break;
+					case UnaryOperatorExpression { Operator: UnaryOperatorType.Not } not:
+						AddEqualsFalseSite(not, sites);
+						break;
+					case CastExpression cast:
+						AddImplicitCastSite(cast, sites);
 						break;
 					case ConditionalExpression or VariableInitializer:
 						AddMinimalParenthesesSite(node, sites);
 						break;
 					case MemberReferenceExpression member:
 						AddNullForgivingSite(member, sites);
+						AddTupleRestSite(member, sites);
 						break;
 					case OutVarDeclarationExpression outVar:
 						AddOutVarTypeSite(outVar, sites);
@@ -242,10 +256,13 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						break;
 					case DirectionExpression direction:
 						AddDirectionSite(direction, sites);
+						if (direction.FieldDirection == FieldDirection.Ref && direction.Expression is ConditionalExpression)
+							AddParenthesesSite(direction, sites);
 						break;
 					case InvocationExpression invocation:
 						AddTypeArgumentsSite(invocation, sites);
 						AddOmittedArgumentsSite(invocation, invocation.Arguments, sites);
+						AddNullForgivingResultSite(invocation, sites);
 						break;
 					case ObjectCreateExpression creation:
 						AddOmittedArgumentsSite(creation, creation.Arguments, sites);
@@ -298,6 +315,155 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			nameof.CopyAnnotationsFrom(literal);
 			literal.ReplaceWith(nameof);
 			return () => nameof.ReplaceWith(literal);
+		}
+
+		/// <summary>"var (a, b) = e" ↔ "(int a, string b) = e" (and "_" stays a discard).</summary>
+		void AddDeconstructionSite(AssignmentExpression assignment, List<Site> sites)
+		{
+			if (assignment.Left is DeclarationExpression { Designation: ParenthesizedVariableDesignation designations } declaration && declaration.Type.IsVar())
+			{
+				var elements = designations.VariableDesignations.ToList();
+				if (elements.Any(e => e is not SingleVariableDesignation))
+					return;
+				var types = elements.Select(e => ((SingleVariableDesignation)e).Identifier == "_" ? null : VariableType(e)).ToList();
+				if (types.Where((t, i) => t is null && ((SingleVariableDesignation)elements[i]).Identifier != "_").Any())
+					return;
+				Add(sites).Alternatives.Add(() => {
+					var tuple = new TupleExpression();
+					for (int i = 0; i < elements.Count; i++)
+					{
+						var designation = (SingleVariableDesignation)elements[i];
+						if (types[i] is null)
+							tuple.Elements.Add(new IdentifierExpression("_"));
+						else
+							tuple.Elements.Add(new DeclarationExpression { Type = context.TypeSystemAstBuilder.ConvertType(types[i]!), Designation = (VariableDesignation)designation.Clone() });
+					}
+					tuple.CopyAnnotationsFrom(declaration);
+					declaration.ReplaceWith(tuple);
+					return () => tuple.ReplaceWith(declaration);
+				});
+			}
+			else if (assignment.Left is TupleExpression tuple && tuple.Elements.All(e => e is DeclarationExpression { Designation: SingleVariableDesignation } or IdentifierExpression { Identifier: "_" })
+				&& tuple.Elements.Any(e => e is DeclarationExpression))
+			{
+				Add(sites).Alternatives.Add(() => {
+					var designation = new ParenthesizedVariableDesignation();
+					foreach (var element in tuple.Elements)
+					{
+						designation.VariableDesignations.Add(element is DeclarationExpression d
+							? (VariableDesignation)d.Designation.Clone()
+							: new SingleVariableDesignation { Identifier = "_" });
+					}
+					var declaration = new DeclarationExpression { Type = new SimpleType("var"), Designation = designation };
+					declaration.CopyAnnotationsFrom(tuple);
+					tuple.ReplaceWith(declaration);
+					return () => declaration.ReplaceWith(tuple);
+				});
+			}
+		}
+
+		static IType? VariableType(VariableDesignation designation)
+		{
+			var type = designation.Annotation<ILVariableResolveResult>()?.Variable.Type ?? designation.GetResolveResult()?.Type;
+			return type is null || type.Kind is TypeKind.Unknown or TypeKind.ByReference || type.ContainsAnonymousType() ? null : type;
+		}
+
+		/// <summary>"t.Item10" → "t.Rest.Item3" (the same field of a big tuple).</summary>
+		static void AddTupleRestSite(MemberReferenceExpression member, List<Site> sites)
+		{
+			if (!member.MemberName.StartsWith("Item", StringComparison.Ordinal) || !int.TryParse(member.MemberName.Substring(4), out int n) || n < 8
+				|| member.Target.GetResolveResult()?.Type is not TupleType)
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var oldName = member.MemberName;
+				var oldTarget = member.Target;
+				Expression target = oldTarget.Detach();
+				int index = n;
+				while (index > 7)
+				{
+					target = new MemberReferenceExpression(target, "Rest");
+					index -= 7;
+				}
+				member.Target = target;
+				member.MemberName = "Item" + index;
+				return () => {
+					member.MemberName = oldName;
+					member.Target = oldTarget;
+				};
+			});
+		}
+
+		/// <summary>"ref c ? ref a : ref b" → "ref (c ? ref a : ref b)"</summary>
+		static void AddParenthesesSite(DirectionExpression direction, List<Site> sites)
+		{
+			Add(sites).Alternatives.Add(() => {
+				var inner = direction.Expression;
+				var parenthesized = new ParenthesizedExpression { Expression = inner.Detach() };
+				direction.Expression = parenthesized;
+				return () => direction.Expression = ((ParenthesizedExpression)direction.Expression).Expression.Detach();
+			});
+		}
+
+		/// <summary>"!M()" → "M() == false" (bool only: the same IL).</summary>
+		static void AddEqualsFalseSite(UnaryOperatorExpression not, List<Site> sites)
+		{
+			if (not.Expression.GetResolveResult()?.Type.IsKnownType(KnownTypeCode.Boolean) != true)
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var comparison = new BinaryOperatorExpression(not.Expression.Detach(), BinaryOperatorType.Equality, new PrimitiveExpression(false));
+				comparison.CopyAnnotationsFrom(not);
+				not.ReplaceWith(comparison);
+				return () => {
+					not.Expression = comparison.Left!.Detach();
+					comparison.ReplaceWith(not);
+				};
+			});
+		}
+
+		/// <summary>
+		/// "(double)(a + b) + d" → "a + b + d": an implicit numeric conversion the compiler applies anyway, because the
+		/// other operand already has the target type.
+		/// </summary>
+		static void AddImplicitCastSite(CastExpression cast, List<Site> sites)
+		{
+			if (cast.Parent is not BinaryOperatorExpression { Operator: BinaryOperatorType.Add or BinaryOperatorType.Subtract or BinaryOperatorType.Multiply or BinaryOperatorType.Divide } binary)
+				return;
+			var target = cast.GetResolveResult()?.Type;
+			var source = cast.Expression.GetResolveResult()?.Type;
+			var other = binary.Left == cast ? binary.Right : binary.Left;
+			if (target is null || source is null || other?.GetResolveResult()?.Type is not { } otherType || !otherType.Equals(target))
+				return;
+			// int/long → double/float/decimal, int → long: widening conversions that keep the value
+			bool widening = (source.IsKnownType(KnownTypeCode.Int32) || source.IsKnownType(KnownTypeCode.Int64) || source.IsKnownType(KnownTypeCode.Int16))
+				&& (target.IsKnownType(KnownTypeCode.Double) || target.IsKnownType(KnownTypeCode.Decimal) || target.IsKnownType(KnownTypeCode.Int64) && !source.IsKnownType(KnownTypeCode.Int64));
+			if (!widening)
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var inner = cast.Expression.Detach();
+				cast.ReplaceWith(inner);
+				return () => {
+					inner.ReplaceWith(cast);
+					cast.Expression = inner;
+				};
+			});
+		}
+
+		/// <summary>"M(a)" → "M(a)!" for a call whose result is annotated nullable (and isn't used with "!" already).</summary>
+		static void AddNullForgivingResultSite(InvocationExpression invocation, List<Site> sites)
+		{
+			if (invocation.Parent is UnaryOperatorExpression { Operator: UnaryOperatorType.SuppressNullableWarning } or MemberReferenceExpression
+				|| invocation.GetSymbol() is not IMethod { ReturnType: { Nullability: Nullability.Nullable, IsReferenceType: true } })
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var placeholder = new UnaryOperatorExpression();
+				invocation.ReplaceWith(placeholder);
+				placeholder.Operator = UnaryOperatorType.SuppressNullableWarning;
+				placeholder.Expression = invocation;
+				return () => {
+					invocation.Remove();
+					placeholder.ReplaceWith(invocation);
+				};
+			});
 		}
 
 		/// <summary>"M().P" → "M()!.P" (the source's null-forgiving operator; no IL).</summary>
@@ -380,7 +546,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			if (variableType is null || variableType.Kind is TypeKind.Unknown or TypeKind.ByReference or TypeKind.Dynamic || variableType.ContainsAnonymousType())
 				return;
 			var initializerType = initializer.GetResolveResult()?.Type;
-			bool exactType = initializerType is not null && initializerType.Equals(variableType) && SameTupleNames(initializerType, variableType);
+			bool exactType = initializerType is not null && NormalizeTypeVisitor.IgnoreNullability.EquivalentTypes(initializerType, variableType)
+				&& SameTupleNames(initializerType, variableType);
 			bool varAllowed = exactType && initializer is not (NullReferenceExpression or DefaultValueExpression { Type: null } or LambdaExpression
 				or AnonymousMethodExpression or StackAllocExpression or CollectionExpression or ArrayInitializerExpression)
 				&& initializer.GetResolveResult() is not MethodGroupResolveResult;
@@ -393,6 +560,36 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			else if (varAllowed)
 			{
 				site.Alternatives.Add(() => SetDeclarationType(declaration, new SimpleType("var")));
+			}
+			else if (initializer is TupleExpression tuple && variableType is TupleType named
+				&& named.ElementNames.Length == tuple.Elements.Count && named.ElementNames.Any(n => n is not null)
+				&& !tuple.Elements.Any(e => e is NamedArgumentExpression))
+			{
+				// "(int Min, string name) t = (s.Min, "n")" → "var t = (s.Min, name: "n")" (Min is inferred from s.Min)
+				site.Alternatives.Add(() => {
+					var undoType = SetDeclarationType(declaration, new SimpleType("var"));
+					var elements = tuple.Elements.ToList();
+					var undos = new List<Action>();
+					for (int i = 0; i < elements.Count; i++)
+					{
+						string? name = named.ElementNames[i];
+						if (name is null || InferredName(elements[i]) == name)
+							continue;
+						var element = elements[i];
+						var namedElement = new NamedArgumentExpression { Name = name };
+						element.ReplaceWith(namedElement);
+						namedElement.Expression = element;
+						undos.Add(() => {
+							element.Remove();
+							namedElement.ReplaceWith(element);
+						});
+					}
+					return () => {
+						for (int i = undos.Count - 1; i >= 0; i--)
+							undos[i]();
+						undoType();
+					};
+				});
 			}
 			// target-typed "new(...)"
 			if (initializer is ObjectCreateExpression creation && exactType && context.Settings.GetMinimumRequiredVersion() >= LanguageVersion.CSharp9_0
@@ -410,6 +607,13 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			if (site.Alternatives.Count == 0)
 				sites.Remove(site);
 		}
+
+		/// <summary>The tuple element name C# infers from an element expression ("x" from x, "Min" from s.Min).</summary>
+		static string? InferredName(Expression element) => element switch {
+			IdentifierExpression id => id.Identifier,
+			MemberReferenceExpression member => member.MemberName,
+			_ => null
+		};
 
 		static Action SetDeclarationType(VariableDeclarationStatement declaration, AstType type)
 		{

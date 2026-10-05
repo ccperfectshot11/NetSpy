@@ -19,6 +19,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection.Metadata;
 
@@ -61,6 +62,14 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				RemoveCallerArgumentExpression(invocation);
 			foreach (var assignment in rootNode.Descendants.OfType<AssignmentExpression>().ToList())
 				IntroduceDelegateCompoundAssignment(assignment);
+			if (context.Settings.SourceLayoutFromPdb && context.Settings.TupleTypes)
+			{
+				foreach (var block in rootNode.Descendants.OfType<BlockStatement>().ToList())
+				{
+					IntroduceTupleSwaps(block);
+					IntroduceTupleDeclarations(block);
+				}
+			}
 			if (context.Settings.SourceLayoutFromPdb && context.DecompileRun.DebugInfoProvider is { } provider)
 			{
 				foreach (var block in rootNode.Descendants.OfType<BlockStatement>().ToList())
@@ -98,6 +107,93 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			var statement = new ExpressionStatement(new AssignmentExpression(target.Detach(), assignment.Right.Detach()) { Operator = AssignmentOperatorType.NullCoalescing });
 			statement.CopyAnnotationsFrom(ifElse);
 			ifElse.ReplaceWith(statement);
+		}
+
+		/// <summary>
+		/// "T t = b; b = a; a = t;" → "(a, b) = (b, a);" when the three statements are one sequence point (one source
+		/// statement) and t is a compiler temporary used nowhere else.
+		/// </summary>
+		void IntroduceTupleSwaps(BlockStatement block)
+		{
+			var statements = block.Statements.ToList();
+			for (int i = 0; i + 2 < statements.Count; i++)
+			{
+				if (statements[i] is not VariableDeclarationStatement { Variables.Count: 1, Modifiers: Modifiers.None } declaration
+					|| declaration.Variables.Single() is not { Initializer: { } b } temp
+					|| temp.GetILVariable() is not { HasGeneratedName: true } tempVariable
+					|| statements[i + 1] is not ExpressionStatement { Expression: AssignmentExpression { Operator: AssignmentOperatorType.Assign } first }
+					|| statements[i + 2] is not ExpressionStatement { Expression: AssignmentExpression { Operator: AssignmentOperatorType.Assign } second })
+					continue;
+				var a = first.Right;
+				if (!IsSimpleTarget(b) || !IsSimpleTarget(a) || !first.Left.IsMatch(b) || !second.Left.IsMatch(a)
+					|| second.Right is not IdentifierExpression read || read.GetILVariable() != tempVariable)
+					continue;
+				// one source statement: the three have the same sequence point
+				var layouts = new[] { statements[i], statements[i + 1], statements[i + 2] }.Select(s => s.Annotation<SourceLayoutAnnotation>()).ToList();
+				if (layouts.Any(l => l is null) || layouts.Any(l => l!.StartLine != layouts[0]!.StartLine || l.StartColumn != layouts[0]!.StartColumn))
+					continue;
+				var entity = block.Ancestors.OfType<EntityDeclaration>().FirstOrDefault();
+				if (entity is null || entity.Descendants.OfType<IdentifierExpression>().Count(id => id.GetILVariable() == tempVariable) != 1)
+					continue;
+				context.Step("Introduce tuple swap", declaration);
+				var left = new TupleExpression();
+				left.Elements.Add(a.Clone());
+				left.Elements.Add(b.Clone());
+				var right = new TupleExpression();
+				right.Elements.Add(b.Detach());
+				right.Elements.Add(a.Detach());
+				var swap = new ExpressionStatement(new AssignmentExpression(left, right));
+				swap.CopyAnnotationsFrom(declaration);
+				declaration.ReplaceWith(swap);
+				statements[i + 1].Remove();
+				statements[i + 2].Remove();
+				statements = block.Statements.ToList();
+			}
+		}
+
+		/// <summary>
+		/// "string a = "x"; int b = 2;" with one sequence point for both → "var (a, b) = ("x", 2);" (two declarations
+		/// of a source statement each have their own).
+		/// </summary>
+		void IntroduceTupleDeclarations(BlockStatement block)
+		{
+			var statements = block.Statements.ToList();
+			for (int i = 0; i < statements.Count; i++)
+			{
+				if (Single(statements[i]) is not { } firstVariable || statements[i].Annotation<SourceLayoutAnnotation>() is not { } layout)
+					continue;
+				var group = new List<VariableDeclarationStatement> { (VariableDeclarationStatement)statements[i] };
+				for (int j = i + 1; j < statements.Count && Single(statements[j]) is not null
+					&& statements[j].Annotation<SourceLayoutAnnotation>() is { } other
+					&& other.StartLine == layout.StartLine && other.StartColumn == layout.StartColumn; j++)
+					group.Add((VariableDeclarationStatement)statements[j]);
+				if (group.Count < 2)
+					continue;
+				var variables = group.Select(g => g.Variables.Single()).ToList();
+				// a tuple literal evaluates every value before assigning: no value may read the variables
+				var ilVariables = variables.Select(v => v.GetILVariable()).ToList();
+				if (ilVariables.Any(v => v is null) || variables.Any(v => v.Initializer!.DescendantsAndSelf.OfType<IdentifierExpression>().Any(id => ilVariables.Contains(id.GetILVariable()))))
+					continue;
+				context.Step("Introduce tuple declaration", group[0]);
+				var designation = new ParenthesizedVariableDesignation();
+				var values = new TupleExpression();
+				foreach (var variable in variables)
+				{
+					var single = new SingleVariableDesignation { Identifier = variable.Name };
+					single.CopyAnnotationsFrom(variable);
+					designation.VariableDesignations.Add(single);
+					values.Elements.Add(variable.Initializer!.Detach());
+				}
+				var statement = new ExpressionStatement(new AssignmentExpression(new DeclarationExpression { Type = new SimpleType("var"), Designation = designation }, values));
+				statement.CopyAnnotationsFrom(group[0]);
+				group[0].ReplaceWith(statement);
+				foreach (var g in group.Skip(1))
+					g.Remove();
+				statements = block.Statements.ToList();
+			}
+
+			static VariableInitializer? Single(Statement statement) => statement is VariableDeclarationStatement { Variables.Count: 1, Modifiers: Modifiers.None } d
+				&& d.Variables.Single() is { Initializer: not null } v && v.Initializer is not (LambdaExpression or AnonymousMethodExpression or StackAllocExpression) ? v : null;
 		}
 
 		/// <summary>"d = (T)Delegate.Combine(d, v)" → "d += v" (and Remove → "-="): what the compiler makes of them.</summary>
