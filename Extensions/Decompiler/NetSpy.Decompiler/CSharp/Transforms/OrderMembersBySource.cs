@@ -65,7 +65,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			var lines = members.Select(m => SourceLine(m)).ToList();
 			var documents = lines.Where(l => l is not null).Select(l => l!.Value.Document).Distinct().ToList();
-			if (documents.Count != 1 || lines.Count(l => l is not null) < 2)
+			if (documents.Count != 1 || lines.Count(l => l is not null) < 1)
 				return; // partial types spread over files keep the decompiler's order
 			// stable sort of the known members by line, the others anchored to their neighbours
 			var known = members.Select((m, i) => (Member: m, Index: i, Line: lines[i]?.Line ?? -1)).Where(x => x.Line >= 0)

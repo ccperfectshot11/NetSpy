@@ -88,6 +88,12 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				foreach (var foreachStatement in rootNode.Descendants.OfType<ForeachStatement>().ToList())
 					ProcessForeachVariable(foreachStatement);
 			}
+			// "T P { get; set; } = new();": the initializer's sequence point (in the constructors) covers the whole declaration
+			if (context.Settings.GetMinimumRequiredVersion() >= LanguageVersion.CSharp9_0)
+			{
+				foreach (var member in rootNode.Descendants.OfType<EntityDeclaration>().Where(m => m is PropertyDeclaration or FieldDeclaration).ToList())
+					ProcessMemberInitializer(member);
+			}
 			// "T P => expr;": the getter's single sequence point is the expression
 			foreach (var member in rootNode.Descendants.OfType<EntityDeclaration>().ToList())
 			{
@@ -102,6 +108,72 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					continue;
 				Process(expressionBody, width);
 			}
+		}
+
+		void ProcessMemberInitializer(EntityDeclaration member)
+		{
+			var initializer = member switch {
+				PropertyDeclaration p => p.Initializer,
+				FieldDeclaration { Variables.Count: 1 } f => f.Variables.Single().Initializer,
+				_ => null
+			};
+			if (initializer is not ObjectCreateExpression creation || creation.Annotation<TargetTypedNewAnnotation>() is not null
+				|| member.GetSymbol() is not IMember { DeclaringTypeDefinition: { } type } symbol
+				|| creation.GetResolveResult()?.Type is not { } created || !NormalizeTypeVisitor.IgnoreNullability.EquivalentTypes(created, symbol.ReturnType)
+				|| context.DecompileRun.DebugInfoProvider is not { } provider)
+				return;
+			// a property's initializer has a sequence point over its value, on the property's line (the getter's);
+			// a field's covers the whole declaration
+			int? propertyLine = symbol is IProperty { Getter: { } getter } ? FirstLine(getter, provider) : null;
+			var widths = new HashSet<int>();
+			foreach (var constructor in type.Methods.Where(m => m.IsConstructor && !m.MetadataToken.IsNil))
+			{
+				try
+				{
+					foreach (var sp in provider.GetSequencePoints((System.Reflection.Metadata.MethodDefinitionHandle)constructor.MetadataToken))
+					{
+						if (!sp.IsHidden && sp.StartLine == sp.EndLine && (propertyLine is null || sp.StartLine == propertyLine))
+							widths.Add(sp.EndColumn - sp.StartColumn);
+					}
+				}
+				catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+				{
+				}
+			}
+			if (member is PropertyDeclaration && propertyLine is null)
+				return;
+			AstNode measured = member is PropertyDeclaration ? creation : member;
+			int current = measured is EntityDeclaration ? DeclarationWidth(member) : Measure(creation);
+			if (current < 0 || widths.Contains(current))
+				return;
+			creation.AddAnnotation(TargetTypedNewAnnotation.Instance);
+			if (!widths.Contains(measured is EntityDeclaration ? DeclarationWidth(member) : Measure(creation)))
+				creation.RemoveAnnotations<TargetTypedNewAnnotation>();
+			else
+				context.Step("Match initializer width", member);
+		}
+
+		static int? FirstLine(IMethod method, DebugInfo.IDebugInfoProvider provider)
+		{
+			if (method.MetadataToken.IsNil || method.MetadataToken.Kind != System.Reflection.Metadata.HandleKind.MethodDefinition)
+				return null;
+			try
+			{
+				var points = provider.GetSequencePoints((System.Reflection.Metadata.MethodDefinitionHandle)method.MetadataToken).Where(sp => !sp.IsHidden).ToList();
+				return points.Count == 0 ? null : points.Min(sp => sp.StartLine);
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return null;
+			}
+		}
+
+		int DeclarationWidth(EntityDeclaration member)
+		{
+			var clone = (EntityDeclaration)member.Clone();
+			clone.Attributes.Clear();
+			var text = clone.ToString(formatting).Trim();
+			return text.IndexOf('\n') >= 0 ? -1 : text.Length;
 		}
 
 		int? GetterWidth(IMethod getter)
