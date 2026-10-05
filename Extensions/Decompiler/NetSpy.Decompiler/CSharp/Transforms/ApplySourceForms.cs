@@ -96,6 +96,15 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				UseNameofInAttribute(attribute);
 			foreach (var usingStatement in rootNode.Descendants.OfType<UsingStatement>().ToList())
 				IntroduceLockOnLockObject(usingStatement);
+			if (context.Settings.SourceLayoutFromPdb)
+			{
+				foreach (var whileStatement in rootNode.Descendants.OfType<WhileStatement>().ToList())
+					IntroduceForLoop(whileStatement);
+				foreach (var yieldBreak in rootNode.Descendants.OfType<YieldBreakStatement>().ToList())
+					RemoveCompilerYieldBreak(yieldBreak);
+				foreach (var entity in rootNode.Descendants.OfType<EntityDeclaration>().Where(e => e is not TypeDeclaration).ToList())
+					RestoreSourceNames(entity);
+			}
 			if (context.Settings.SourceLayoutFromPdb && context.DecompileRun.DebugInfoProvider is { } debugInfo)
 			{
 				foreach (var constructor in rootNode.Descendants.OfType<ConstructorDeclaration>().ToList())
@@ -316,6 +325,166 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				if (value.DescendantsAndSelf.OfType<IdentifierExpression>().Any(id => id.GetILVariable() is { } v && temps.ContainsKey(v)))
 					return null;
 				return value;
+			}
+		}
+
+		/// <summary>
+		/// "int i = 0; int j = 10; while (i &lt; j) { ...; i += 3; j--; }" whose declarations and last statements are on
+		/// one source line (each part of a for header has a sequence point of its own, all on the header's line) is
+		/// "for (int i = 0, j = 10; i &lt; j; i += 3, j--) { ... }".
+		/// </summary>
+		void IntroduceForLoop(WhileStatement whileStatement)
+		{
+			if (whileStatement.Parent is not BlockStatement block || whileStatement.EmbeddedStatement is not BlockStatement body
+				|| body.Descendants.Any(n => n is ContinueStatement continueStatement && !continueStatement.Ancestors.TakeWhile(a => a != body)
+					.Any(a => a is WhileStatement or ForStatement or ForeachStatement or DoWhileStatement)))
+				return;
+			var statements = block.Statements.ToList();
+			int index = statements.IndexOf(whileStatement);
+			// the declarations right before the loop, on one line
+			var declarations = new List<VariableDeclarationStatement>();
+			int? line = null;
+			for (int i = index - 1; i >= 0; i--)
+			{
+				if (statements[i] is not VariableDeclarationStatement { Modifiers: Modifiers.None } declaration
+					|| declaration.Variables.Any(v => v.Initializer is null)
+					|| declaration.Annotation<SourceLayoutAnnotation>() is not { } layout || (line is not null && layout.StartLine != line))
+					break;
+				line = layout.StartLine;
+				declarations.Insert(0, declaration);
+			}
+			if (line is null || declarations.Select(d => d.Type.ToString()).Distinct().Count() != 1)
+				return;
+			// the iterators: the body's last statements on that same line
+			var bodyStatements = body.Statements.ToList();
+			var iterators = new List<Statement>();
+			for (int i = bodyStatements.Count - 1; i >= 0; i--)
+			{
+				if (bodyStatements[i] is not ExpressionStatement iterator || iterator.Annotation<SourceLayoutAnnotation>()?.StartLine != line)
+					break;
+				iterators.Insert(0, iterator);
+			}
+			if (iterators.Count == 0 || iterators.Count == bodyStatements.Count)
+				return;
+			// the variables must not be used after the loop (a for loop scopes them)
+			var variables = declarations.SelectMany(d => d.Variables).Select(v => v.GetILVariable()).ToList();
+			if (variables.Any(v => v is null)
+				|| statements.Skip(index + 1).Any(s => s.DescendantsAndSelf.OfType<IdentifierExpression>().Any(id => variables.Contains(id.GetILVariable()))))
+				return;
+			context.Step("Introduce for loop", whileStatement);
+			var forStatement = new ForStatement { Condition = whileStatement.Condition.Detach(), EmbeddedStatement = body.Detach() };
+			var merged = new VariableDeclarationStatement { Type = declarations[0].Type.Clone() };
+			foreach (var declaration in declarations)
+			{
+				foreach (var variable in declaration.Variables.ToList())
+					merged.Variables.Add(variable.Detach());
+				declaration.Remove();
+			}
+			forStatement.Initializers.Add(merged);
+			foreach (var iterator in iterators)
+				forStatement.Iterators.Add(iterator.Detach());
+			forStatement.CopyAnnotationsFrom(whileStatement);
+			whileStatement.ReplaceWith(forStatement);
+		}
+
+		/// <summary>
+		/// "if (C) { yield break; } REST" at the end of an iterator, where the yield break has no sequence point (the
+		/// source didn't write it: it is the iterator's end), is "if (!C) { REST }".
+		/// </summary>
+		void RemoveCompilerYieldBreak(YieldBreakStatement yieldBreak)
+		{
+			if (yieldBreak.Annotation<SourceLayoutAnnotation>() is not null
+				|| yieldBreak.Parent is not BlockStatement { Statements.Count: 1 } thenBlock || thenBlock.Parent is not IfElseStatement { FalseStatement: null, Condition: { } condition } ifElse
+				|| ifElse.Parent is not BlockStatement body || body.Parent is not (MethodDeclaration or Accessor or LocalFunctionDeclarationStatement))
+				return;
+			var rest = body.Statements.SkipWhile(s => s != ifElse).Skip(1).ToList();
+			if (rest.Count == 0 || rest.Any(s => s.DescendantsAndSelf.OfType<YieldBreakStatement>().Any()))
+				return;
+			context.Step("Remove compiler yield break", ifElse);
+			var inner = new BlockStatement();
+			foreach (var statement in rest)
+				inner.Statements.Add(statement.Detach());
+			ifElse.Condition = Invert(condition.Detach());
+			ifElse.TrueStatement = inner;
+		}
+
+		/// <summary>
+		/// "item2" → "item": a local renamed to avoid a clash gets its source name back (from the iterator/async state
+		/// field "&lt;item&gt;5__3") when no declaration of that name shares its scope and the name means nothing else there.
+		/// </summary>
+		void RestoreSourceNames(EntityDeclaration entity)
+		{
+			var declarations = new List<(AstNode Node, ILVariable Variable, AstNode Scope, Action<string> Rename)>();
+			foreach (var node in entity.Descendants)
+			{
+				switch (node)
+				{
+					case ForeachStatement { VariableDesignation: SingleVariableDesignation designation } foreachStatement
+						when designation.Annotation<ILVariableResolveResult>()?.Variable is { } v:
+						declarations.Add((designation, v, foreachStatement, n => designation.Identifier = n));
+						break;
+					case VariableInitializer { Parent: VariableDeclarationStatement { Parent: BlockStatement scope } } variable
+						when variable.GetILVariable() is { } v:
+						declarations.Add((variable, v, scope, n => variable.Name = n));
+						break;
+				}
+			}
+			foreach (var (node, variable, scope, rename) in declarations)
+			{
+				string current = variable.Name ?? "";
+				var source = SourceName(variable);
+				// a foreach variable "item2" next to a foreach variable "item" of the same type: the clash-avoiding suffix
+				if (source is null && variable.Kind == VariableKind.ForeachLocal && current.Length > 1 && char.IsDigit(current[current.Length - 1]))
+				{
+					string stripped = current.TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
+					if (stripped.Length > 0 && declarations.Any(d => d.Node != node && d.Variable.Kind == VariableKind.ForeachLocal
+						&& GetName(d.Node) == stripped && d.Variable.Type.Equals(variable.Type)))
+						source = stripped;
+				}
+				if (source is null || source == current || !current.StartsWith(source, StringComparison.Ordinal))
+					continue;
+				// no other declaration of the name in an overlapping scope, no other meaning of the name inside the scope
+				bool clash = declarations.Any(d => d.Node != node && GetName(d.Node) == source
+					&& (d.Scope == scope || d.Scope.Ancestors.Contains(scope) || scope.Ancestors.Contains(d.Scope)))
+					|| scope.Descendants.OfType<IdentifierExpression>().Any(id => id.Identifier == source)
+					|| entity.Descendants.OfType<ParameterDeclaration>().Any(p => p.Name == source);
+				if (clash)
+					continue;
+				context.Step("Restore source name", node);
+				rename(source);
+				foreach (var id in entity.Descendants.OfType<IdentifierExpression>().Where(id => id.GetILVariable() == variable))
+					id.Identifier = source;
+				variable.Name = source;
+			}
+
+			static string? GetName(AstNode node) => node switch {
+				SingleVariableDesignation d => d.Identifier,
+				VariableInitializer v => v.Name,
+				_ => null
+			};
+		}
+
+		/// <summary>The name the source gave a hoisted local ("&lt;item&gt;5__3" → item).</summary>
+		static string? SourceName(ILVariable variable)
+		{
+			var field = variable.StateMachineField?.Name;
+			if (field is null || !field.StartsWith("<", StringComparison.Ordinal))
+				return null;
+			int end = field.IndexOf('>');
+			return end > 1 ? field.Substring(1, end - 1) : null;
+		}
+
+		static Expression Invert(Expression condition)
+		{
+			switch (condition)
+			{
+				case UnaryOperatorExpression { Operator: UnaryOperatorType.Not } not:
+					return not.Expression.Detach();
+				case BinaryOperatorExpression { Operator: BinaryOperatorType.Equality or BinaryOperatorType.InEquality } comparison:
+					comparison.Operator = comparison.Operator == BinaryOperatorType.Equality ? BinaryOperatorType.InEquality : BinaryOperatorType.Equality;
+					return comparison;
+				default:
+					return new UnaryOperatorExpression(UnaryOperatorType.Not, condition);
 			}
 		}
 

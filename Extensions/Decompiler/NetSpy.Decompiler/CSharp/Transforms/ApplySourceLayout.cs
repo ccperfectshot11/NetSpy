@@ -89,8 +89,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						{
 							// lines between the two statements; a statement ending in a block also has its '}' line
 							int between = layout.StartLine - previous.EndLine - 1;
-							if (EndsWithBlock(previousStatement!))
-								between--;
+							between -= TrailingBraces(previousStatement!);
 							layout.BlankLineBefore = between > 0;
 						}
 					}
@@ -221,6 +220,36 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					return true;
 			}
 			return false;
+		}
+
+		/// <summary>
+		/// NetSpy: the "}" lines after a statement's last sequence point: one per block it ends with, nested ones included
+		/// ("if (c) { foreach (...) { x; } }" ends with two).
+		/// </summary>
+		static int TrailingBraces(Statement statement)
+		{
+			if (!EndsWithBlock(statement))
+				return 0;
+			// the block the statement ends with, and its last statement
+			Statement? last = statement switch {
+				IfElseStatement ifElse => ifElse.FalseStatement ?? ifElse.TrueStatement,
+				ForStatement f => f.EmbeddedStatement,
+				ForeachStatement f => f.EmbeddedStatement,
+				WhileStatement w => w.EmbeddedStatement,
+				UsingStatement u => u.EmbeddedStatement,
+				LockStatement l => l.EmbeddedStatement,
+				FixedStatement f => f.EmbeddedStatement,
+				CheckedStatement c => c.Body,
+				UncheckedStatement u => u.Body,
+				UnsafeStatement u => u.Body,
+				BlockStatement b => b,
+				_ => null
+			};
+			if (last is IfElseStatement elseIf)
+				return TrailingBraces(elseIf);
+			if (last is BlockStatement block && block.Statements.LastOrDefault() is { } inner && inner is not (TryCatchStatement or SwitchStatement))
+				return 1 + TrailingBraces(inner);
+			return 1;
 		}
 
 		static bool EndsWithBlock(Statement statement)
