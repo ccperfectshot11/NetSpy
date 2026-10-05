@@ -374,6 +374,8 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 		public static CSharpFormattingOptions CreateAllman()
 		{
 			var baseOptions = CreateKRStyle();
+			// NetSpy: "delegate (int x)" like the .NET (Visual Studio) style
+			baseOptions.SpaceBeforeAnonymousMethodParentheses = true;
 			baseOptions.AnonymousMethodBraceStyle = BraceStyle.NextLine;
 			baseOptions.PropertyBraceStyle = BraceStyle.NextLine;
 			baseOptions.PropertyGetBraceStyle = BraceStyle.NextLine;

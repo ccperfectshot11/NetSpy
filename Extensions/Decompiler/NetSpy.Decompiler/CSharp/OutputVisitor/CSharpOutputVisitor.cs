@@ -632,7 +632,24 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 				Space(policy.SpaceBeforeAnonymousMethodParentheses);
 				WriteCommaSeparatedListInParenthesis(anonymousMethodExpression.Parameters, policy.SpaceWithinAnonymousMethodParentheses);
 			}
-			WriteBlock(anonymousMethodExpression.Body, policy.AnonymousMethodBraceStyle);
+			if (anonymousMethodExpression.Annotation<Transforms.SingleLineBlockAnnotation>() is not null && anonymousMethodExpression.Body.Statements.Count == 1)
+			{
+				// NetSpy: "delegate (int x) { return x; }" on one line
+				Space();
+				StartNode(anonymousMethodExpression.Body);
+				WriteToken("{");
+				Space();
+				singleLineDepth++;
+				anonymousMethodExpression.Body.Statements.Single().AcceptVisitor(this);
+				singleLineDepth--;
+				Space();
+				WriteToken("}");
+				EndNode(anonymousMethodExpression.Body);
+			}
+			else
+			{
+				WriteBlock(anonymousMethodExpression.Body, policy.AnonymousMethodBraceStyle);
+			}
 			EndNode(anonymousMethodExpression);
 		}
 
