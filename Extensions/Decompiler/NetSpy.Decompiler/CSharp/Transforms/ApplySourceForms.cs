@@ -94,6 +94,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				HoistUnsafe(type);
 			foreach (var attribute in rootNode.Descendants.OfType<Syntax.Attribute>().ToList())
 				UseNameofInAttribute(attribute);
+			foreach (var usingStatement in rootNode.Descendants.OfType<UsingStatement>().ToList())
+				IntroduceLockOnLockObject(usingStatement);
 			if (context.Settings.SourceLayoutFromPdb && context.DecompileRun.DebugInfoProvider is { } debugInfo)
 			{
 				foreach (var constructor in rootNode.Descendants.OfType<ConstructorDeclaration>().ToList())
@@ -315,6 +317,24 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					return null;
 				return value;
 			}
+		}
+
+		/// <summary>"using (gate.EnterScope()) { ... }" with gate a System.Threading.Lock is what C# 13 makes of "lock (gate) { ... }".</summary>
+		void IntroduceLockOnLockObject(UsingStatement usingStatement)
+		{
+			if (usingStatement.IsAsync || usingStatement.IsEnhanced
+				|| usingStatement.ResourceAcquisition is not InvocationExpression { Arguments.Count: 0, Target: MemberReferenceExpression { MemberName: "EnterScope" } member } call
+				|| call.GetSymbol() is not IMethod { DeclaringType.FullName: "System.Threading.Lock" })
+				return;
+			// the source may have written the using itself: then it has a sequence point for "using (gate.EnterScope())";
+			// a lock statement has none for its header
+			string resource = usingStatement.ResourceAcquisition.ToString(context.Settings.CSharpFormattingOptions).Trim();
+			if (usingStatement.Annotation<SourceLayoutAnnotation>() is not { } layout || layout.Width == "using (".Length + resource.Length + 1)
+				return;
+			context.Step("Introduce lock on Lock", usingStatement);
+			var lockStatement = new LockStatement { Expression = member.Target.Detach(), EmbeddedStatement = usingStatement.EmbeddedStatement.Detach() };
+			lockStatement.CopyAnnotationsFrom(usingStatement);
+			usingStatement.ReplaceWith(lockStatement);
 		}
 
 		static readonly HashSet<string> NameAttributes = new HashSet<string> {

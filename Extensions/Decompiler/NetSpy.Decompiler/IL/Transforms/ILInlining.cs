@@ -701,6 +701,11 @@ namespace NetSpy.Decompiler.IL.Transforms
 					}
 					break;
 			}
+			if (inlinedExpression.ResultType == StackType.Ref && v.Kind == VariableKind.Local && !v.HasGeneratedName)
+			{
+				// NetSpy: "ref int slot = ref a[0];" with its name from the PDB: the source declared it
+				return false;
+			}
 			if (inlinedExpression.ResultType == StackType.Ref)
 			{
 				// VB likes to use ref locals for compound assignment

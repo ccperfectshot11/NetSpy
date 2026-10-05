@@ -131,7 +131,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			if (statement is ForeachStatement foreachStatement)
 			{
 				// the iteration variable's own sequence point ("var x") ends right before the one of "in"
-				var line = points.Where(sp => sp.StartLine == first.StartLine && sp.EndLine == first.StartLine).ToList();
+				var line = sequencePoints.Where(sp => sp.StartLine == first.StartLine && sp.EndLine == first.StartLine).ToList();
 				var inKeyword = line.Where(sp => sp.EndColumn - sp.StartColumn == 2).ToList();
 				var variable = line.Where(sp => inKeyword.Any(k => k.StartColumn == sp.EndColumn + 1)).ToList();
 				if (variable.Count == 1)
