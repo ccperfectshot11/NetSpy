@@ -43,6 +43,12 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 		VerbatimStringLiteral,
 		CharLiteral,
 		Utf8Literal,
+		/// <summary>NetSpy: a string as a raw string literal ("""...""")</summary>
+		RawStringLiteral,
+		/// <summary>NetSpy: a char as a unicode escape ('\uXXXX')</summary>
+		UnicodeCharLiteral,
+		/// <summary>NetSpy: a double in scientific notation (1e-3)</summary>
+		ScientificNumber,
 	}
 
 	/// <summary>

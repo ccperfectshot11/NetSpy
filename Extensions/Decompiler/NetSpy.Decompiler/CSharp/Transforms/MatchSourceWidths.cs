@@ -52,7 +52,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 
 		const int MaxSites = 12;
 
-		static readonly char[] Escaped = { '"', '\\', '\n', '\r', '\t' };
+		static readonly char[] Escaped = { '\n', '\r' };
 		static readonly char[] EscapedInInterpolation = { '"', '\\', '\n', '\r', '\t', '{', '}' };
 
 		public void Run(AstNode rootNode, TransformContext context)
@@ -335,7 +335,17 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				if (node is PrimitiveExpression { Value: string name })
 					AddNameofSite((PrimitiveExpression)node, name, statement, sites);
 				if (node is PrimitiveExpression { Value: not null } constant)
+				{
 					AddConstantSite(constant, statement, sites);
+					AddLiteralFormatSite(constant, sites);
+				}
+				if (node is MemberReferenceExpression { Target: TypeReferenceExpression, MemberName: "MinValue" or "MaxValue" } limit)
+					AddLimitLiteralSite(limit, sites);
+				if (node is UnaryOperatorExpression { Operator: UnaryOperatorType.PostIncrement or UnaryOperatorType.PostDecrement
+					or UnaryOperatorType.Increment or UnaryOperatorType.Decrement } step)
+					AddStepAssignmentSite(step, sites);
+				if (node is AssignmentExpression { Operator: AssignmentOperatorType.Add or AssignmentOperatorType.Subtract, Right: PrimitiveExpression { Value: 1 } } byOne)
+					AddIncrementSite(byOne, sites);
 				if (node is InvocationExpression { Target: IdentifierExpression { Identifier: "nameof" }, Arguments.Count: 1 } nameofCall
 					&& nameofCall.Arguments.Single() is IdentifierExpression { Identifier: var nameofArgument })
 				{
@@ -479,6 +489,118 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 			if (site.Alternatives.Count > 0)
 				sites.Add(site);
+		}
+
+		/// <summary>
+		/// The spellings of a literal: 0xF0u (hex), 'A', 1e-3, @"\d" and """x "y" z""", and an int written as a char
+		/// ("(int)'\''" for 39).
+		/// </summary>
+		static void AddLiteralFormatSite(PrimitiveExpression literal, List<Site> sites)
+		{
+			if (literal.Format != LiteralFormat.None && literal.Format != LiteralFormat.DecimalNumber)
+				return;
+			var site = new Site();
+			void Format(LiteralFormat format) => site.Alternatives.Add(() => {
+				var old = literal.Format;
+				literal.Format = format;
+				return () => literal.Format = old;
+			});
+			switch (literal.Value)
+			{
+				case int i when i >= 0:
+				case uint:
+				case long l when l >= 0:
+				case ulong:
+					// hex is plausible for masks and big constants, not for "1" or "42"
+					if (IsBitwiseContext(literal) || Convert.ToDecimal(literal.Value, CultureInfo.InvariantCulture) >= 256)
+						Format(LiteralFormat.HexadecimalNumber);
+					break;
+				case char:
+					Format(LiteralFormat.UnicodeCharLiteral);
+					break;
+				case double d when d != Math.Floor(d) || Math.Abs(d) >= 1e6:
+					Format(LiteralFormat.ScientificNumber);
+					break;
+				case string s when s.IndexOf('\n') < 0 && s.IndexOf('\r') < 0:
+					if (s.IndexOf('\\') >= 0 || s.IndexOf('"') >= 0)
+						Format(LiteralFormat.VerbatimStringLiteral);
+					if (s.IndexOf('"') >= 0 && s.Length > 0 && s[0] != '"' && s[s.Length - 1] != '"')
+						Format(LiteralFormat.RawStringLiteral);
+					break;
+			}
+			// an int the source wrote as a char constant: "(int)'\''"
+			if (literal.Value is int code && code is >= 9 and <= 126 && (code >= 32 || code is 9 or 10 or 13) && literal.Parent is not CastExpression)
+			{
+				site.Alternatives.Add(() => {
+					var cast = new CastExpression(new PrimitiveType("int"), new PrimitiveExpression((char)code));
+					cast.CopyAnnotationsFrom(literal);
+					literal.ReplaceWith(cast);
+					return () => cast.ReplaceWith(literal);
+				});
+			}
+			if (site.Alternatives.Count > 0)
+				sites.Add(site);
+		}
+
+		static bool IsBitwiseContext(Expression literal) => literal.Parent switch {
+			BinaryOperatorExpression { Operator: BinaryOperatorType.BitwiseAnd or BinaryOperatorType.BitwiseOr or BinaryOperatorType.ExclusiveOr
+				or BinaryOperatorType.ShiftLeft or BinaryOperatorType.ShiftRight } => true,
+			AssignmentExpression { Operator: AssignmentOperatorType.BitwiseAnd or AssignmentOperatorType.BitwiseOr or AssignmentOperatorType.ExclusiveOr } => true,
+			CastExpression cast => cast.GetResolveResult()?.Type.Kind == TypeKind.Enum,
+			_ => false
+		};
+
+		/// <summary>"long.MinValue" → "-9223372036854775807L - 1", "ulong.MaxValue" → "18446744073709551615UL"...</summary>
+		static void AddLimitLiteralSite(MemberReferenceExpression limit, List<Site> sites)
+		{
+			if (limit.GetSymbol() is not IField { IsConst: true } field || field.GetConstantValue() is not { } value)
+				return;
+			Expression replacement;
+			if (value is long l && l == long.MinValue)
+				replacement = new BinaryOperatorExpression(new PrimitiveExpression(-9223372036854775807L), BinaryOperatorType.Subtract, new PrimitiveExpression(1));
+			else if (value is int i && i == int.MinValue)
+				replacement = new BinaryOperatorExpression(new PrimitiveExpression(-2147483647), BinaryOperatorType.Subtract, new PrimitiveExpression(1));
+			else if (value is long or ulong or int or uint)
+				replacement = new PrimitiveExpression(value);
+			else
+				return;
+			Add(sites).Alternatives.Add(() => {
+				replacement.CopyAnnotationsFrom(limit);
+				limit.ReplaceWith(replacement);
+				return () => replacement.ReplaceWith(limit);
+			});
+		}
+
+		/// <summary>"x--;" → "x -= 1;" (statement level: the same IL).</summary>
+		static void AddStepAssignmentSite(UnaryOperatorExpression step, List<Site> sites)
+		{
+			if (step.Parent is not ExpressionStatement || step.Expression.GetResolveResult()?.Type is not { } type
+				|| !(type.IsKnownType(KnownTypeCode.Int32) || type.IsKnownType(KnownTypeCode.Int64)))
+				return;
+			bool increment = step.Operator is UnaryOperatorType.PostIncrement or UnaryOperatorType.Increment;
+			Add(sites).Alternatives.Add(() => {
+				var assignment = new AssignmentExpression(step.Expression.Clone(), new PrimitiveExpression(1)) {
+					Operator = increment ? AssignmentOperatorType.Add : AssignmentOperatorType.Subtract
+				};
+				assignment.CopyAnnotationsFrom(step);
+				step.ReplaceWith(assignment);
+				return () => assignment.ReplaceWith(step);
+			});
+		}
+
+		/// <summary>"x -= 1;" → "x--;"</summary>
+		static void AddIncrementSite(AssignmentExpression byOne, List<Site> sites)
+		{
+			if (byOne.Parent is not ExpressionStatement || byOne.Left.GetResolveResult()?.Type is not { } type
+				|| !(type.IsKnownType(KnownTypeCode.Int32) || type.IsKnownType(KnownTypeCode.Int64)))
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var step = new UnaryOperatorExpression(byOne.Operator == AssignmentOperatorType.Add ? UnaryOperatorType.PostIncrement : UnaryOperatorType.PostDecrement,
+					byOne.Left.Clone());
+				step.CopyAnnotationsFrom(byOne);
+				byOne.ReplaceWith(step);
+				return () => step.ReplaceWith(byOne);
+			});
 		}
 
 		static Action ReplaceWithNameof(PrimitiveExpression literal, Expression argument)
@@ -985,6 +1107,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		static void AddNullForgivingSite(MemberReferenceExpression member, List<Site> sites)
 		{
 			if (member.Target is not (InvocationExpression or MemberReferenceExpression) || member.Target.GetResolveResult()?.Type is not { IsReferenceType: true })
+				return;
+			// only after a value the API annotates as nullable ("GetField(...)!")
+			if (member.Target.GetSymbol() is not IMember { ReturnType.Nullability: Nullability.Nullable })
 				return;
 			Add(sites).Alternatives.Add(() => {
 				var target = member.Target;

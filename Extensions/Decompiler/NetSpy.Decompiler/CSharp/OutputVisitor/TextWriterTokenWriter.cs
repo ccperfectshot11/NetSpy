@@ -263,6 +263,47 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 				return;
 			}
 
+			// NetSpy: verbatim (@"...") and single-line raw ("""...""") string literals
+			if (value is string text && format is LiteralFormat.VerbatimStringLiteral or LiteralFormat.RawStringLiteral)
+			{
+				string literal;
+				if (format == LiteralFormat.VerbatimStringLiteral)
+				{
+					literal = "@\"" + text.Replace("\"", "\"\"") + "\"";
+				}
+				else
+				{
+					int run = 0, longest = 0;
+					foreach (char c in text)
+					{
+						run = c == '"' ? run + 1 : 0;
+						longest = Math.Max(longest, run);
+					}
+					string quotes = new string('"', Math.Max(3, longest + 1));
+					literal = quotes + text + quotes;
+				}
+				textWriter.Write(literal);
+				column += literal.Length;
+				Length += literal.Length;
+				return;
+			}
+			if (value is char unicode && format == LiteralFormat.UnicodeCharLiteral)
+			{
+				string literal = "'\\u" + ((int)unicode).ToString("X4", NumberFormatInfo.InvariantInfo) + "'";
+				textWriter.Write(literal);
+				column += literal.Length;
+				Length += literal.Length;
+				return;
+			}
+			if (value is double scientific && format == LiteralFormat.ScientificNumber && scientific != 0 && !double.IsInfinity(scientific) && !double.IsNaN(scientific))
+			{
+				string literal = scientific.ToString("0.################e0", NumberFormatInfo.InvariantInfo);
+				textWriter.Write(literal);
+				column += literal.Length;
+				Length += literal.Length;
+				return;
+			}
+
 			if (value is string)
 			{
 				string tmp = ConvertString(value.ToString()!);
