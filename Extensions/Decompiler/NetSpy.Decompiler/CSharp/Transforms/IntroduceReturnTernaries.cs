@@ -196,7 +196,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// <summary>"null" and "default" take the type of the other branch.</summary>
 		static bool IsTypeless(Expression e) => e is NullReferenceExpression || e is DefaultValueExpression { Type: null };
 
-		static Expression Negate(Expression condition)
+		internal static Expression Negate(Expression condition)
 		{
 			switch (condition)
 			{
@@ -229,7 +229,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		}
 
 		/// <summary>The lowest IL offset of the instructions an expression was built from (-1 if unknown).</summary>
-		static int StartOffset(Expression expression)
+		internal static int StartOffset(Expression expression)
 		{
 			int min = int.MaxValue;
 			foreach (var node in expression.DescendantsAndSelf)

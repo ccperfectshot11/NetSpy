@@ -71,13 +71,16 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 
 		static void AnnotateStatements(BlockStatement body, List<DebugInfo.SequencePoint> sequencePoints)
 		{
-			foreach (var block in body.DescendantsAndSelf.OfType<BlockStatement>())
+			// NetSpy: the statements of blocks and of switch sections
+			var containers = body.DescendantsAndSelf.OfType<BlockStatement>().Select(b => ((AstNode)b, (IEnumerable<Statement>)b.Statements))
+				.Concat(body.Descendants.OfType<Syntax.SwitchSection>().Select(s => ((AstNode)s, (IEnumerable<Statement>)s.Statements)));
+			foreach (var (block, blockStatements) in containers)
 			{
 				if (IsInOtherFunction(block, body))
 					continue;
 				SourceLayoutAnnotation? previous = null;
 				Statement? previousStatement = null;
-				foreach (var statement in block.Statements)
+				foreach (var statement in blockStatements)
 				{
 					var layout = GetLayout(statement, body, sequencePoints);
 					if (traceEnabled)

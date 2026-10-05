@@ -102,6 +102,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					IntroduceForLoop(whileStatement);
 				foreach (var yieldBreak in rootNode.Descendants.OfType<YieldBreakStatement>().ToList())
 					RemoveCompilerYieldBreak(yieldBreak);
+				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
+					IntroduceNestedReturnTernary(ifElse);
 				foreach (var entity in rootNode.Descendants.OfType<EntityDeclaration>().Where(e => e is not TypeDeclaration).ToList())
 					RestoreSourceNames(entity);
 			}
@@ -385,6 +387,36 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				forStatement.Iterators.Add(iterator.Detach());
 			forStatement.CopyAnnotationsFrom(whileStatement);
 			whileStatement.ReplaceWith(forStatement);
+		}
+
+		/// <summary>
+		/// "if (c) { return a; } return b;" anywhere (a switch section, a loop body) whose two statements are one sequence
+		/// point is "return c ? a : b;" (the value emitted later in the IL is the "true" one, as for whole bodies).
+		/// </summary>
+		void IntroduceNestedReturnTernary(IfElseStatement ifElse)
+		{
+			if (ifElse.FalseStatement is not null || ifElse.Parent is not BlockStatement && ifElse.Parent is not Syntax.SwitchSection
+				|| ifElse.NextSibling is not ReturnStatement { Expression: { } whenFalse } next
+				|| (ifElse.TrueStatement is BlockStatement { Statements.Count: 1 } block ? block.Statements.Single() : ifElse.TrueStatement)
+					is not ReturnStatement { Expression: { } whenTrue }
+				|| ifElse.Annotation<SourceLayoutAnnotation>() is not { } first || next.Annotation<SourceLayoutAnnotation>() is not { } second
+				|| first.StartLine != second.StartLine || first.StartColumn != second.StartColumn)
+				return;
+			var trueType = whenTrue.GetResolveResult()?.Type;
+			var falseType = whenFalse.GetResolveResult()?.Type;
+			if (whenTrue is not NullReferenceExpression && whenFalse is not NullReferenceExpression
+				&& (trueType is null || falseType is null || !trueType.Equals(falseType)))
+				return;
+			context.Step("Introduce nested return ternary", ifElse);
+			var condition = ifElse.Condition!.Detach();
+			int trueOffset = IntroduceReturnTernaries.StartOffset(whenTrue), falseOffset = IntroduceReturnTernaries.StartOffset(whenFalse);
+			Expression ternary = trueOffset >= 0 && falseOffset > trueOffset
+				? new ConditionalExpression(IntroduceReturnTernaries.Negate(condition), whenFalse.Detach(), whenTrue.Detach())
+				: new ConditionalExpression(condition, whenTrue.Detach(), whenFalse.Detach());
+			var statement = new ReturnStatement(ternary);
+			statement.CopyAnnotationsFrom(next);
+			next.Remove();
+			ifElse.ReplaceWith(statement);
 		}
 
 		/// <summary>
