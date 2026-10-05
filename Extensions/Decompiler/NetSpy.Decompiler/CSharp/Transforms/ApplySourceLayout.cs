@@ -136,6 +136,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				var variable = line.Where(sp => inKeyword.Any(k => k.StartColumn == sp.EndColumn + 1)).ToList();
 				if (variable.Count == 1)
 					layout.ForeachVariableWidth = variable[0].EndColumn - variable[0].StartColumn;
+				// the collection's own sequence point starts right after "in "
+				if (inKeyword.Count == 1 && line.FirstOrDefault(sp => sp.StartColumn == inKeyword[0].EndColumn + 1) is { } collection)
+					layout.ForeachExpressionWidth = collection.EndColumn - collection.StartColumn;
 			}
 			return layout;
 		}
@@ -364,6 +367,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		public int Width = -1;
 		/// <summary>NetSpy: for a foreach, the width of the iteration variable's sequence point ("var x"), else -1.</summary>
 		public int ForeachVariableWidth = -1;
+		/// <summary>NetSpy: for a foreach, the width of the collection expression's sequence point, else -1.</summary>
+		public int ForeachExpressionWidth = -1;
 	}
 
 	/// <summary>NetSpy: how the original wrote a member's body ("=> expr" or a block), from the PDB.</summary>

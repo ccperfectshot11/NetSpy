@@ -88,6 +88,11 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				foreach (var foreachStatement in rootNode.Descendants.OfType<ForeachStatement>().ToList())
 					ProcessForeachVariable(foreachStatement);
 			}
+			foreach (var foreachStatement in rootNode.Descendants.OfType<ForeachStatement>().ToList())
+			{
+				if (foreachStatement.Annotation<SourceLayoutAnnotation>() is { ForeachExpressionWidth: > 0 } foreachLayout)
+					Process(foreachStatement.InExpression, foreachLayout.ForeachExpressionWidth);
+			}
 			// "T P { get; set; } = new();": the initializer's sequence point (in the constructors) covers the whole declaration
 			if (context.Settings.GetMinimumRequiredVersion() >= LanguageVersion.CSharp9_0)
 			{
