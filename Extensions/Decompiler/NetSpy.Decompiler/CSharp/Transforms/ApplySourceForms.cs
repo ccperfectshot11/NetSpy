@@ -104,6 +104,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					RemoveCompilerYieldBreak(yieldBreak);
 				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
 					IntroduceNestedReturnTernary(ifElse);
+				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
+					IntroduceEarlyExit(ifElse);
 				foreach (var entity in rootNode.Descendants.OfType<EntityDeclaration>().Where(e => e is not TypeDeclaration).ToList())
 					RestoreSourceNames(entity);
 			}
@@ -387,6 +389,33 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				forStatement.Iterators.Add(iterator.Detach());
 			forStatement.CopyAnnotationsFrom(whileStatement);
 			whileStatement.ReplaceWith(forStatement);
+		}
+
+		/// <summary>
+		/// "if (C) { REST }" as the last statement of a loop body (or of a void method) whose REST starts at the if's own
+		/// column was "if (!C) { continue; } REST" (or "return;"): nested statements would be indented one level more.
+		/// </summary>
+		void IntroduceEarlyExit(IfElseStatement ifElse)
+		{
+			if (ifElse.FalseStatement is not null || ifElse.TrueStatement is not BlockStatement { Statements.Count: > 0 } rest
+				|| ifElse.Parent is not BlockStatement body || body.Statements.LastOrDefault() != ifElse
+				|| ifElse.Annotation<SourceLayoutAnnotation>() is not { } layout
+				|| rest.Statements.First().Annotation<SourceLayoutAnnotation>() is not { } inner || inner.StartColumn != layout.StartColumn)
+				return;
+			Statement exit;
+			if (body.Parent is WhileStatement or ForStatement or ForeachStatement or DoWhileStatement)
+				exit = new ContinueStatement();
+			else if (body.Parent is MethodDeclaration { ReturnType: Syntax.PrimitiveType { Keyword: "void" } } or Accessor { Kind: AccessorKind.Setter or AccessorKind.Init or AccessorKind.Adder or AccessorKind.Remover }
+				or ConstructorDeclaration)
+				exit = new ReturnStatement();
+			else
+				return;
+			context.Step("Introduce early exit", ifElse);
+			var statements = rest.Statements.ToList();
+			ifElse.Condition = Invert(ifElse.Condition!.Detach());
+			ifElse.TrueStatement = new BlockStatement { exit };
+			foreach (var statement in statements)
+				body.Statements.Add(statement.Detach());
 		}
 
 		/// <summary>

@@ -93,6 +93,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 							// lines between the two statements; a statement ending in a block also has its '}' line
 							int between = layout.StartLine - previous.EndLine - 1;
 							between -= TrailingBraces(previousStatement!);
+							// "break;" / "continue;" at the end of its block often have no sequence point, but a line
+							between -= TrailingUnlocated(previousStatement!, body, sequencePoints);
 							layout.BlankLineBefore = between > 0;
 						}
 					}
@@ -229,6 +231,49 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// NetSpy: the "}" lines after a statement's last sequence point: one per block it ends with, nested ones included
 		/// ("if (c) { foreach (...) { x; } }" ends with two).
 		/// </summary>
+		/// <summary>The statements at the end of the innermost block a statement ends with that have no sequence point.</summary>
+		static int TrailingUnlocated(Statement statement, BlockStatement body, List<DebugInfo.SequencePoint> sequencePoints)
+		{
+			Statement? last = statement;
+			BlockStatement? innermost = null;
+			while (last is not null)
+			{
+				Statement? embedded = last switch {
+					IfElseStatement ifElse => ifElse.FalseStatement ?? ifElse.TrueStatement,
+					ForStatement f => f.EmbeddedStatement,
+					ForeachStatement f => f.EmbeddedStatement,
+					WhileStatement w => w.EmbeddedStatement,
+					UsingStatement u => u.EmbeddedStatement,
+					LockStatement l => l.EmbeddedStatement,
+					_ => null
+				};
+				if (embedded is BlockStatement block)
+				{
+					innermost = block;
+					last = block.Statements.LastOrDefault();
+				}
+				else if (embedded is IfElseStatement)
+				{
+					last = embedded;
+				}
+				else
+				{
+					break;
+				}
+			}
+			if (innermost is null)
+				return 0;
+			int count = 0;
+			foreach (var s in innermost.Statements.Reverse())
+			{
+				if (s is not (BreakStatement or ContinueStatement) || GetLayout(s, body, sequencePoints) is not null)
+					break;
+				count++;
+			}
+			// a block with no sequence point at all also has its "{" line after the header's point
+			return count > 0 && count == innermost.Statements.Count ? count + 1 : count;
+		}
+
 		static int TrailingBraces(Statement statement)
 		{
 			if (!EndsWithBlock(statement))
