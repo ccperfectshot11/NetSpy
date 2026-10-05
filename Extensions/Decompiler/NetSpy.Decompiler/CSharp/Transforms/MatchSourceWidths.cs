@@ -219,8 +219,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		static AstNode MeasuredNode(AstNode statement)
 		{
 			if (statement.Parent is BlockStatement { Statements.Count: 1 } body
-				&& (body.Annotation<BodyStyleAnnotation>()?.IsExpressionBody == true
-					|| AnnotateAccessorStyles.StyleOf(body) is AccessorStyle.ExpressionBody or AccessorStyle.PropertyExpressionBody))
+				&& (AnnotateAccessorStyles.StyleOf(body) is { } style
+					? style is AccessorStyle.ExpressionBody or AccessorStyle.PropertyExpressionBody
+					: body.Annotation<BodyStyleAnnotation>()?.IsExpressionBody == true))
 			{
 				switch (statement)
 				{
@@ -258,6 +259,19 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			{
 				if (node is PrimitiveExpression { Value: string name })
 					AddNameofSite((PrimitiveExpression)node, name, statement, sites);
+				if (node is PrimitiveExpression { Value: not null } constant)
+					AddConstantSite(constant, statement, sites);
+				if (node is InvocationExpression { Target: IdentifierExpression { Identifier: "nameof" }, Arguments.Count: 1 } nameofCall
+					&& nameofCall.Arguments.Single() is IdentifierExpression { Identifier: var nameofArgument })
+				{
+					// "nameof(value)" → "\"value\"" (the decompiler writes nameof for parameter names)
+					Add(sites).Alternatives.Add(() => {
+						var literal = new PrimitiveExpression(nameofArgument);
+						literal.CopyAnnotationsFrom(nameofCall);
+						nameofCall.ReplaceWith(literal);
+						return () => literal.ReplaceWith(nameofCall);
+					});
+				}
 				switch (node)
 				{
 					case AssignmentExpression assignment:
@@ -341,6 +355,34 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			{
 				if (type!.GetMembers(m => m.Name == name).Any())
 					site.Alternatives.Add(() => ReplaceWithNameof(literal, new MemberReferenceExpression(new TypeReferenceExpression(syntax.Clone()), name)));
+			}
+			if (site.Alternatives.Count > 0)
+				sites.Add(site);
+		}
+
+		/// <summary>"3.14159" → "Pi": a constant of the current (or an enclosing) type with that value and type, which the compiler inlined.</summary>
+		void AddConstantSite(PrimitiveExpression literal, AstNode statement, List<Site> sites)
+		{
+			var literalType = literal.GetResolveResult()?.Type;
+			if (literalType is null || literalType.Kind == TypeKind.Unknown)
+				return;
+			var site = new Site();
+			foreach (var type in statement.Ancestors.OfType<TypeDeclaration>().Select(t => t.GetSymbol()).OfType<ITypeDefinition>())
+			{
+				foreach (var field in type.Fields.Where(f => f.IsConst && f.Type.Equals(literalType) && Equals(f.GetConstantValue(), literal.Value)))
+				{
+					// the name must mean the constant where it is used (no local or parameter of that name)
+					var member = statement.Ancestors.OfType<EntityDeclaration>().FirstOrDefault(e => e is not TypeDeclaration);
+					if (member?.Descendants.Any(n => n is ParameterDeclaration { Name: var p } && p == field.Name
+						|| n is VariableInitializer { Name: var v } && v == field.Name) == true)
+						continue;
+					site.Alternatives.Add(() => {
+						var reference = new IdentifierExpression(field.Name);
+						reference.CopyAnnotationsFrom(literal);
+						literal.ReplaceWith(reference);
+						return () => reference.ReplaceWith(literal);
+					});
+				}
 			}
 			if (site.Alternatives.Count > 0)
 				sites.Add(site);

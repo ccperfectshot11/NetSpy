@@ -2523,7 +2523,13 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 				WriteIdentifier(constructorDeclaration.NameToken);
 			Space(policy.SpaceBeforeConstructorDeclarationParentheses);
 			WriteCommaSeparatedListInParenthesis(constructorDeclaration.Parameters, policy.SpaceWithinMethodDeclarationParentheses);
-			if (constructorDeclaration.Initializer is not null)
+			if (constructorDeclaration.Initializer is not null && constructorDeclaration.Annotation<Transforms.InitializerOnSameLineAnnotation>() is not null)
+			{
+				// NetSpy: "C() : base(x)" on one line, as the source had it
+				Space();
+				constructorDeclaration.Initializer.AcceptVisitor(this);
+			}
+			else if (constructorDeclaration.Initializer is not null)
 			{
 				NewLine();
 				writer.Indent();

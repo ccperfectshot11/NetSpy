@@ -42,6 +42,16 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 	/// <item>local functions are declared in their source order (their own sequence points' lines).</item>
 	/// </list>
 	/// </summary>
+	/// <summary>NetSpy: the constructor's ": base(...)" / ": this(...)" stays on the declaration's line.</summary>
+	public sealed class InitializerOnSameLineAnnotation
+	{
+		public static readonly InitializerOnSameLineAnnotation Instance = new InitializerOnSameLineAnnotation();
+
+		InitializerOnSameLineAnnotation()
+		{
+		}
+	}
+
 	public sealed class ApplySourceForms : IAstTransform
 	{
 		TransformContext context = null!;
@@ -82,6 +92,13 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 			foreach (var type in rootNode.Descendants.OfType<TypeDeclaration>().ToList())
 				HoistUnsafe(type);
+			foreach (var attribute in rootNode.Descendants.OfType<Syntax.Attribute>().ToList())
+				UseNameofInAttribute(attribute);
+			if (context.Settings.SourceLayoutFromPdb && context.DecompileRun.DebugInfoProvider is { } debugInfo)
+			{
+				foreach (var constructor in rootNode.Descendants.OfType<ConstructorDeclaration>().ToList())
+					DecideInitializerLine(constructor, debugInfo);
+			}
 			if (context.Settings.SourceLayoutFromPdb && context.DecompileRun.DebugInfoProvider is { } provider)
 			{
 				foreach (var block in rootNode.Descendants.OfType<BlockStatement>().ToList())
@@ -298,6 +315,65 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					return null;
 				return value;
 			}
+		}
+
+		static readonly HashSet<string> NameAttributes = new HashSet<string> {
+			"System.Diagnostics.CodeAnalysis.MemberNotNullAttribute",
+			"System.Diagnostics.CodeAnalysis.MemberNotNullWhenAttribute",
+			"System.Diagnostics.CodeAnalysis.NotNullIfNotNullAttribute",
+			"System.Runtime.CompilerServices.CallerArgumentExpressionAttribute",
+		};
+
+		/// <summary>
+		/// "[MemberNotNull("cached")]" → "[MemberNotNull(nameof(cached))]": the attributes whose strings name a member or a
+		/// parameter are written with nameof (the metadata only has the string).
+		/// </summary>
+		void UseNameofInAttribute(Syntax.Attribute attribute)
+		{
+			if (attribute.GetResolveResult()?.Type.FullName is not { } name || !NameAttributes.Contains(name))
+				return;
+			var owner = attribute.Ancestors.OfType<EntityDeclaration>().FirstOrDefault();
+			var type = attribute.Ancestors.OfType<TypeDeclaration>().FirstOrDefault()?.GetSymbol() as ITypeDefinition;
+			var parameters = owner?.Descendants.OfType<ParameterDeclaration>().Select(p => p.Name ?? "").ToList() ?? new List<string>();
+			foreach (var argument in attribute.Arguments.ToList())
+			{
+				if (argument is not PrimitiveExpression { Value: string text } literal)
+					continue;
+				bool known = parameters.Contains(text) || type?.GetMembers(m => m.Name == text).Any() == true;
+				if (!known)
+					continue;
+				context.Step("Use nameof in attribute", literal);
+				var nameof = new InvocationExpression(new IdentifierExpression("nameof"), new IdentifierExpression(text));
+				nameof.CopyAnnotationsFrom(literal);
+				literal.ReplaceWith(nameof);
+			}
+		}
+
+		/// <summary>
+		/// "C() : base(x)" on one line or ": base(x)" on the next: the base call's sequence point ("base(x)") starts right
+		/// after an indented ": " on its own line, anywhere else on the declaration's line.
+		/// </summary>
+		void DecideInitializerLine(ConstructorDeclaration constructor, DebugInfo.IDebugInfoProvider provider)
+		{
+			if (constructor.Initializer is not { } initializer || constructor.GetSymbol() is not IMethod method
+				|| method.MetadataToken.IsNil || method.MetadataToken.Kind != HandleKind.MethodDefinition
+				|| constructor.Ancestors.OfType<TypeDeclaration>().FirstOrDefault()?.GetSymbol() is not ITypeDefinition type)
+				return;
+			List<DebugInfo.SequencePoint> points;
+			try
+			{
+				points = provider.GetSequencePoints((MethodDefinitionHandle)method.MetadataToken).Where(sp => !sp.IsHidden).ToList();
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return;
+			}
+			int width = initializer.ToString(context.Settings.CSharpFormattingOptions).Trim().TrimStart(':').Trim().Length;
+			var call = points.OrderBy(sp => sp.Offset).FirstOrDefault(sp => sp.StartLine == sp.EndLine && sp.EndColumn - sp.StartColumn == width);
+			if (call is null || ApplySourceLayout.DocumentBlockColumn(context, provider, type, call.DocumentUrl) is not int column)
+				return;
+			if (call.StartColumn != column + ": ".Length)
+				constructor.AddAnnotation(InitializerOnSameLineAnnotation.Instance);
 		}
 
 		/// <summary>
