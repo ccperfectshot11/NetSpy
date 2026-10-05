@@ -26,6 +26,7 @@ using System.Reflection.Metadata;
 using NetSpy.Decompiler.CSharp.OutputVisitor;
 using NetSpy.Decompiler.CSharp.Syntax;
 using NetSpy.Decompiler.CSharp.Syntax.PatternMatching;
+using NetSpy.Decompiler.IL;
 using NetSpy.Decompiler.Semantics;
 using NetSpy.Decompiler.TypeSystem;
 
@@ -70,6 +71,17 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					IntroduceTupleDeclarations(block);
 				}
 			}
+			if (context.Settings.SourceLayoutFromPdb)
+			{
+				foreach (var block in rootNode.Descendants.OfType<BlockStatement>().ToList())
+				{
+					IntroduceStringConcatenation(block);
+					if (context.Settings.GetMinimumRequiredVersion() >= LanguageVersion.CSharp8_0)
+						IntroduceNullCoalescingAssignmentReturn(block);
+				}
+			}
+			foreach (var type in rootNode.Descendants.OfType<TypeDeclaration>().ToList())
+				HoistUnsafe(type);
 			if (context.Settings.SourceLayoutFromPdb && context.DecompileRun.DebugInfoProvider is { } provider)
 			{
 				foreach (var block in rootNode.Descendants.OfType<BlockStatement>().ToList())
@@ -172,7 +184,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				var variables = group.Select(g => g.Variables.Single()).ToList();
 				// a tuple literal evaluates every value before assigning: no value may read the variables
 				var ilVariables = variables.Select(v => v.GetILVariable()).ToList();
-				if (ilVariables.Any(v => v is null) || variables.Any(v => v.Initializer!.DescendantsAndSelf.OfType<IdentifierExpression>().Any(id => ilVariables.Contains(id.GetILVariable()))))
+				if (ilVariables.Any(v => v is null || v.HasGeneratedName) || variables.Any(v => v.Initializer!.DescendantsAndSelf.OfType<IdentifierExpression>().Any(id => ilVariables.Contains(id.GetILVariable()))))
 					continue;
 				context.Step("Introduce tuple declaration", group[0]);
 				var designation = new ParenthesizedVariableDesignation();
@@ -194,6 +206,220 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 
 			static VariableInitializer? Single(Statement statement) => statement is VariableDeclarationStatement { Variables.Count: 1, Modifiers: Modifiers.None } d
 				&& d.Variables.Single() is { Initializer: not null } v && v.Initializer is not (LambdaExpression or AnonymousMethodExpression or StackAllocExpression) ? v : null;
+		}
+
+		/// <summary>
+		/// A concatenation of more than four pieces compiles to "string.Concat(string[])", and a piece of a generic type
+		/// to "T t2 = t; array[k] = t2?.ToString();":
+		/// <code>
+		/// string[] a = new string[] { x, "/", null };
+		/// T t2 = t;
+		/// a[2] = t2?.ToString();
+		/// return string.Concat(a);
+		/// </code>
+		/// is "return x + "/" + t;" (one source statement: one sequence point for all of them).
+		/// </summary>
+		void IntroduceStringConcatenation(BlockStatement block)
+		{
+			var statements = block.Statements.ToList();
+			for (int i = 0; i < statements.Count; i++)
+			{
+				if (statements[i] is not VariableDeclarationStatement { Variables.Count: 1 } declaration
+					|| declaration.Variables.Single() is not { Initializer: ArrayCreateExpression { Initializer: { } initializer } } arrayVariable
+					|| arrayVariable.GetILVariable() is not { HasGeneratedName: true, Type: ArrayType { ElementType: var elementType } } array
+					|| !elementType.IsKnownType(KnownTypeCode.String)
+					|| statements[i].Annotation<SourceLayoutAnnotation>() is not { } layout)
+					continue;
+				var pieces = initializer.Elements.ToList<Expression?>();
+				var used = new List<Statement> { statements[i] };
+				var temps = new Dictionary<ILVariable, Expression>();
+				int j = i + 1;
+				for (; j < statements.Count; j++)
+				{
+					var statement = statements[j];
+					if (statement.Annotation<SourceLayoutAnnotation>() is { } l && (l.StartLine != layout.StartLine || l.StartColumn != layout.StartColumn))
+						break;
+					if (statement is VariableDeclarationStatement { Variables.Count: 1 } copy && copy.Variables.Single() is { Initializer: { } value } temp
+						&& temp.GetILVariable() is { HasGeneratedName: true } tempVariable && value is IdentifierExpression or MemberReferenceExpression)
+					{
+						temps[tempVariable] = value;
+						used.Add(statement);
+						continue;
+					}
+					if (statement is ExpressionStatement { Expression: AssignmentExpression { Operator: AssignmentOperatorType.Assign,
+						Left: IndexerExpression { Target: IdentifierExpression target, Arguments.Count: 1 } indexer } store }
+						&& target.GetILVariable() == array && indexer.Arguments.Single() is PrimitiveExpression { Value: int k }
+						&& k >= 0 && k < pieces.Count && pieces[k] is NullReferenceExpression)
+					{
+						pieces[k] = Piece(store.Right, temps);
+						used.Add(statement);
+						continue;
+					}
+					break;
+				}
+				if (j >= statements.Count || pieces.Any(p => p is null or NullReferenceExpression))
+					continue;
+				// the one use of the array: "string.Concat(array)" in the next statement
+				var concat = statements[j].DescendantsAndSelf.OfType<InvocationExpression>().FirstOrDefault(inv =>
+					inv.GetSymbol() is IMethod { Name: "Concat", DeclaringType.FullName: "System.String" }
+					&& inv.Arguments.Count == 1 && inv.Arguments.Single() is IdentifierExpression id && id.GetILVariable() == array);
+				// the array is read only by the stores and by "string.Concat"
+				var entity = block.Ancestors.OfType<EntityDeclaration>().FirstOrDefault();
+				int stores = used.Count - 1 - temps.Count;
+				if (concat is null || entity is null || entity.Descendants.OfType<IdentifierExpression>().Count(id => id.GetILVariable() == array) != stores + 1)
+					continue;
+				// the chain must start with a string so that "+" is string concatenation
+				if (!pieces[0]!.GetResolveResult().Type.IsKnownType(KnownTypeCode.String) && !pieces[1]!.GetResolveResult().Type.IsKnownType(KnownTypeCode.String))
+					continue;
+				context.Step("Introduce string concatenation", statements[j]);
+				Expression chain = pieces[0]!.Detach();
+				foreach (var piece in pieces.Skip(1))
+					chain = new BinaryOperatorExpression(chain, BinaryOperatorType.Add, piece!.Parent is null ? piece : piece.Detach());
+				concat.ReplaceWith(chain);
+				statements[j].CopyAnnotationsFrom(statements[i]);
+				foreach (var statement in used)
+					statement.Remove();
+				DecideBodyStyle(block);
+				statements = block.Statements.ToList();
+				i = -1;
+			}
+
+			// "t2?.ToString()" with t2 a copy of t → t
+			static Expression? Piece(Expression value, Dictionary<ILVariable, Expression> temps)
+			{
+				string text = value.ToString().Replace(" ", "");
+				foreach (var temp in temps)
+				{
+					if (text == temp.Key.Name + "?.ToString()")
+						return temp.Value.Clone();
+				}
+				// any other use of a temporary: it would disappear with its declaration
+				if (value.DescendantsAndSelf.OfType<IdentifierExpression>().Any(id => id.GetILVariable() is { } v && temps.ContainsKey(v)))
+					return null;
+				return value;
+			}
+		}
+
+		/// <summary>
+		/// A body that became a single statement here: "=> x" if its sequence point is as wide as x, a block if it is as
+		/// wide as "return x;".
+		/// </summary>
+		void DecideBodyStyle(BlockStatement body)
+		{
+			if (body.Parent is not (MethodDeclaration or Accessor or OperatorDeclaration) || body.Statements.Count != 1
+				|| body.Statements.Single() is not { } statement || statement.Annotation<SourceLayoutAnnotation>() is not { Width: > 0 } layout
+				|| ExpressionBodiedMembers.GetExpression(body) is not { } expression)
+				return;
+			// "T P => x;": the getter of a get-only property becomes the property's expression body
+			if (body.Parent is Accessor { Kind: AccessorKind.Getter } getter && AnnotateAccessorStyles.StyleOf(body) == AccessorStyle.PropertyExpressionBody
+				&& statement is ReturnStatement { Expression: { } value } && getter.Attributes.Count == 0 && (getter.Modifiers & ~Modifiers.Readonly) == 0)
+			{
+				switch (getter.Parent)
+				{
+					case PropertyDeclaration { Setter: null } property:
+						property.Modifiers |= getter.Modifiers;
+						property.ExpressionBody = value.Detach();
+						property.CopyAnnotationsFrom(getter);
+						getter.Remove();
+						return;
+					case IndexerDeclaration { Setter: null } indexer:
+						indexer.Modifiers |= getter.Modifiers;
+						indexer.ExpressionBody = value.Detach();
+						indexer.CopyAnnotationsFrom(getter);
+						getter.Remove();
+						return;
+				}
+			}
+			body.RemoveAnnotations<BodyStyleAnnotation>();
+			if (Width(expression) == layout.Width)
+				body.AddAnnotation(BodyStyleAnnotation.ExpressionBody);
+			else if (Width(statement) == layout.Width)
+				body.AddAnnotation(BodyStyleAnnotation.Block);
+
+			int Width(AstNode node)
+			{
+				var clone = node.Clone();
+				clone.AcceptVisitor(new InsertParenthesesVisitor { InsertParenthesesForReadability = true });
+				var text = clone.ToString(context.Settings.CSharpFormattingOptions).Trim();
+				return text.IndexOf('\n') >= 0 ? -1 : text.Length;
+			}
+		}
+
+		/// <summary>
+		/// "T t = x; if (t == null) { T a = e; T b = a; x = a; t = b; } return t;" (or the shorter forms) is
+		/// "return x ??= e;"
+		/// </summary>
+		void IntroduceNullCoalescingAssignmentReturn(BlockStatement block)
+		{
+			if (block.Statements.Count != 3 || block.Statements.ElementAt(0) is not VariableDeclarationStatement { Variables.Count: 1 } declaration
+				|| declaration.Variables.Single() is not { Initializer: { } target } result || result.GetILVariable() is not { } resultVariable
+				|| !IsSimpleTarget(target)
+				|| block.Statements.ElementAt(1) is not IfElseStatement { FalseStatement: null, Condition: BinaryOperatorExpression { Operator: BinaryOperatorType.Equality, Left: IdentifierExpression tested, Right: NullReferenceExpression } } ifElse
+				|| tested.GetILVariable() != resultVariable
+				|| block.Statements.ElementAt(2) is not ReturnStatement { Expression: IdentifierExpression returned } || returned.GetILVariable() != resultVariable)
+				return;
+			var inner = (ifElse.TrueStatement as BlockStatement)?.Statements.ToList() ?? new List<Statement> { ifElse.TrueStatement };
+			// the value: the first statement's; then "x = <value or a copy>" and "t = <value or a copy>"
+			Expression? value = null;
+			var copies = new HashSet<ILVariable>();
+			bool storedTarget = false, storedResult = false;
+			foreach (var statement in inner)
+			{
+				switch (statement)
+				{
+					case VariableDeclarationStatement { Variables.Count: 1 } d when d.Variables.Single() is { Initializer: { } init } v && v.GetILVariable() is { HasGeneratedName: true } local:
+						if (value is null)
+							value = init;
+						else if (init is IdentifierExpression copy && copies.Contains(copy.GetILVariable()!))
+						{ }
+						else
+							return;
+						copies.Add(local);
+						break;
+					case ExpressionStatement { Expression: AssignmentExpression { Operator: AssignmentOperatorType.Assign } assignment }:
+						bool isCopy = assignment.Right is IdentifierExpression r && r.GetILVariable() is { } rv && copies.Contains(rv);
+						if (assignment.Left is IdentifierExpression l && l.GetILVariable() == resultVariable)
+						{
+							if (value is null) { value = assignment.Right; copies.Add(resultVariable); }
+							else if (!isCopy) return;
+							storedResult = true;
+						}
+						else if (assignment.Left.IsMatch(target) && (isCopy || assignment.Right is IdentifierExpression r2 && r2.GetILVariable() == resultVariable))
+						{
+							storedTarget = true;
+						}
+						else
+						{
+							return;
+						}
+						break;
+					default:
+						return;
+				}
+			}
+			if (value is null || !storedTarget || !storedResult)
+				return;
+			context.Step("Introduce return ??=", block);
+			var replacement = new ReturnStatement(new AssignmentExpression(target.Detach(), value.Detach()) { Operator = AssignmentOperatorType.NullCoalescing });
+			replacement.CopyAnnotationsFrom(declaration);
+			block.Statements.Clear();
+			block.Statements.Add(replacement);
+			DecideBodyStyle(block);
+		}
+
+		/// <summary>
+		/// "unsafe" on two or more members (or on a fixed buffer) is written once on the type, as is usual: both
+		/// compile alike.
+		/// </summary>
+		void HoistUnsafe(TypeDeclaration type)
+		{
+			var members = type.Members.Where(m => (m.Modifiers & Modifiers.Unsafe) != 0).ToList();
+			if ((type.Modifiers & Modifiers.Unsafe) != 0 || members.Count < 2 && !members.Any(m => m is FixedFieldDeclaration))
+				return;
+			context.Step("Unsafe type", type);
+			foreach (var member in members)
+				member.Modifiers &= ~Modifiers.Unsafe;
+			type.Modifiers |= Modifiers.Unsafe;
 		}
 
 		/// <summary>"d = (T)Delegate.Combine(d, v)" → "d += v" (and Remove → "-="): what the compiler makes of them.</summary>

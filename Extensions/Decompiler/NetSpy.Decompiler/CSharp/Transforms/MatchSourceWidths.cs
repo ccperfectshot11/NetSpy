@@ -238,6 +238,12 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					case UnaryOperatorExpression { Operator: UnaryOperatorType.Not } not:
 						AddEqualsFalseSite(not, sites);
 						break;
+					case UnaryOperatorExpression { Operator: UnaryOperatorType.Dereference } dereference:
+						AddPointerIndexSite(dereference, sites);
+						break;
+					case PointerReferenceExpression arrow:
+						AddArrowSite(arrow, sites);
+						break;
 					case CastExpression cast:
 						AddImplicitCastSite(cast, sites);
 						break;
@@ -401,6 +407,42 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				var parenthesized = new ParenthesizedExpression { Expression = inner.Detach() };
 				direction.Expression = parenthesized;
 				return () => direction.Expression = ((ParenthesizedExpression)direction.Expression).Expression.Detach();
+			});
+		}
+
+		/// <summary>"*p" → "p[0]" (the same pointer read or write).</summary>
+		static void AddPointerIndexSite(UnaryOperatorExpression dereference, List<Site> sites)
+		{
+			if (dereference.Expression is not (IdentifierExpression or MemberReferenceExpression) || dereference.Expression.GetResolveResult()?.Type is not PointerType)
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var pointer = dereference.Expression.Detach();
+				var index = new IndexerExpression(pointer, new PrimitiveExpression(0));
+				index.CopyAnnotationsFrom(dereference);
+				dereference.ReplaceWith(index);
+				return () => {
+					pointer.Remove();
+					dereference.Expression = pointer;
+					index.ReplaceWith(dereference);
+				};
+			});
+		}
+
+		/// <summary>"p->Z" → "(*p).Z"</summary>
+		static void AddArrowSite(PointerReferenceExpression arrow, List<Site> sites)
+		{
+			if (arrow.TypeArguments.Count != 0)
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var pointer = arrow.Target.Detach();
+				var member = new MemberReferenceExpression(new ParenthesizedExpression { Expression = new UnaryOperatorExpression(UnaryOperatorType.Dereference, pointer) }, arrow.MemberName);
+				member.CopyAnnotationsFrom(arrow);
+				arrow.ReplaceWith(member);
+				return () => {
+					pointer.Remove();
+					arrow.Target = pointer;
+					member.ReplaceWith(arrow);
+				};
 			});
 		}
 
@@ -626,9 +668,22 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// <summary>"1.0" → "1" for a double/float/decimal argument (the int converts implicitly).</summary>
 		static void AddIntegralLiteralSite(PrimitiveExpression literal, List<Site> sites)
 		{
-			if (literal.Value is not (double or float or decimal) || ParameterOf(literal) is not { } parameter)
+			if (literal.Value is not (double or float or decimal))
 				return;
-			var parameterType = parameter.Type;
+			// the type the literal converts to: a parameter's, or the other operand's / the compound assignment's target
+			IType? parameterType = ParameterOf(literal)?.Type;
+			if (parameterType is null && literal.Parent is BinaryOperatorExpression { Operator: BinaryOperatorType.Add or BinaryOperatorType.Subtract
+				or BinaryOperatorType.Multiply or BinaryOperatorType.Divide or BinaryOperatorType.LessThan or BinaryOperatorType.LessThanOrEqual
+				or BinaryOperatorType.GreaterThan or BinaryOperatorType.GreaterThanOrEqual or BinaryOperatorType.Equality or BinaryOperatorType.InEquality } binary)
+			{
+				var other = binary.Left == literal ? binary.Right : binary.Left;
+				if (other is not PrimitiveExpression)
+					parameterType = other?.GetResolveResult()?.Type;
+			}
+			if (parameterType is null && literal.Parent is AssignmentExpression { Operator: not AssignmentOperatorType.Assign } compound && compound.Right == literal)
+				parameterType = compound.Left.GetResolveResult()?.Type;
+			if (parameterType is null || !parameterType.Equals(literal.GetResolveResult()?.Type))
+				return;
 			if (!(parameterType.IsKnownType(KnownTypeCode.Double) || parameterType.IsKnownType(KnownTypeCode.Single) || parameterType.IsKnownType(KnownTypeCode.Decimal)))
 				return;
 			decimal value;
