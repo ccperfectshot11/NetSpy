@@ -99,6 +99,10 @@ namespace NetSpy.Decompiler.IL.Transforms
 				return false;
 			if (!(parameterReferenceVar.Kind == VariableKind.Local || parameterReferenceVar.Kind == VariableKind.StackSlot))
 				return false;
+			// NetSpy: a local the PDB names was declared by the source: an expression tree it builds by hand
+			// ("var p = Expression.Parameter(...); Expression.Lambda(..., p)") isn't a lambda the compiler lowered
+			if (parameterReferenceVar.Kind == VariableKind.Local && !parameterReferenceVar.HasGeneratedName)
+				return false;
 			if (parameterReferenceVar.Type == null || parameterReferenceVar.Type.FullName != "System.Linq.Expressions.ParameterExpression")
 				return false;
 			if (!(init is CallInstruction initCall && initCall.Arguments.Count == 2))

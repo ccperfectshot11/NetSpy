@@ -812,6 +812,10 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						when variable.GetILVariable() is { } v:
 						declarations.Add((variable, v, scope, n => variable.Name = n));
 						break;
+					case VariableInitializer { Parent: VariableDeclarationStatement { Parent: ForStatement forStatement } } loopVariable
+						when loopVariable.GetILVariable() is { } v:
+						declarations.Add((loopVariable, v, forStatement, n => loopVariable.Name = n));
+						break;
 				}
 			}
 			foreach (var (node, variable, scope, rename) in declarations)
@@ -822,8 +826,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				if (source is null && variable.Kind == VariableKind.ForeachLocal && current.Length > 1 && char.IsDigit(current[current.Length - 1]))
 				{
 					string stripped = current.TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
-					if (stripped.Length > 0 && declarations.Any(d => d.Node != node && d.Variable.Kind == VariableKind.ForeachLocal
-						&& GetName(d.Node) == stripped && d.Variable.Type.Equals(variable.Type)))
+					if (stripped.Length > 0 && declarations.Any(d => d.Node != node && GetName(d.Node) == stripped && d.Variable.Type.Equals(variable.Type)))
 						source = stripped;
 				}
 				if (source is null || source == current || !current.StartsWith(source, StringComparison.Ordinal))

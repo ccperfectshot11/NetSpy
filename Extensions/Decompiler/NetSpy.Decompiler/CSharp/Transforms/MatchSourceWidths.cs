@@ -425,6 +425,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						AddConditionalAccessSite(coalescing, sites);
 						break;
 					case InvocationExpression invocation:
+						AddStaticExtensionCallSite(invocation, sites);
 						AddCollectionExpressionSite(invocation, sites);
 						AddParamsExpansionSite(invocation, sites);
 						AddRemoveTypeArgumentsSite(invocation, sites);
@@ -698,6 +699,23 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					return () => creation.ReplaceWith(expression);
 				});
 			}
+		}
+
+		/// <summary>"x.Ext(a)" → "Holder.Ext(x, a)" (an extension method called as a static method).</summary>
+		void AddStaticExtensionCallSite(InvocationExpression invocation, List<Site> sites)
+		{
+			if (invocation.GetResolveResult() is not CSharpInvocationResolveResult { IsExtensionMethodInvocation: true, Member: IMethod method }
+				|| invocation.Target is not MemberReferenceExpression { Target: { } receiver } member || method.DeclaringTypeDefinition is not { } holder)
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var oldTarget = receiver;
+				var arguments = invocation.Arguments.ToList();
+				var call = new InvocationExpression(new MemberReferenceExpression(new TypeReferenceExpression(context.TypeSystemAstBuilder.ConvertType(holder)), member.MemberName,
+					member.TypeArguments.Select(t => t.Clone())), new[] { receiver.Clone() }.Concat(arguments.Select(a => a.Clone())));
+				call.CopyAnnotationsFrom(invocation);
+				invocation.ReplaceWith(call);
+				return () => call.ReplaceWith(invocation);
+			});
 		}
 
 		/// <summary>"Sum(10, 20)" (expanded params) Ă˘â€ â€™ "Sum(new int[] { 10, 20 })"</summary>

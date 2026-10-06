@@ -250,7 +250,8 @@ namespace NetSpy.Decompiler.IL.Transforms
 							continue;
 						}
 						string nameWithoutNumber = SplitName(name, out int newIndex);
-						if (!parentScope.IsReservedVariableName(nameWithoutNumber, out _))
+						// NetSpy: "p2" doesn't clash with an outer "p" (only an outer "p2" or later would)
+						if (!parentScope.IsReservedVariableName(nameWithoutNumber, out int usedIndex) || newIndex > usedIndex)
 						{
 							AddExistingName(reservedVariableNames, name);
 							if (variables.TryGetValue(i, out var v))
