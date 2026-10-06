@@ -1421,6 +1421,32 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					};
 				});
 			}
+			// C# 10 natural lambda type: "Func<string, int> f = s => ..." → "var f = (string s) => ..."
+			if (!isVar && initializer is LambdaExpression { IsAsync: false } lambda && lambda.Parameters.Count > 0
+				&& lambda.Parameters.All(p => p.Type is null) && lambda.Attributes.Count == 0
+				&& context.Settings.GetMinimumRequiredVersion() >= LanguageVersion.CSharp10_0
+				&& variableType is ParameterizedType { Namespace: "System", Name: "Func" or "Action" } delegateType
+				&& lambda.Annotation<IL.ILFunction>()?.Method is { } lambdaMethod
+				&& (delegateType.Name == "Action" || lambda.Body is Expression body && body.GetResolveResult()?.Type is { } bodyType
+					&& bodyType.Equals(delegateType.TypeArguments.Last())))
+			{
+				site.Alternatives.Add(() => {
+					var undoType = SetDeclarationType(declaration, new SimpleType("var"));
+					var parameters = lambda.Parameters.ToList();
+					var added = new List<AstType>();
+					for (int i = 0; i < parameters.Count; i++)
+					{
+						var parameterType = context.TypeSystemAstBuilder.ConvertType(lambdaMethod.Parameters[i].Type);
+						parameters[i].Type = parameterType;
+						added.Add(parameterType);
+					}
+					return () => {
+						foreach (var t in added)
+							t.Remove();
+						undoType();
+					};
+				});
+			}
 			if (site.Alternatives.Count == 0)
 				sites.Remove(site);
 		}
