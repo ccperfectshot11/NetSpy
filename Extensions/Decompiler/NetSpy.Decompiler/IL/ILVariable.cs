@@ -209,6 +209,12 @@ namespace NetSpy.Decompiler.IL
 		public bool HasGeneratedName { get; set; }
 
 		/// <summary>
+		/// NetSpy: the name the PDB gives this local, kept when <see cref="Name"/> gets a clash-avoiding suffix
+		/// (C# allows the same name in sibling scopes; the decompiler reserves names per function).
+		/// </summary>
+		public string? SourceName { get; set; }
+
+		/// <summary>
 		/// Gets the function in which this variable is declared.
 		/// </summary>
 		/// <remarks>

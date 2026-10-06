@@ -294,6 +294,7 @@ namespace NetSpy.Decompiler.IL.Transforms
 					v = new ILVariable(inst.Variable.Kind, inst.Variable.Type, inst.Variable.StackType, inst.Variable.Index);
 					v.Name = inst.Variable.Name;
 					v.HasGeneratedName = inst.Variable.HasGeneratedName;
+					v.SourceName = inst.Variable.SourceName;
 					v.StateMachineField = inst.Variable.StateMachineField;
 					v.InitialValueIsInitialized = inst.Variable.InitialValueIsInitialized;
 					v.UsesInitialValue = false; // we'll set UsesInitialValue when we encounter an uninit load

@@ -686,6 +686,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			/// <summary>Names of locals that are this value (declared on the path or by a designation).</summary>
 			public readonly List<string> Names = new List<string>();
 			public string? Designation;
+			/// <summary>NetSpy: the local the designation declares (for its PDB name).</summary>
+			public IL.ILVariable? DesignationVariable;
 			/// <summary>NetSpy: list pattern elements read as "x[i]" (by index) and "x[x.Length - i]" (by distance from the end).</summary>
 			public SortedDictionary<int, PNode>? Elements, ElementsFromEnd;
 			/// <summary>NetSpy: the "x[start..^end]" slice of a list pattern.</summary>
@@ -873,6 +875,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 							return false;
 					}
 					node.Designation = id.Identifier;
+					node.DesignationVariable ??= id.GetILVariable();
 				}
 				return true;
 			}
@@ -1521,7 +1524,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				else
 					recursive.SubPatterns.AddRange(members);
 				if (node.Designation is not null)
-					recursive.Designation = new SingleVariableDesignation { Identifier = node.Designation };
+					recursive.Designation = NewDesignation(node);
 				parts.Add(recursive);
 			}
 			else if (node.TypeSyntax is not null)
@@ -1533,14 +1536,14 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					return atoms[0];
 				}
 				parts.Add(node.Designation is not null
-					? new DeclarationExpression { Type = node.TypeSyntax.Clone(), Designation = new SingleVariableDesignation { Identifier = node.Designation } }
+					? new DeclarationExpression { Type = node.TypeSyntax.Clone(), Designation = NewDesignation(node) }
 					: new TypeReferenceExpression(node.TypeSyntax.Clone()));
 			}
 			else if (node.Designation is not null)
 			{
 				parts.Add(node.NotNull
-					? new RecursivePatternExpression { Designation = new SingleVariableDesignation { Identifier = node.Designation } }
-					: new DeclarationExpression { Type = new SimpleType("var"), Designation = new SingleVariableDesignation { Identifier = node.Designation } });
+					? new RecursivePatternExpression { Designation = NewDesignation(node) }
+					: new DeclarationExpression { Type = new SimpleType("var"), Designation = NewDesignation(node) });
 			}
 			if (listPattern is not null)
 				parts.Add(listPattern);
@@ -1645,11 +1648,19 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			return value is int i ? i : null;
 		}
 
+		static SingleVariableDesignation NewDesignation(PNode node)
+		{
+			var designation = new SingleVariableDesignation { Identifier = node.Designation! };
+			if (node.DesignationVariable is { } variable)
+				designation.AddAnnotation(new ILVariableResolveResult(variable, variable.Type));
+			return designation;
+		}
+
 		static Expression DesignationOrDiscard(PNode element)
 		{
 			return element.Designation is null
 				? new IdentifierExpression("_")
-				: new DeclarationExpression { Type = new SimpleType("var"), Designation = new SingleVariableDesignation { Identifier = element.Designation } };
+				: new DeclarationExpression { Type = new SimpleType("var"), Designation = NewDesignation(element) };
 		}
 
 		/// <summary>"not x" next to a different constant is implied: ("paper", ...) needs no "not "rock"".</summary>

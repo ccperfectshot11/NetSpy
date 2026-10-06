@@ -345,6 +345,7 @@ namespace NetSpy.Decompiler.IL
 			else
 			{
 				ilVar.Name = name;
+				ilVar.SourceName = name;
 			}
 			return ilVar;
 		}

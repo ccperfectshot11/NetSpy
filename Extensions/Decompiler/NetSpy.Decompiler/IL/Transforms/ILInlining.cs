@@ -362,6 +362,12 @@ namespace NetSpy.Decompiler.IL.Transforms
 			{
 				return false; // inlining of ldloca is not allowed in the early inlining stage
 			}
+			if (v.Kind == VariableKind.Local && !v.HasGeneratedName && !options.HasFlag(InliningOptions.Aggressive))
+			{
+				// NetSpy: the compiler's temporaries have no name in the PDB: a named local ("var (a, b) = ("x", 2); ... b.ToString()")
+				// was declared in the source
+				return false;
+			}
 			// Inlining a value type variable is allowed only if the resulting code will maintain the semantics
 			// that the method is operating on a copy.
 			// Thus, we have to ensure we're operating on an r-value.

@@ -867,7 +867,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 
 		/// <summary>
 		/// "item2" â†’ "item": a local renamed to avoid a clash gets its source name back (from the iterator/async state
-		/// field "&lt;item&gt;5__3") when no declaration of that name shares its scope and the name means nothing else there.
+		/// field "&lt;item&gt;5__3", or the PDB local name) when no declaration of that name shares its scope and the name means nothing else there.
 		/// </summary>
 		void RestoreSourceNames(EntityDeclaration entity)
 		{
@@ -888,12 +888,22 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						when loopVariable.GetILVariable() is { } v:
 						declarations.Add((loopVariable, v, forStatement, n => loopVariable.Name = n));
 						break;
+					// "case int i:", "o is string text", "out var x": the enclosing block (or switch section) holds them
+					case SingleVariableDesignation { Parent: not ForeachStatement } patternVariable
+						when patternVariable.Annotation<ILVariableResolveResult>()?.Variable is { } v
+						&& PatternScope(patternVariable) is { } patternScope:
+						declarations.Add((patternVariable, v, patternScope, n => patternVariable.Identifier = n));
+						break;
+					case CatchClause { VariableName.Length: > 0 } catchClause
+						when catchClause.Annotation<ILVariableResolveResult>()?.Variable is { } v:
+						declarations.Add((catchClause, v, catchClause, n => catchClause.VariableName = n));
+						break;
 				}
 			}
 			foreach (var (node, variable, scope, rename) in declarations)
 			{
 				string current = variable.Name ?? "";
-				var source = SourceName(variable);
+				var source = SourceName(variable) ?? variable.SourceName;
 				// a foreach variable "item2" next to a foreach variable "item" of the same type: the clash-avoiding suffix
 				if (source is null && variable.Kind == VariableKind.ForeachLocal && current.Length > 1 && char.IsDigit(current[current.Length - 1]))
 				{
@@ -901,7 +911,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					if (stripped.Length > 0 && declarations.Any(d => d.Node != node && GetName(d.Node) == stripped && d.Variable.Type.Equals(variable.Type)))
 						source = stripped;
 				}
-				if (source is null || source == current || !current.StartsWith(source, StringComparison.Ordinal))
+				if (source is null || source == current || !current.StartsWith(source, StringComparison.Ordinal)
+					|| !current.Substring(source.Length).All(char.IsDigit))
 					continue;
 				// no other declaration of the name in an overlapping scope, no other meaning of the name inside the scope
 				bool clash = declarations.Any(d => d.Node != node && GetName(d.Node) == source
@@ -917,9 +928,21 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				variable.Name = source;
 			}
 
+			// a case label's variables belong to its switch section, others to the block around their statement
+			static AstNode? PatternScope(SingleVariableDesignation designation)
+			{
+				foreach (var section in designation.Ancestors.OfType<Syntax.SwitchSection>())
+				{
+					if (section.CaseLabels.Any(label => designation.Ancestors.Contains(label)))
+						return section;
+				}
+				return designation.Ancestors.OfType<Statement>().FirstOrDefault()?.Parent;
+			}
+
 			static string? GetName(AstNode node) => node switch {
 				SingleVariableDesignation d => d.Identifier,
 				VariableInitializer v => v.Name,
+				CatchClause c => c.VariableName,
 				_ => null
 			};
 		}
