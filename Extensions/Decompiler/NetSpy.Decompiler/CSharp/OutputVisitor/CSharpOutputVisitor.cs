@@ -1514,7 +1514,9 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 		public virtual void VisitQueryExpression(QueryExpression queryExpression)
 		{
 			StartNode(queryExpression);
-			if (queryExpression.Slot?.Kind != Slots.PrecedingQuery)
+			// NetSpy: the clauses at the source's column (from the PDB), relative to the statement
+			int alignment = queryExpression.Annotation<Transforms.QueryAlignmentAnnotation>()?.ExtraSpaces ?? -1;
+			if (queryExpression.Slot?.Kind != Slots.PrecedingQuery && alignment < 0)
 				writer.Indent();
 			bool first = true;
 			foreach (var clause in queryExpression.Clauses)
@@ -1528,11 +1530,13 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 					if (!(clause is QueryContinuationClause))
 					{
 						NewLine();
+						for (int i = 0; i < alignment; i++)
+							writer.Space();
 					}
 				}
 				clause.AcceptVisitor(this);
 			}
-			if (queryExpression.Slot?.Kind != Slots.PrecedingQuery)
+			if (queryExpression.Slot?.Kind != Slots.PrecedingQuery && alignment < 0)
 				writer.Unindent();
 			EndNode(queryExpression);
 		}

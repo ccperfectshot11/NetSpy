@@ -42,6 +42,14 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 	/// <item>local functions are declared in their source order (their own sequence points' lines).</item>
 	/// </list>
 	/// </summary>
+	/// <summary>NetSpy: a query's clauses start this many spaces after the statement's column.</summary>
+	public sealed class QueryAlignmentAnnotation
+	{
+		public readonly int ExtraSpaces;
+
+		public QueryAlignmentAnnotation(int extraSpaces) => ExtraSpaces = extraSpaces;
+	}
+
 	/// <summary>NetSpy: the constructor's ": base(...)" / ": this(...)" stays on the declaration's line.</summary>
 	public sealed class InitializerOnSameLineAnnotation
 	{
@@ -117,8 +125,10 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				}
 				foreach (var creation in rootNode.Descendants.OfType<AnonymousTypeCreateExpression>().ToList())
 					IntroduceAnonymousWith(creation);
+				foreach (var query in rootNode.Descendants.OfType<QueryExpression>().ToList())
+					AlignQuery(query);
 			}
-			// "++x;" → "x++;" (statement level: the same; the usual spelling)
+			// "++x;" â†’ "x++;" (statement level: the same; the usual spelling)
 			foreach (var statement in rootNode.Descendants.OfType<ExpressionStatement>().ToList())
 			{
 				if (statement.Expression is UnaryOperatorExpression { Operator: UnaryOperatorType.Increment or UnaryOperatorType.Decrement } step)
@@ -141,7 +151,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 		}
 
-		/// <summary>"x ?? (x = y)" → "x ??= y"</summary>
+		/// <summary>"x ?? (x = y)" â†’ "x ??= y"</summary>
 		void IntroduceNullCoalescingAssignment(BinaryOperatorExpression coalescing)
 		{
 			if (coalescing.Right is not AssignmentExpression { Operator: AssignmentOperatorType.Assign } assignment
@@ -153,7 +163,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			coalescing.ReplaceWith(replacement);
 		}
 
-		/// <summary>"if (x == null) { x = y; }" → "x ??= y;" (the PDB has one sequence point for both).</summary>
+		/// <summary>"if (x == null) { x = y; }" â†’ "x ??= y;" (the PDB has one sequence point for both).</summary>
 		void IntroduceNullCoalescingAssignmentStatement(IfElseStatement ifElse)
 		{
 			if (ifElse.FalseStatement is not null
@@ -174,7 +184,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		}
 
 		/// <summary>
-		/// "T t = b; b = a; a = t;" → "(a, b) = (b, a);" when the three statements are one sequence point (one source
+		/// "T t = b; b = a; a = t;" â†’ "(a, b) = (b, a);" when the three statements are one sequence point (one source
 		/// statement) and t is a compiler temporary used nowhere else.
 		/// </summary>
 		void IntroduceTupleSwaps(BlockStatement block)
@@ -216,7 +226,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		}
 
 		/// <summary>
-		/// "string a = "x"; int b = 2;" with one sequence point for both → "var (a, b) = ("x", 2);" (two declarations
+		/// "string a = "x"; int b = 2;" with one sequence point for both â†’ "var (a, b) = ("x", 2);" (two declarations
 		/// of a source statement each have their own).
 		/// </summary>
 		void IntroduceTupleDeclarations(BlockStatement block)
@@ -336,7 +346,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				i = -1;
 			}
 
-			// "t2?.ToString()" with t2 a copy of t → t
+			// "t2?.ToString()" with t2 a copy of t â†’ t
 			static Expression? Piece(Expression value, Dictionary<ILVariable, Expression> temps)
 			{
 				string text = value.ToString().Replace(" ", "");
@@ -409,6 +419,68 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				forStatement.Iterators.Add(iterator.Detach());
 			forStatement.CopyAnnotationsFrom(whileStatement);
 			whileStatement.ReplaceWith(forStatement);
+		}
+
+		/// <summary>
+		/// "var q = from c in cs\n        where ...": a clause's lambda has a sequence point at its expression ("where c.X"
+		/// â†’ at "c.X"), which gives the column the source put the clauses at. "var q = ..." declarations of a query get "var".
+		/// </summary>
+		void AlignQuery(QueryExpression query)
+		{
+			if (query.Ancestors.OfType<Statement>().FirstOrDefault() is not { } statement || statement.Annotation<SourceLayoutAnnotation>() is not { } layout
+				|| context.DecompileRun.DebugInfoProvider is not { } provider)
+				return;
+			if (statement is VariableDeclarationStatement { Variables.Count: 1 } declaration && !declaration.Type.IsVar()
+				&& declaration.Variables.Single().Initializer == query && context.Settings.ImplicitlyTypedLocals
+				&& declaration.Variables.Single().GetILVariable()?.Type is ParameterizedType { Namespace: "System.Linq" or "System.Collections.Generic" })
+			{
+				var var = new SimpleType("var");
+				var.CopyAnnotationsFrom(declaration.Type);
+				declaration.Type = var;
+			}
+			foreach (var clause in query.Clauses.Skip(1))
+			{
+				var (keyword, expression) = clause switch {
+					QueryWhereClause where => ("where ", where.Condition),
+					QuerySelectClause select => ("select ", select.Expression),
+					QueryOrderClause order => ("orderby ", order.Orderings.FirstOrDefault()?.Expression),
+					_ => ("", (Expression?)null)
+				};
+				if (expression is null)
+					continue;
+				var method = expression.DescendantsAndSelf.SelectMany(n => n.Annotations.OfType<ILInstruction>())
+					.Select(Function).FirstOrDefault(f => f?.Method is not null)?.Method;
+				if (method is null || method.MetadataToken.IsNil || method.MetadataToken.Kind != HandleKind.MethodDefinition)
+					continue;
+				DebugInfo.SequencePoint? point;
+				try
+				{
+					point = provider.GetSequencePoints((MethodDefinitionHandle)method.MetadataToken).FirstOrDefault(sp => !sp.IsHidden);
+				}
+				catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+				{
+					continue;
+				}
+				// the statement's own line: the last point of the method before the clause's line
+				var statementPoint = ApplySourceLayout.MethodPoints(statement, context)?.Where(sp => point is not null && sp.StartLine < point.StartLine)
+					.OrderByDescending(sp => sp.StartLine).ThenBy(sp => sp.StartColumn).FirstOrDefault();
+				if (point is null || statementPoint is null)
+					return;
+				int extra = point.StartColumn - keyword.Length - statementPoint.StartColumn;
+				if (extra > 0)
+					query.AddAnnotation(new QueryAlignmentAnnotation(extra));
+				return;
+			}
+
+			static ILFunction? Function(ILInstruction instruction)
+			{
+				for (ILInstruction? i = instruction; i is not null; i = i.Parent)
+				{
+					if (i is ILFunction f)
+						return f;
+				}
+				return null;
+			}
 		}
 
 		/// <summary>The two statements belong to the same source statement (same sequence point).</summary>
@@ -591,7 +663,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		}
 
 		/// <summary>
-		/// "if (e is T v) { ... }" → "T? v = e as T; if (v != null) { ... }" when the PDB has the two source lines: a point as
+		/// "if (e is T v) { ... }" â†’ "T? v = e as T; if (v != null) { ... }" when the PDB has the two source lines: a point as
 		/// wide as the declaration and, on the next line, one as wide as "if (v != null)".
 		/// </summary>
 		void IntroduceAsWithNullCheck(IfElseStatement ifElse)
@@ -794,7 +866,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		}
 
 		/// <summary>
-		/// "item2" → "item": a local renamed to avoid a clash gets its source name back (from the iterator/async state
+		/// "item2" â†’ "item": a local renamed to avoid a clash gets its source name back (from the iterator/async state
 		/// field "&lt;item&gt;5__3") when no declaration of that name shares its scope and the name means nothing else there.
 		/// </summary>
 		void RestoreSourceNames(EntityDeclaration entity)
@@ -852,7 +924,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			};
 		}
 
-		/// <summary>The name the source gave a hoisted local ("&lt;item&gt;5__3" → item).</summary>
+		/// <summary>The name the source gave a hoisted local ("&lt;item&gt;5__3" â†’ item).</summary>
 		static string? SourceName(ILVariable variable)
 		{
 			var field = variable.StateMachineField?.Name;
@@ -902,7 +974,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		};
 
 		/// <summary>
-		/// "[MemberNotNull("cached")]" → "[MemberNotNull(nameof(cached))]": the attributes whose strings name a member or a
+		/// "[MemberNotNull("cached")]" â†’ "[MemberNotNull(nameof(cached))]": the attributes whose strings name a member or a
 		/// parameter are written with nameof (the metadata only has the string).
 		/// </summary>
 		void UseNameofInAttribute(Syntax.Attribute attribute)
@@ -1075,7 +1147,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			type.Modifiers |= Modifiers.Unsafe;
 		}
 
-		/// <summary>"d = (T)Delegate.Combine(d, v)" → "d += v" (and Remove → "-="): what the compiler makes of them.</summary>
+		/// <summary>"d = (T)Delegate.Combine(d, v)" â†’ "d += v" (and Remove â†’ "-="): what the compiler makes of them.</summary>
 		void IntroduceDelegateCompoundAssignment(AssignmentExpression assignment)
 		{
 			if (assignment.Operator != AssignmentOperatorType.Assign || !IsSimpleTarget(assignment.Left)
@@ -1097,7 +1169,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			_ => false
 		};
 
-		/// <summary>"Check(a > 0, "a > 0")" → "Check(a > 0)" for "[CallerArgumentExpression("condition")] string expression = """.</summary>
+		/// <summary>"Check(a > 0, "a > 0")" â†’ "Check(a > 0)" for "[CallerArgumentExpression("condition")] string expression = """.</summary>
 		void RemoveCallerArgumentExpression(InvocationExpression invocation)
 		{
 			if (invocation.GetResolveResult() is not CSharpInvocationResolveResult { IsExpandedForm: false } resolved

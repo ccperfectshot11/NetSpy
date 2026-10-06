@@ -83,6 +83,11 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				foreach (var statement in blockStatements)
 				{
 					var layout = GetLayout(statement, body, sequencePoints);
+					// NetSpy: a statement can't start before the previous one ends; a point that early belongs to shared IL
+					// (cached delegates...): use the statement's points after the previous statement
+					if (layout is not null && previous is not null && layout.StartLine < previous.EndLine
+						&& GetLayout(statement, body, sequencePoints.Where(sp => sp.StartLine > previous.EndLine).ToList()) is { } later)
+						layout = later;
 					if (traceEnabled)
 						System.Console.Error.WriteLine($"[layout] {(layout is null ? "?" : $"{layout.StartLine}:{layout.StartColumn}-{layout.EndLine}")} {statement.ToString().Split('\n')[0].Trim()}");
 					if (layout is not null)
