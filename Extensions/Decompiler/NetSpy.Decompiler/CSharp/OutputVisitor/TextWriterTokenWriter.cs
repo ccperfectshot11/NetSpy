@@ -367,6 +367,9 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 					return;
 				}
 				var str = f.ToString("R", NumberFormatInfo.InvariantInfo) + "f";
+				// NetSpy: "1.0f" (the source's spelling of a whole number)
+				if (format == LiteralFormat.DecimalPointNumber && str.IndexOfAny(new[] { '.', 'E', 'e' }) < 0)
+					str = str.Insert(str.Length - 1, ".0");
 				if (f == 0 && 1 / f == float.NegativeInfinity && str[0] != '-')
 				{
 					// negative zero is a special case

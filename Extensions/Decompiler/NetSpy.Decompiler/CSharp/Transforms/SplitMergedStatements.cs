@@ -75,9 +75,10 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		void TrySplit(Statement statement, List<DebugInfo.SequencePoint> points, ILFunction function, HashSet<string> usedNames, TransformContext context)
 		{
 			if (statement is not (ExpressionStatement or ReturnStatement or ThrowStatement or YieldReturnStatement
-				or VariableDeclarationStatement { Variables.Count: 1 }))
+				or VariableDeclarationStatement { Variables.Count: 1 } or FixedStatement { Variables.Count: 1 }))
 				return;
-			var ranges = Ranges(statement).ToList();
+			// a fixed statement: only its header ("fixed (char* p = text)"), not its body
+			var ranges = (statement is FixedStatement fixedStatement ? fixedStatement.Variables.SelectMany(Ranges) : Ranges(statement)).ToList();
 			if (ranges.Count == 0)
 				return;
 			var covering = points.Where(sp => ranges.Any(r => r.Start < sp.EndOffset && sp.Offset <= r.InclusiveEnd)).ToList();
@@ -86,6 +87,10 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			int split = covering[1].Offset;
 			// the first subexpression (pre-order) whose IL is all before the second statement
 			var candidate = statement.Descendants.OfType<Expression>().FirstOrDefault(e => Ranges(e).Any() && Ranges(e).All(r => r.InclusiveEnd < split));
+			// "string text = "pinned"; fixed (char* p = text)": the pinned value's IL runs into the header's
+			if (candidate is null && statement is FixedStatement { Variables.Count: 1 } header
+				&& header.Variables.Single().Initializer is { } pinned and not UnaryOperatorExpression { Operator: UnaryOperatorType.AddressOf })
+				candidate = pinned;
 			if (candidate is null || !CanBeLocal(candidate))
 				return;
 			// everything else (except the operations consuming it) is evaluated after it

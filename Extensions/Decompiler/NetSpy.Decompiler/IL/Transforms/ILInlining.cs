@@ -772,7 +772,8 @@ namespace NetSpy.Decompiler.IL.Transforms
 					}
 					break;
 				case OpCode.CallIndirect when loadInst.SlotInfo == CallIndirect.FunctionPointerSlot:
-					return true;
+					// NetSpy: "delegate*<int, int> f = &M; f(1);" with f named by the PDB: the source declared it
+					return !(v.Kind == VariableKind.Local && !v.HasGeneratedName);
 				case OpCode.LdElema:
 					if (((LdElema)parent).WithSystemIndex)
 					{

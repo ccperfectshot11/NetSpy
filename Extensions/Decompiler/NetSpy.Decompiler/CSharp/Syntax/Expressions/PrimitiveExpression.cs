@@ -49,6 +49,8 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 		UnicodeCharLiteral,
 		/// <summary>NetSpy: a double in scientific notation (1e-3)</summary>
 		ScientificNumber,
+		/// <summary>NetSpy: a whole float written with a decimal point (1.0f)</summary>
+		DecimalPointNumber,
 	}
 
 	/// <summary>

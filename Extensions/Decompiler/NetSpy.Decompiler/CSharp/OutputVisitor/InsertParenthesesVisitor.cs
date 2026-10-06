@@ -281,9 +281,12 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 		public override void VisitCastExpression(CastExpression castExpression)
 		{
 			// Even in readability mode, don't parenthesize casts of casts.
+			// NetSpy: nor "(byte*)&x" / "(int*)*pp" (a pointer cast of an address or a dereference)
+			bool pointerOperand = castExpression.Type is ComposedType { PointerRank: > 0 }
+				&& castExpression.Expression is UnaryOperatorExpression { Operator: UnaryOperatorType.AddressOf or UnaryOperatorType.Dereference };
 			if (!(castExpression.Expression is CastExpression))
 			{
-				ParenthesizeIfRequired(castExpression.Expression, InsertParenthesesForReadability ? PrecedenceLevel.NullableRewrap : PrecedenceLevel.Unary);
+				ParenthesizeIfRequired(castExpression.Expression, InsertParenthesesForReadability && !pointerOperand ? PrecedenceLevel.NullableRewrap : PrecedenceLevel.Unary);
 			}
 			// There's a nasty issue in the C# grammar: cast expressions including certain operators are ambiguous in some cases
 			// "(int)-1" is fine, but "(A)-b" is not a cast.

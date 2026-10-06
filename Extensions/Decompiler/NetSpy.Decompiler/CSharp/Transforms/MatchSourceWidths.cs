@@ -613,6 +613,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				case double d when d != Math.Floor(d) || Math.Abs(d) >= 1e6:
 					Format(LiteralFormat.ScientificNumber);
 					break;
+				case float f when f == Math.Floor(f) && Math.Abs(f) < 1e6:
+					Format(LiteralFormat.DecimalPointNumber);
+					break;
 				case string s when s.IndexOf('\n') < 0 && s.IndexOf('\r') < 0:
 					if (s.IndexOf('\\') >= 0 || s.IndexOf('"') >= 0)
 						Format(LiteralFormat.VerbatimStringLiteral);
