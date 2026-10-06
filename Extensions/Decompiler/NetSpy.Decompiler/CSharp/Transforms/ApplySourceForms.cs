@@ -101,7 +101,15 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			foreach (var type in rootNode.Descendants.OfType<TypeDeclaration>().ToList())
 				HoistUnsafe(type);
 			foreach (var attribute in rootNode.Descendants.OfType<Syntax.Attribute>().ToList())
+			{
 				UseNameofInAttribute(attribute);
+				// no sequence points for attribute arguments: a string with backslashes (a regex, a path) is written @"..."
+				foreach (var literal in attribute.Descendants.OfType<PrimitiveExpression>())
+				{
+					if (literal.Value is string s && literal.Format == LiteralFormat.None && s.IndexOf('\\') >= 0 && !s.Any(c => char.IsControl(c)))
+						literal.Format = LiteralFormat.VerbatimStringLiteral;
+				}
+			}
 			foreach (var usingStatement in rootNode.Descendants.OfType<UsingStatement>().ToList())
 				IntroduceLockOnLockObject(usingStatement);
 			if (context.Settings.SourceLayoutFromPdb)
