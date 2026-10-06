@@ -199,6 +199,25 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 		}
 
+		/// <summary>NetSpy: the visible sequence points of the method a node is in (null if unknown).</summary>
+		internal static List<DebugInfo.SequencePoint>? MethodPoints(AstNode node, TransformContext context)
+		{
+			if (!context.Settings.SourceLayoutFromPdb || context.DecompileRun.DebugInfoProvider is not { } provider)
+				return null;
+			var entity = node.Ancestors.OfType<EntityDeclaration>().FirstOrDefault();
+			var method = entity?.Annotation<ILFunction>()?.MoveNextMethod ?? entity?.GetSymbol() as IMethod;
+			if (method is null || method.MetadataToken.IsNil || method.MetadataToken.Kind != HandleKind.MethodDefinition)
+				return null;
+			try
+			{
+				return provider.GetSequencePoints((MethodDefinitionHandle)method.MetadataToken).Where(sp => !sp.IsHidden).ToList();
+			}
+			catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+			{
+				return null;
+			}
+		}
+
 		/// <summary>NetSpy: the first source line of a lambda's own method; -1 if unknown.</summary>
 		internal static int LambdaLine(AstNode lambda, TransformContext context)
 		{

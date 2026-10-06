@@ -346,10 +346,26 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					AddStepAssignmentSite(step, sites);
 				if (node is AssignmentExpression { Operator: AssignmentOperatorType.Add or AssignmentOperatorType.Subtract, Right: PrimitiveExpression { Value: 1 } } byOne)
 					AddIncrementSite(byOne, sites);
+				if (node is UnaryOperatorExpression { Parent: ExpressionStatement } prefixOrPostfix)
+					AddPrefixPostfixSite(prefixOrPostfix, sites);
+				if (node is BinaryOperatorExpression { Operator: BinaryOperatorType.ConditionalOr or BinaryOperatorType.ConditionalAnd or BinaryOperatorType.BitwiseOr or BinaryOperatorType.BitwiseAnd } logical)
+					AddMinimalParenthesesSite(logical, sites);
+				if (node is BinaryOperatorExpression { Operator: BinaryOperatorType.LessThan or BinaryOperatorType.LessThanOrEqual
+					or BinaryOperatorType.GreaterThan or BinaryOperatorType.GreaterThanOrEqual } relational)
+					AddNegatedComparisonSite(relational, sites);
+				if (node is Expression expressionNode)
+				{
+					AddExplicitCastSite(expressionNode, sites);
+					AddDelegateCreationSite(expressionNode, sites);
+				}
+				if (node is InvocationExpression expanded)
+					AddParamsArraySite(expanded, sites);
+				if (node is VariableInitializer { Initializer: ArrayCreateExpression } arrayVariable)
+					AddBareArrayInitializerSite(arrayVariable, sites);
 				if (node is InvocationExpression { Target: IdentifierExpression { Identifier: "nameof" }, Arguments.Count: 1 } nameofCall
 					&& nameofCall.Arguments.Single() is IdentifierExpression { Identifier: var nameofArgument })
 				{
-					// "nameof(value)" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "\"value\"" (the decompiler writes nameof for parameter names)
+					// "nameof(value)" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "\"value\"" (the decompiler writes nameof for parameter names)
 					Add(sites).Alternatives.Add(() => {
 						var literal = new PrimitiveExpression(nameofArgument);
 						literal.CopyAnnotationsFrom(nameofCall);
@@ -433,7 +449,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		}
 
 		/// <summary>
-		/// "\"Name\"" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "nameof(Name)" (a member of the current type, a parameter or a local) or "nameof(T.Name)"
+		/// "\"Name\"" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "nameof(Name)" (a member of the current type, a parameter or a local) or "nameof(T.Name)"
 		/// (a member of a type the statement uses).
 		/// </summary>
 		void AddNameofSite(PrimitiveExpression literal, string name, AstNode statement, List<Site> sites)
@@ -463,7 +479,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				sites.Add(site);
 		}
 
-		/// <summary>"3.14159" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "Pi": a constant of the current (or an enclosing) type with that value and type, which the compiler inlined.</summary>
+		/// <summary>"3.14159" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "Pi": a constant of the current (or an enclosing) type with that value and type, which the compiler inlined.</summary>
 		void AddConstantSite(PrimitiveExpression literal, AstNode statement, List<Site> sites)
 		{
 			var literalType = literal.GetResolveResult()?.Type;
@@ -550,7 +566,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			_ => false
 		};
 
-		/// <summary>"long.MinValue" → "-9223372036854775807L - 1", "ulong.MaxValue" → "18446744073709551615UL"...</summary>
+		/// <summary>"long.MinValue" â†’ "-9223372036854775807L - 1", "ulong.MaxValue" â†’ "18446744073709551615UL"...</summary>
 		static void AddLimitLiteralSite(MemberReferenceExpression limit, List<Site> sites)
 		{
 			if (limit.GetSymbol() is not IField { IsConst: true } field || field.GetConstantValue() is not { } value)
@@ -571,7 +587,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"x--;" → "x -= 1;" (statement level: the same IL).</summary>
+		/// <summary>"x--;" â†’ "x -= 1;" (statement level: the same IL).</summary>
 		static void AddStepAssignmentSite(UnaryOperatorExpression step, List<Site> sites)
 		{
 			if (step.Parent is not ExpressionStatement || step.Expression.GetResolveResult()?.Type is not { } type
@@ -588,7 +604,151 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"x -= 1;" → "x--;"</summary>
+		/// <summary>"x++;" â†” "++x;" (statement level)</summary>
+		static void AddPrefixPostfixSite(UnaryOperatorExpression step, List<Site> sites)
+		{
+			var swapped = step.Operator switch {
+				UnaryOperatorType.PostIncrement => UnaryOperatorType.Increment,
+				UnaryOperatorType.Increment => UnaryOperatorType.PostIncrement,
+				UnaryOperatorType.PostDecrement => UnaryOperatorType.Decrement,
+				UnaryOperatorType.Decrement => UnaryOperatorType.PostDecrement,
+				_ => (UnaryOperatorType?)null
+			};
+			if (swapped is not { } op)
+				return;
+			// same width: it never changes a statement's width, but it does when joined with other changes; "++x;" is
+			// written like "x++;" in the PDB, so the choice only follows a statement's other changes
+			Add(sites).Alternatives.Add(() => {
+				var old = step.Operator;
+				step.Operator = op;
+				return () => step.Operator = old;
+			});
+		}
+
+		/// <summary>"a &lt;= b" â†’ "!(a &gt; b)" (integers only: for floating point NaN makes them differ)</summary>
+		static void AddNegatedComparisonSite(BinaryOperatorExpression relational, List<Site> sites)
+		{
+			if (relational.Left?.GetResolveResult()?.Type is not { } type || !(type.IsKnownType(KnownTypeCode.Int32) || type.IsKnownType(KnownTypeCode.Int64)
+				|| type.IsKnownType(KnownTypeCode.Char)))
+				return;
+			var inverse = relational.Operator switch {
+				BinaryOperatorType.LessThan => BinaryOperatorType.GreaterThanOrEqual,
+				BinaryOperatorType.LessThanOrEqual => BinaryOperatorType.GreaterThan,
+				BinaryOperatorType.GreaterThan => BinaryOperatorType.LessThanOrEqual,
+				_ => BinaryOperatorType.LessThan
+			};
+			Add(sites).Alternatives.Add(() => {
+				var oldOperator = relational.Operator;
+				var placeholder = new UnaryOperatorExpression();
+				relational.ReplaceWith(placeholder);
+				relational.Operator = inverse;
+				placeholder.Operator = UnaryOperatorType.Not;
+				placeholder.Expression = new ParenthesizedExpression { Expression = relational };
+				return () => {
+					relational.Remove();
+					relational.Operator = oldOperator;
+					placeholder.ReplaceWith(relational);
+				};
+			});
+		}
+
+		/// <summary>
+		/// "INamed n = list[0];" â†’ "INamed n = (INamed)list[0];": an implicit reference conversion the source wrote as a cast.
+		/// </summary>
+		void AddExplicitCastSite(Expression expression, List<Site> sites)
+		{
+			if (expression is CastExpression or NullReferenceExpression or PrimitiveExpression or LambdaExpression or AnonymousMethodExpression
+				|| expression.GetResolveResult()?.Type is not { IsReferenceType: true } type || TargetType(expression) is not { IsReferenceType: true } target
+				|| NormalizeTypeVisitor.IgnoreNullability.EquivalentTypes(type, target) || target.Kind != TypeKind.Interface)
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var cast = new CastExpression(context.TypeSystemAstBuilder.ConvertType(target), expression.Clone());
+				cast.CopyAnnotationsFrom(expression);
+				expression.ReplaceWith(cast);
+				return () => cast.ReplaceWith(expression);
+			});
+		}
+
+		/// <summary>"D d = M;" â†” "D d = new D(M);" (a method group converted to a delegate)</summary>
+		void AddDelegateCreationSite(Expression expression, List<Site> sites)
+		{
+			// the delegate type the place converts to: a typed declaration, "d = ..." / "d += ...", an argument
+			var target = TargetType(expression) ?? (expression.Parent is AssignmentExpression assignment && assignment.Right == expression
+				? assignment.Left.GetResolveResult()?.Type : null);
+			if (target is not { Kind: TypeKind.Delegate })
+				return;
+			if (expression is ObjectCreateExpression { Arguments.Count: 1, Initializer: null } creation
+				&& creation.GetResolveResult()?.Type is { Kind: TypeKind.Delegate } created && created.Equals(target)
+				&& creation.Arguments.Single() is IdentifierExpression or MemberReferenceExpression
+				&& creation.Arguments.Single().GetResolveResult() is MethodGroupResolveResult)
+			{
+				Add(sites).Alternatives.Add(() => {
+					var group = creation.Arguments.Single().Clone();
+					creation.ReplaceWith(group);
+					return () => group.ReplaceWith(creation);
+				});
+			}
+			else if (expression is IdentifierExpression or MemberReferenceExpression && expression.GetResolveResult() is MethodGroupResolveResult
+				&& !(expression.Parent is InvocationExpression call && call.Target == expression))
+			{
+				Add(sites).Alternatives.Add(() => {
+					var creation = new ObjectCreateExpression(context.TypeSystemAstBuilder.ConvertType(target), expression.Clone());
+					creation.CopyAnnotationsFrom(expression);
+					expression.ReplaceWith(creation);
+					return () => creation.ReplaceWith(expression);
+				});
+			}
+		}
+
+		/// <summary>"Sum(10, 20)" (expanded params) â†’ "Sum(new int[] { 10, 20 })"</summary>
+		void AddParamsArraySite(InvocationExpression invocation, List<Site> sites)
+		{
+			if (invocation.GetResolveResult() is not CSharpInvocationResolveResult { IsExpandedForm: true } resolved
+				|| resolved.Member.Parameters.LastOrDefault() is not { IsParams: true, Type: ArrayType arrayType } parameter
+				|| invocation.Arguments.Any(a => a is NamedArgumentExpression))
+				return;
+			int fixedCount = resolved.Member.Parameters.Count - 1 - (resolved.IsExtensionMethodInvocation ? 1 : 0);
+			if (invocation.Arguments.Count < fixedCount)
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var all = invocation.Arguments.ToList();
+				var array = new ArrayCreateExpression { Type = context.TypeSystemAstBuilder.ConvertType(arrayType.ElementType) };
+				array.AdditionalArraySpecifiers.Add(new ArraySpecifier());
+				array.Initializer = new ArrayInitializerExpression();
+				foreach (var argument in all.Skip(fixedCount))
+					array.Initializer.Elements.Add(argument.Clone());
+				foreach (var argument in all)
+					argument.Remove();
+				invocation.Arguments.AddRange(all.Take(fixedCount));
+				invocation.Arguments.Add(array);
+				return () => {
+					foreach (var argument in invocation.Arguments.ToList())
+						argument.Remove();
+					invocation.Arguments.AddRange(all);
+				};
+			});
+		}
+
+		/// <summary>"var a = new int[,] { ... };" â†’ "int[,] a = { ... };"</summary>
+		void AddBareArrayInitializerSite(VariableInitializer variable, List<Site> sites)
+		{
+			if (variable.Parent is not VariableDeclarationStatement { Variables.Count: 1 } declaration
+				|| variable.Initializer is not ArrayCreateExpression { Initializer: { } initializer, Arguments.Count: 0 } creation
+				|| creation.GetResolveResult()?.Type is not ArrayType arrayType)
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var undoType = declaration.Type.IsVar() ? SetDeclarationType(declaration, context.TypeSystemAstBuilder.ConvertType(arrayType)) : null;
+				var bare = (ArrayInitializerExpression)initializer.Clone();
+				bare.CopyAnnotationsFrom(creation);
+				creation.ReplaceWith(bare);
+				return () => {
+					bare.ReplaceWith(creation);
+					undoType?.Invoke();
+				};
+			});
+		}
+
+		/// <summary>"x -= 1;" â†’ "x--;"</summary>
 		static void AddIncrementSite(AssignmentExpression byOne, List<Site> sites)
 		{
 			if (byOne.Parent is not ExpressionStatement || byOne.Left.GetResolveResult()?.Type is not { } type
@@ -611,7 +771,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			return () => nameof.ReplaceWith(literal);
 		}
 
-		/// <summary>"var (a, b) = e" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬ĹĄ "(int a, string b) = e" (and "_" stays a discard).</summary>
+		/// <summary>"var (a, b) = e" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬ÄąÄ„ "(int a, string b) = e" (and "_" stays a discard).</summary>
 		void AddDeconstructionSite(AssignmentExpression assignment, List<Site> sites)
 		{
 			if (assignment.Left is DeclarationExpression { Designation: ParenthesizedVariableDesignation designations } declaration && declaration.Type.IsVar())
@@ -662,7 +822,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			return type is null || type.Kind is TypeKind.Unknown or TypeKind.ByReference || type.ContainsAnonymousType() ? null : type;
 		}
 
-		/// <summary>"t.Item10" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "t.Rest.Item3" (the same field of a big tuple).</summary>
+		/// <summary>"t.Item10" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "t.Rest.Item3" (the same field of a big tuple).</summary>
 		static void AddTupleRestSite(MemberReferenceExpression member, List<Site> sites)
 		{
 			if (!member.MemberName.StartsWith("Item", StringComparison.Ordinal) || !int.TryParse(member.MemberName.Substring(4), out int n) || n < 8
@@ -687,7 +847,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"ref c ? ref a : ref b" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "ref (c ? ref a : ref b)"</summary>
+		/// <summary>"ref c ? ref a : ref b" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "ref (c ? ref a : ref b)"</summary>
 		static void AddParenthesesSite(DirectionExpression direction, List<Site> sites)
 		{
 			Add(sites).Alternatives.Add(() => {
@@ -699,14 +859,14 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		}
 
 		/// <summary>
-		/// "new[] { 1, 2 }" / "new int[] { 1, 2 }" Ă˘â€ â€™ "[1, 2]" and "Array.Empty&lt;int&gt;()" Ă˘â€ â€™ "[]" where the target type is
+		/// "new[] { 1, 2 }" / "new int[] { 1, 2 }" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "[1, 2]" and "Array.Empty&lt;int&gt;()" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "[]" where the target type is
 		/// known (a typed declaration, an assignment, a return, an argument of a non-generic parameter).
 		/// </summary>
 		void AddCollectionExpressionSite(Expression expression, List<Site> sites)
 		{
 			if (context.Settings.GetMinimumRequiredVersion() < LanguageVersion.CSharp12_0)
 				return;
-			// "var s = new HashSet<int> { 1, 2 }" Ă˘â€ â€™ "HashSet<int> s = [1, 2]" (the declaration gets the type)
+			// "var s = new HashSet<int> { 1, 2 }" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "HashSet<int> s = [1, 2]" (the declaration gets the type)
 			VariableDeclarationStatement? untyped = expression.Parent is VariableInitializer { Parent: VariableDeclarationStatement d } && d.Type.IsVar() ? d : null;
 			IType? untypedType = untyped is null ? null : expression.GetResolveResult()?.Type;
 			if (untyped is not null ? !IsCollectionTarget(untypedType) : !HasTargetType(expression))
@@ -749,7 +909,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"new[] { 1m }" â†” "new decimal[] { 1m }"</summary>
+		/// <summary>"new[] { 1m }" Ă˘â€ â€ť "new decimal[] { 1m }"</summary>
 		void AddArrayElementTypeSite(ArrayCreateExpression creation, List<Site> sites)
 		{
 			if (creation.Initializer is null || creation.Arguments.Count != 0 || creation.GetResolveResult()?.Type is not ArrayType { Dimensions: 1 } arrayType
@@ -777,7 +937,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 		}
 
-		/// <summary>"default(T)" â†” "default" (where the target gives the type).</summary>
+		/// <summary>"default(T)" Ă˘â€ â€ť "default" (where the target gives the type).</summary>
 		void AddDefaultTypeSite(DefaultValueExpression defaultValue, List<Site> sites)
 		{
 			if (!context.Settings.DefaultLiterals)
@@ -804,7 +964,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 		}
 
-		/// <summary>"x => e" â†’ "delegate (T x) { return e; }" (C# 2 anonymous method: the same delegate).</summary>
+		/// <summary>"x => e" Ă˘â€ â€™ "delegate (T x) { return e; }" (C# 2 anonymous method: the same delegate).</summary>
 		void AddAnonymousMethodSite(LambdaExpression lambda, List<Site> sites)
 		{
 			if (lambda.IsAsync || lambda.Annotation<IL.ILFunction>()?.Method is not { } method || method.Parameters.Count != lambda.Parameters.Count
@@ -812,7 +972,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				|| method.Parameters.Any(p => p.Type.Kind == TypeKind.Unknown || p.Type.ContainsAnonymousType())
 				|| lambda.Attributes.Count != 0)
 				return;
-			Add(sites).Alternatives.Add(() => {
+			var site = Add(sites);
+			site.Alternatives.Add(() => {
 				var anonymous = new AnonymousMethodExpression();
 				for (int i = 0; i < lambda.Parameters.Count; i++)
 				{
@@ -840,9 +1001,25 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				lambda.ReplaceWith(anonymous);
 				return () => anonymous.ReplaceWith(lambda);
 			});
+			// "delegate { ... }" (no parameter list) when the body uses none of the parameters
+			if (lambda.Parameters.Count > 0 && !lambda.Parameters.Any(p => p.Name != "_" && lambda.Body.Descendants.OfType<IdentifierExpression>().Any(id => id.Identifier == p.Name)))
+			{
+				site.Alternatives.Add(() => {
+					var anonymous = new AnonymousMethodExpression();
+					var body = lambda.Body;
+					var block = body is BlockStatement b ? (BlockStatement)b.Clone() : new BlockStatement {
+						method.ReturnType.IsKnownType(KnownTypeCode.Void) ? new ExpressionStatement((Expression)body.Clone()) : new ReturnStatement((Expression)body.Clone())
+					};
+					anonymous.Body = block;
+					anonymous.CopyAnnotationsFrom(lambda);
+					anonymous.AddAnnotation(SingleLineBlockAnnotation.Instance);
+					lambda.ReplaceWith(anonymous);
+					return () => anonymous.ReplaceWith(lambda);
+				});
+			}
 		}
 
-		/// <summary>"n ?? 7" â†’ "n.GetValueOrDefault(7)" for a nullable value type local/parameter and a constant.</summary>
+		/// <summary>"n ?? 7" Ă˘â€ â€™ "n.GetValueOrDefault(7)" for a nullable value type local/parameter and a constant.</summary>
 		static void AddGetValueOrDefaultSite(BinaryOperatorExpression coalescing, List<Site> sites)
 		{
 			if (coalescing.Left is not IdentifierExpression nullable || !NullableType.IsNullable(nullable.GetResolveResult()?.Type)
@@ -856,7 +1033,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"x?.P ?? c" â†’ "x == null ? c : x.P" (x a local or parameter, P a property/field).</summary>
+		/// <summary>"x?.P ?? c" Ă˘â€ â€™ "x == null ? c : x.P" (x a local or parameter, P a property/field).</summary>
 		static void AddConditionalAccessSite(BinaryOperatorExpression coalescing, List<Site> sites)
 		{
 			// the decompiler writes "x?.P" as a member reference on a NullConditional unary
@@ -930,7 +1107,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		}
 
 		/// <summary>
-		/// C# 13 params collections: "M([a, b])", "M(new List&lt;T&gt;(2) { a, b })", "M(default(ReadOnlySpan&lt;T&gt;))" Ă˘â€ â€™
+		/// C# 13 params collections: "M([a, b])", "M(new List&lt;T&gt;(2) { a, b })", "M(default(ReadOnlySpan&lt;T&gt;))" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘
 		/// "M(a, b)" / "M()" for a params parameter (what the compiler builds for the expanded form).
 		/// </summary>
 		void AddParamsExpansionSite(InvocationExpression invocation, List<Site> sites)
@@ -967,7 +1144,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"M&lt;T&gt;(x)" Ă˘â€ â€™ "M(x)" (the width proves the source let the compiler infer them).</summary>
+		/// <summary>"M&lt;T&gt;(x)" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "M(x)" (the width proves the source let the compiler infer them).</summary>
 		static void AddRemoveTypeArgumentsSite(InvocationExpression invocation, List<Site> sites)
 		{
 			AstNodeCollection<AstType>? typeArguments = invocation.Target switch {
@@ -985,7 +1162,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"return new T(x);" / "=> new T(x)" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "new(x)" when T is the member's return type.</summary>
+		/// <summary>"return new T(x);" / "=> new T(x)" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "new(x)" when T is the member's return type.</summary>
 		void AddReturnedTargetTypedNewSite(ObjectCreateExpression creation, List<Site> sites)
 		{
 			if (context.Settings.GetMinimumRequiredVersion() < LanguageVersion.CSharp9_0 || creation.Annotation<TargetTypedNewAnnotation>() is not null
@@ -1005,7 +1182,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"*p" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "p[0]" (the same pointer read or write).</summary>
+		/// <summary>"*p" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "p[0]" (the same pointer read or write).</summary>
 		static void AddPointerIndexSite(UnaryOperatorExpression dereference, List<Site> sites)
 		{
 			if (dereference.Expression is not (IdentifierExpression or MemberReferenceExpression) || dereference.Expression.GetResolveResult()?.Type is not PointerType)
@@ -1023,7 +1200,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"p->Z" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "(*p).Z"</summary>
+		/// <summary>"p->Z" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "(*p).Z"</summary>
 		static void AddArrowSite(PointerReferenceExpression arrow, List<Site> sites)
 		{
 			if (arrow.TypeArguments.Count != 0)
@@ -1041,7 +1218,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"!M()" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "M() == false" (bool only: the same IL).</summary>
+		/// <summary>"!M()" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "M() == false" (bool only: the same IL).</summary>
 		static void AddEqualsFalseSite(UnaryOperatorExpression not, List<Site> sites)
 		{
 			if (not.Expression.GetResolveResult()?.Type.IsKnownType(KnownTypeCode.Boolean) != true)
@@ -1058,7 +1235,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		}
 
 		/// <summary>
-		/// "(double)(a + b) + d" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "a + b + d": an implicit numeric conversion the compiler applies anyway, because the
+		/// "(double)(a + b) + d" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "a + b + d": an implicit numeric conversion the compiler applies anyway, because the
 		/// other operand already has the target type.
 		/// </summary>
 		static void AddImplicitCastSite(CastExpression cast, List<Site> sites)
@@ -1070,7 +1247,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			var other = binary.Left == cast ? binary.Right : binary.Left;
 			if (target is null || source is null || other?.GetResolveResult()?.Type is not { } otherType || !otherType.Equals(target))
 				return;
-			// int/long Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ double/float/decimal, int Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ long: widening conversions that keep the value
+			// int/long Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË double/float/decimal, int Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË long: widening conversions that keep the value
 			bool widening = (source.IsKnownType(KnownTypeCode.Int32) || source.IsKnownType(KnownTypeCode.Int64) || source.IsKnownType(KnownTypeCode.Int16))
 				&& (target.IsKnownType(KnownTypeCode.Double) || target.IsKnownType(KnownTypeCode.Decimal) || target.IsKnownType(KnownTypeCode.Int64) && !source.IsKnownType(KnownTypeCode.Int64));
 			if (!widening)
@@ -1085,7 +1262,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"M(a)" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "M(a)!" for a call whose result is annotated nullable (and isn't used with "!" already).</summary>
+		/// <summary>"M(a)" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "M(a)!" for a call whose result is annotated nullable (and isn't used with "!" already).</summary>
 		static void AddNullForgivingResultSite(InvocationExpression invocation, List<Site> sites)
 		{
 			if (invocation.Parent is UnaryOperatorExpression { Operator: UnaryOperatorType.SuppressNullableWarning } or MemberReferenceExpression
@@ -1103,7 +1280,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"M().P" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "M()!.P" (the source's null-forgiving operator; no IL).</summary>
+		/// <summary>"M().P" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "M()!.P" (the source's null-forgiving operator; no IL).</summary>
 		static void AddNullForgivingSite(MemberReferenceExpression member, List<Site> sites)
 		{
 			if (member.Target is not (InvocationExpression or MemberReferenceExpression) || member.Target.GetResolveResult()?.Type is not { IsReferenceType: true })
@@ -1135,7 +1312,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"c ? a : (b ?? d)" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "c ? a : b ?? d", "x = (c ? a : b)" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "x = c ? a : b" (no readability parentheses).</summary>
+		/// <summary>"c ? a : (b ?? d)" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "c ? a : b ?? d", "x = (c ? a : b)" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "x = c ? a : b" (no readability parentheses).</summary>
 		static void AddMinimalParenthesesSite(AstNode node, List<Site> sites)
 		{
 			if (node.Annotation<MinimalParenthesesAnnotation>() is not null)
@@ -1146,7 +1323,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"x += y" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "x = x + y" (statement level, simple targets, types where both mean the same).</summary>
+		/// <summary>"x += y" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "x = x + y" (statement level, simple targets, types where both mean the same).</summary>
 		static void AddCompoundAssignmentSite(AssignmentExpression assignment, List<Site> sites)
 		{
 			if (assignment.Parent is not ExpressionStatement || AssignmentExpression.GetCorrespondingBinaryOperator(assignment.Operator) is not { } op
@@ -1205,7 +1382,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				&& named.ElementNames.Length == tuple.Elements.Count && named.ElementNames.Any(n => n is not null)
 				&& !tuple.Elements.Any(e => e is NamedArgumentExpression))
 			{
-				// "(int Min, string name) t = (s.Min, "n")" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "var t = (s.Min, name: "n")" (Min is inferred from s.Min)
+				// "(int Min, string name) t = (s.Min, "n")" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "var t = (s.Min, name: "n")" (Min is inferred from s.Min)
 				site.Alternatives.Add(() => {
 					var undoType = SetDeclarationType(declaration, new SimpleType("var"));
 					var elements = tuple.Elements.ToList();
@@ -1263,7 +1440,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			return () => type.ReplaceWith(old);
 		}
 
-		/// <summary>"1.0" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "1" for a double/float/decimal argument (the int converts implicitly).</summary>
+		/// <summary>"1.0" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "1" for a double/float/decimal argument (the int converts implicitly).</summary>
 		static void AddIntegralLiteralSite(PrimitiveExpression literal, List<Site> sites)
 		{
 			if (literal.Value is not (double or float or decimal))
@@ -1304,7 +1481,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
-		/// <summary>"in x" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "ref x" (ref readonly parameter) or "x" (in / ref readonly parameter).</summary>
+		/// <summary>"in x" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "ref x" (ref readonly parameter) or "x" (in / ref readonly parameter).</summary>
 		static void AddDirectionSite(DirectionExpression direction, List<Site> sites)
 		{
 			if (direction.FieldDirection != FieldDirection.In || ParameterOf(direction) is not { } parameter)
@@ -1333,7 +1510,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			return () => direction.FieldDirection = old;
 		}
 
-		/// <summary>"M(a, b)" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "M&lt;T&gt;(a, b)" (the source may have spelled out inferable type arguments).</summary>
+		/// <summary>"M(a, b)" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "M&lt;T&gt;(a, b)" (the source may have spelled out inferable type arguments).</summary>
 		void AddTypeArgumentsSite(InvocationExpression invocation, List<Site> sites)
 		{
 			if (invocation.GetResolveResult() is not CSharpInvocationResolveResult { Member: IMethod { TypeArguments.Count: > 0 } method }
@@ -1362,7 +1539,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		}
 
 		/// <summary>
-		/// "M(a, 5, 'x')" with defaults "b = 5" Ä‚ËĂ˘â‚¬Â Ă˘â‚¬â„˘ "M(a, c: 'x')": arguments equal to their parameter's default value
+		/// "M(a, 5, 'x')" with defaults "b = 5" Ă„â€šĂ‹ÂÄ‚ËĂ˘â€šÂ¬Ă‚Â Ä‚ËĂ˘â€šÂ¬Ă˘â€žË "M(a, c: 'x')": arguments equal to their parameter's default value
 		/// are left out, the ones after them are named.
 		/// </summary>
 		static void AddOmittedArgumentsSite(Expression call, AstNodeCollection<Expression> arguments, List<Site> sites)

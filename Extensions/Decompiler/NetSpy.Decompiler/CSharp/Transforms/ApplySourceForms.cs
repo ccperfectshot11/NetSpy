@@ -108,6 +108,17 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					IntroduceEarlyExit(ifElse);
 				foreach (var checkedStatement in rootNode.Descendants.OfType<CheckedStatement>().ToList())
 					SplitCheckedBlock(checkedStatement);
+				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
+					IntroduceAsWithNullCheck(ifElse);
+			}
+			// "++x;" → "x++;" (statement level: the same; the usual spelling)
+			foreach (var statement in rootNode.Descendants.OfType<ExpressionStatement>().ToList())
+			{
+				if (statement.Expression is UnaryOperatorExpression { Operator: UnaryOperatorType.Increment or UnaryOperatorType.Decrement } step)
+					step.Operator = step.Operator == UnaryOperatorType.Increment ? UnaryOperatorType.PostIncrement : UnaryOperatorType.PostDecrement;
+			}
+			if (context.Settings.SourceLayoutFromPdb)
+			{
 				foreach (var entity in rootNode.Descendants.OfType<EntityDeclaration>().Where(e => e is not TypeDeclaration).ToList())
 					RestoreSourceNames(entity);
 			}
@@ -391,6 +402,44 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				forStatement.Iterators.Add(iterator.Detach());
 			forStatement.CopyAnnotationsFrom(whileStatement);
 			whileStatement.ReplaceWith(forStatement);
+		}
+
+		/// <summary>
+		/// "if (e is T v) { ... }" → "T? v = e as T; if (v != null) { ... }" when the PDB has the two source lines: a point as
+		/// wide as the declaration and, on the next line, one as wide as "if (v != null)".
+		/// </summary>
+		void IntroduceAsWithNullCheck(IfElseStatement ifElse)
+		{
+			if (ifElse.Parent is not BlockStatement block
+				|| ifElse.Condition is not BinaryOperatorExpression { Operator: BinaryOperatorType.IsPattern, Left: { } value,
+					Right: DeclarationExpression { Type: { } type, Designation: SingleVariableDesignation designation } }
+				|| type.GetResolveResult()?.Type is not { IsReferenceType: true }
+				|| ifElse.Annotation<SourceLayoutAnnotation>() is not { } layout
+				|| ApplySourceLayout.MethodPoints(ifElse, context) is not { } points)
+				return;
+			var options = context.Settings.CSharpFormattingOptions;
+			string name = designation.Identifier;
+			string valueText = value.ToString(options).Trim(), typeText = type.ToString(options).Trim();
+			int condition = ("if (" + name + " != null)").Length;
+			bool nullable;
+			if (Has(layout.StartLine, (typeText + "? " + name + " = " + valueText + " as " + typeText + ";").Length))
+				nullable = true;
+			else if (Has(layout.StartLine, (typeText + " " + name + " = " + valueText + " as " + typeText + ";").Length))
+				nullable = false;
+			else
+				return;
+			if (!Has(layout.StartLine + 1, condition))
+				return;
+			context.Step("Introduce as with null check", ifElse);
+			AstType declaredType = nullable ? new ComposedType { BaseType = type.Clone(), HasNullableSpecifier = true } : type.Clone();
+			var declarationValue = new AsExpression(value.Detach(), type.Clone());
+			var declaration = new VariableDeclarationStatement(declaredType, name, declarationValue);
+			declaration.Variables.Single().CopyAnnotationsFrom(designation);
+			var test = new BinaryOperatorExpression(new IdentifierExpression(name).CopyAnnotationsFrom(designation), BinaryOperatorType.InEquality, new NullReferenceExpression());
+			ifElse.Condition = test;
+			block.Statements.InsertBefore(ifElse, declaration);
+
+			bool Has(int line, int width) => points.Any(sp => sp.StartLine == line && sp.EndLine == line && sp.EndColumn - sp.StartColumn == width);
 		}
 
 		/// <summary>

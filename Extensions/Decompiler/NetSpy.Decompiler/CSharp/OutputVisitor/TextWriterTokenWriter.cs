@@ -437,14 +437,13 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 				{
 					b.Append(((IFormattable)value).ToString(null, NumberFormatInfo.InvariantInfo));
 				}
-				if (value is uint || value is ulong)
-				{
+				// NetSpy: "u" for uint, "L" for long, "UL" for ulong (the .NET style)
+				if (value is uint)
 					b.Append("u");
-				}
-				if (value is long || value is ulong)
-				{
+				else if (value is ulong)
+					b.Append("UL");
+				else if (value is long)
 					b.Append("L");
-				}
 				textWriter.Write(b.ToString());
 				column += b.Length;
 				Length += b.Length;

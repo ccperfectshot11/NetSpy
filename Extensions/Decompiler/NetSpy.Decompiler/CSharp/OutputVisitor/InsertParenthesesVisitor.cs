@@ -390,7 +390,8 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			}
 			else
 			{
-				if (InsertParenthesesForReadability && precedence < PrecedenceLevel.Equality)
+				if (InsertParenthesesForReadability && precedence < PrecedenceLevel.Equality
+					&& binaryOperatorExpression.Annotation<MinimalParenthesesAnnotation>() is null)
 				{
 					// In readable mode, boost the priority of the left-hand side if the operator
 					// there isn't the same as the operator on this expression.
