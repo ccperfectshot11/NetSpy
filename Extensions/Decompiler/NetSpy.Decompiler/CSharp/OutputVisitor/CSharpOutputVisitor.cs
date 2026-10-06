@@ -2426,6 +2426,12 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 					usingStatement.EmbeddedStatement.AcceptVisitor(this);
 				}
 			}
+			else if (usingStatement.EmbeddedStatement is UsingStatement { IsEnhanced: false } stacked)
+			{
+				// NetSpy: "using (a)\nusing (b)\n{ ... }" (stacked: no braces, no indentation)
+				NewLine();
+				stacked.AcceptVisitor(this);
+			}
 			else
 			{
 				WriteEmbeddedStatement(usingStatement.EmbeddedStatement);

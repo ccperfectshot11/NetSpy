@@ -56,6 +56,23 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					usingStatement.IsEnhanced = true;
 				}
 			}
+			foreach (var usingStatement in rootNode.Descendants.OfType<UsingStatement>().ToList())
+				StackUsings(usingStatement, context);
+		}
+
+		/// <summary>
+		/// "using (a) { using (b) { ... } }" whose inner header starts at the outer one's column was written stacked:
+		/// "using (a)\nusing (b)\n{ ... }".
+		/// </summary>
+		static void StackUsings(UsingStatement outer, TransformContext context)
+		{
+			if (outer.IsEnhanced || outer.EmbeddedStatement is not BlockStatement { Statements.Count: 1 } block
+				|| block.Statements.Single() is not UsingStatement { IsEnhanced: false } inner
+				|| outer.Annotation<SourceLayoutAnnotation>() is not { } outerLayout || inner.Annotation<SourceLayoutAnnotation>() is not { } innerLayout
+				|| innerLayout.StartColumn != outerLayout.StartColumn || innerLayout.StartLine <= outerLayout.StartLine)
+				return;
+			context.Step("Stack usings", outer);
+			outer.EmbeddedStatement = inner.Detach();
 		}
 
 		/// <summary>The column the statements of the using's block start at (from its siblings, or from its own body).</summary>
