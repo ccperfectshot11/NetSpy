@@ -118,6 +118,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					IntroduceLateExit(ifElse);
 				foreach (var whileStatement in rootNode.Descendants.OfType<WhileStatement>().ToList())
 					IntroduceOutVarInLoopCondition(whileStatement);
+				foreach (var declaration in rootNode.Descendants.OfType<VariableDeclarationStatement>().ToList())
+					IntroduceIsVar(declaration);
 				foreach (var checkedStatement in rootNode.Descendants.OfType<CheckedStatement>().ToList())
 					SplitCheckedBlock(checkedStatement);
 				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
@@ -816,6 +818,36 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			ifElse.TrueStatement = new BlockStatement { exit };
 			foreach (var statement in statements)
 				body.Statements.Add(statement.Detach());
+		}
+
+		/// <summary>
+		/// "T x = e; S1; S2;" whose sequence point is as wide as "if (e is var x)" and whose next statements are indented
+		/// one level more was "if (e is var x) { S1; S2; }" (always true: the compiler dropped the test).
+		/// </summary>
+		void IntroduceIsVar(VariableDeclarationStatement declaration)
+		{
+			if (declaration.Parent is not BlockStatement block || declaration.Variables.Count != 1 || declaration.Modifiers != Modifiers.None
+				|| declaration.Variables.Single() is not { Initializer: { } value } variable
+				|| declaration.Annotation<SourceLayoutAnnotation>() is not { Width: > 0 } layout
+				|| layout.Width != ("if (" + value.ToString(context.Settings.CSharpFormattingOptions).Trim() + " is var " + variable.Name + ")").Length)
+				return;
+			var body = new List<Statement>();
+			for (var next = declaration.NextSibling as Statement; next?.Annotation<SourceLayoutAnnotation>() is { } inner
+				&& inner.StartColumn == layout.StartColumn + 4 && inner.StartLine > layout.StartLine; next = next.NextSibling as Statement)
+				body.Add(next);
+			if (body.Count == 0)
+				return;
+			context.Step("Introduce is var", declaration);
+			var designation = new SingleVariableDesignation { Identifier = variable.Name };
+			designation.CopyAnnotationsFrom(variable);
+			var condition = new BinaryOperatorExpression(value.Detach(), BinaryOperatorType.IsPattern,
+				new DeclarationExpression { Type = new SimpleType("var"), Designation = designation });
+			var inside = new BlockStatement();
+			foreach (var statement in body)
+				inside.Statements.Add(statement.Detach());
+			var ifElse = new IfElseStatement(condition, inside);
+			ifElse.CopyAnnotationsFrom(declaration);
+			declaration.ReplaceWith(ifElse);
 		}
 
 		/// <summary>
