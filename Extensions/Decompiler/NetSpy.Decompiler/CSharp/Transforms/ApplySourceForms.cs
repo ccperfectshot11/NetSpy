@@ -110,6 +110,13 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					SplitCheckedBlock(checkedStatement);
 				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
 					IntroduceAsWithNullCheck(ifElse);
+				foreach (var block in rootNode.Descendants.OfType<BlockStatement>().ToList())
+				{
+					IntroduceStructWith(block);
+					IntroduceInterpolatedHandler(block);
+				}
+				foreach (var creation in rootNode.Descendants.OfType<AnonymousTypeCreateExpression>().ToList())
+					IntroduceAnonymousWith(creation);
 			}
 			// "++x;" → "x++;" (statement level: the same; the usual spelling)
 			foreach (var statement in rootNode.Descendants.OfType<ExpressionStatement>().ToList())
@@ -402,6 +409,185 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				forStatement.Iterators.Add(iterator.Detach());
 			forStatement.CopyAnnotationsFrom(whileStatement);
 			whileStatement.ReplaceWith(forStatement);
+		}
+
+		/// <summary>The two statements belong to the same source statement (same sequence point).</summary>
+		static bool SameSource(Statement a, Statement b)
+		{
+			return a.Annotation<SourceLayoutAnnotation>() is { } x && b.Annotation<SourceLayoutAnnotation>() is { } y
+				&& x.StartLine == y.StartLine && x.StartColumn == y.StartColumn;
+		}
+
+		/// <summary>The number of identifiers of the member that read <paramref name="variable"/>.</summary>
+		static int Uses(AstNode scope, ILVariable variable)
+		{
+			var entity = scope.Ancestors.OfType<EntityDeclaration>().FirstOrDefault() ?? scope;
+			return entity.Descendants.OfType<IdentifierExpression>().Count(id => id.GetILVariable() == variable);
+		}
+
+		/// <summary>
+		/// "T copy = s; copy.P = v; ...; use(copy);" (one source statement, a struct copy) is "use(s with { P = v })".
+		/// </summary>
+		void IntroduceStructWith(BlockStatement block)
+		{
+			if (!context.Settings.WithExpressions)
+				return;
+			var statements = block.Statements.ToList();
+			for (int i = 0; i < statements.Count; i++)
+			{
+				if (statements[i] is not VariableDeclarationStatement { Variables.Count: 1 } declaration
+					|| declaration.Variables.Single() is not { Initializer: { } source } copyVariable
+					|| copyVariable.GetILVariable() is not { HasGeneratedName: true } copy || copy.Type.IsReferenceType != false
+					|| !IsSimpleTarget(source))
+					continue;
+				var assignments = new List<(string Name, Expression Value)>();
+				int j = i + 1;
+				for (; j < statements.Count && SameSource(statements[i], statements[j]); j++)
+				{
+					if (statements[j] is ExpressionStatement { Expression: AssignmentExpression { Operator: AssignmentOperatorType.Assign,
+						Left: MemberReferenceExpression { Target: IdentifierExpression target } member } assignment }
+						&& target.GetILVariable() == copy && !assignment.Right.DescendantsAndSelf.OfType<IdentifierExpression>().Any(id => id.GetILVariable() == copy))
+					{
+						assignments.Add((member.MemberName, assignment.Right));
+						continue;
+					}
+					break;
+				}
+				if (assignments.Count == 0 || j >= statements.Count || !SameSource(statements[i], statements[j]))
+					continue;
+				int usesBefore = assignments.Count;
+				var use = statements[j].DescendantsAndSelf.OfType<IdentifierExpression>().Where(id => id.GetILVariable() == copy).ToList();
+				if (use.Count != 1 || Uses(block, copy) != usesBefore + 1)
+					continue;
+				context.Step("Introduce struct with", declaration);
+				var initializer = new ArrayInitializerExpression();
+				foreach (var (name, value) in assignments)
+					initializer.Elements.Add(new NamedExpression(name, value.Detach()));
+				var with = new WithInitializerExpression { Expression = source.Detach(), Initializer = initializer };
+				with.CopyAnnotationsFrom(use[0]);
+				use[0].ReplaceWith(with);
+				statements[j].CopyAnnotationsFrom(statements[i]);
+				for (int k = i; k < j; k++)
+					statements[k].Remove();
+				statements = block.Statements.ToList();
+			}
+		}
+
+		/// <summary>
+		/// "new { A = x.A, B = v }" where x has the same anonymous type is "x with { B = v }"; the values the compiler stored
+		/// in temporaries first (same sequence point) are put back.
+		/// </summary>
+		void IntroduceAnonymousWith(AnonymousTypeCreateExpression creation)
+		{
+			if (!context.Settings.WithExpressions || creation.GetResolveResult()?.Type is not { } type || !type.ContainsAnonymousType()
+				|| creation.Ancestors.OfType<Statement>().FirstOrDefault() is not { } statement)
+				return;
+			IdentifierExpression? source = null;
+			var changed = new List<NamedExpression>();
+			foreach (var initializer in creation.Initializers)
+			{
+				if (initializer is not NamedExpression named)
+					return;
+				if (named.Expression is MemberReferenceExpression { Target: IdentifierExpression x } member && member.MemberName == named.Name
+					&& x.GetResolveResult()?.Type is { } xType && xType.Equals(type) && (source is null || source.Identifier == x.Identifier))
+				{
+					source = x;
+					continue;
+				}
+				changed.Add(named);
+			}
+			if (source is null || changed.Count == 0)
+				return;
+			// temporaries the compiler made for the new values, declared right before (same source statement)
+			var temps = new List<VariableDeclarationStatement>();
+			foreach (var named in changed)
+			{
+				if (named.Expression is IdentifierExpression id && id.GetILVariable() is { HasGeneratedName: true } v
+					&& statement.PrevSibling is VariableDeclarationStatement { Variables.Count: 1 } d && d.Variables.Single().GetILVariable() == v
+					&& SameSource(d, statement) && Uses(statement, v) == 1)
+					temps.Add(d);
+			}
+			context.Step("Introduce anonymous with", creation);
+			var initializerList = new ArrayInitializerExpression();
+			foreach (var named in changed)
+			{
+				var value = named.Expression;
+				var temp = temps.FirstOrDefault(t => value is IdentifierExpression id && t.Variables.Single().GetILVariable() == id.GetILVariable());
+				Expression actual = temp is not null ? temp.Variables.Single().Initializer!.Detach() : value.Detach();
+				initializerList.Elements.Add(new NamedExpression(named.Name, actual));
+			}
+			var with = new WithInitializerExpression { Expression = source.Clone(), Initializer = initializerList };
+			with.CopyAnnotationsFrom(creation);
+			creation.ReplaceWith(with);
+			foreach (var temp in temps)
+			{
+				statement.CopyAnnotationsFrom(temp);
+				temp.Remove();
+			}
+		}
+
+		/// <summary>
+		/// "var h = new H(n, k); h.AppendLiteral("a"); h.AppendFormatted(x); M(h);" for an [InterpolatedStringHandler] H,
+		/// all one source statement, is "M($"a{x}")".
+		/// </summary>
+		void IntroduceInterpolatedHandler(BlockStatement block)
+		{
+			var statements = block.Statements.ToList();
+			for (int i = 0; i < statements.Count; i++)
+			{
+				if (statements[i] is not VariableDeclarationStatement { Variables.Count: 1 } declaration
+					|| declaration.Variables.Single() is not { Initializer: ObjectCreateExpression { Arguments.Count: >= 2 } } handlerVariable
+					|| handlerVariable.GetILVariable() is not { HasGeneratedName: true } handler
+					|| handler.Type.GetDefinition()?.GetAttributes().Any(a => a.AttributeType.FullName == "System.Runtime.CompilerServices.InterpolatedStringHandlerAttribute") != true)
+					continue;
+				var content = new List<InterpolatedStringContent>();
+				int j = i + 1;
+				bool valid = true;
+				for (; j < statements.Count && SameSource(statements[i], statements[j]); j++)
+				{
+					if (statements[j] is not ExpressionStatement { Expression: InvocationExpression { Target: MemberReferenceExpression { Target: IdentifierExpression target } member } call }
+						|| target.GetILVariable() != handler)
+						break;
+					var arguments = call.Arguments.ToList();
+					if (member.MemberName == "AppendLiteral" && arguments.Count == 1 && arguments[0] is PrimitiveExpression { Value: string text })
+					{
+						content.Add(new InterpolatedStringText(text.Replace("{", "{{").Replace("}", "}}")));
+					}
+					else if (member.MemberName == "AppendFormatted" && arguments.Count is >= 1 and <= 3)
+					{
+						int alignment = 0;
+						string? format = null;
+						foreach (var extra in arguments.Skip(1))
+						{
+							if (extra is PrimitiveExpression { Value: int a })
+								alignment = a;
+							else if (extra is PrimitiveExpression { Value: string f })
+								format = f;
+							else
+								valid = false;
+						}
+						content.Add(new Interpolation(arguments[0].Clone(), alignment, format));
+					}
+					else
+					{
+						break;
+					}
+				}
+				if (!valid || content.Count == 0 || j >= statements.Count || !SameSource(statements[i], statements[j]))
+					continue;
+				var use = statements[j].DescendantsAndSelf.OfType<IdentifierExpression>().Where(id => id.GetILVariable() == handler).ToList();
+				if (use.Count != 1 || Uses(block, handler) != j - i)
+					continue;
+				context.Step("Introduce interpolated string handler", declaration);
+				var interpolated = new InterpolatedStringExpression();
+				interpolated.Content.AddRange(content);
+				interpolated.CopyAnnotationsFrom(use[0]);
+				use[0].ReplaceWith(interpolated);
+				statements[j].CopyAnnotationsFrom(statements[i]);
+				for (int k = i; k < j; k++)
+					statements[k].Remove();
+				statements = block.Statements.ToList();
+			}
 		}
 
 		/// <summary>
