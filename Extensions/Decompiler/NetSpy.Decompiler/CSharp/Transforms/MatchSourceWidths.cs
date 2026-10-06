@@ -1752,7 +1752,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			int offset = resolved.IsExtensionMethodInvocation ? 1 : 0;
 			var parameters = resolved.Member.Parameters;
 			var list = arguments.ToList();
-			if (list.Count + offset != parameters.Count)
+			// trailing default arguments may already be left out
+			if (list.Count + offset > parameters.Count)
 				return;
 			var omittable = new List<int>();
 			for (int i = 0; i < list.Count; i++)
