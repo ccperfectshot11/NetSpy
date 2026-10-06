@@ -106,6 +106,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					IntroduceNestedReturnTernary(ifElse);
 				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
 					IntroduceEarlyExit(ifElse);
+				foreach (var checkedStatement in rootNode.Descendants.OfType<CheckedStatement>().ToList())
+					SplitCheckedBlock(checkedStatement);
 				foreach (var entity in rootNode.Descendants.OfType<EntityDeclaration>().Where(e => e is not TypeDeclaration).ToList())
 					RestoreSourceNames(entity);
 			}
@@ -389,6 +391,93 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				forStatement.Iterators.Add(iterator.Detach());
 			forStatement.CopyAnnotationsFrom(whileStatement);
 			whileStatement.ReplaceWith(forStatement);
+		}
+
+		/// <summary>
+		/// "checked { S1; S2; }": a leading or trailing statement whose sequence points are as wide as its checked
+		/// operations written "checked(...)" was outside the block in the source: it moves out, with checked expressions.
+		/// </summary>
+		void SplitCheckedBlock(CheckedStatement checkedStatement)
+		{
+			if (checkedStatement.Parent is not BlockStatement)
+				return;
+			var statements = checkedStatement.Body.Statements.ToList();
+			int prefix = 0;
+			while (prefix < statements.Count && Preference(statements[prefix]) is true)
+				prefix++;
+			int suffix = 0;
+			while (suffix < statements.Count - prefix && Preference(statements[statements.Count - 1 - suffix]) is true)
+				suffix++;
+			if (prefix == 0 && suffix == 0)
+				return;
+			context.Step("Split checked block", checkedStatement);
+			foreach (var statement in statements.Take(prefix))
+			{
+				statement.Remove();
+				WrapChecked(statement);
+				((BlockStatement)checkedStatement.Parent!).Statements.InsertBefore(checkedStatement, statement);
+			}
+			foreach (var statement in statements.Skip(statements.Count - suffix).Reverse())
+			{
+				statement.Remove();
+				WrapChecked(statement);
+				((BlockStatement)checkedStatement.Parent!).Statements.InsertAfter(checkedStatement, statement);
+			}
+			if (checkedStatement.Body.Statements.Count == 0)
+				checkedStatement.Remove();
+
+			// true: the statement's leaf statements with checked operations all match their widths only with checked(...);
+			// false: one matches only without; null: no evidence
+			bool? Preference(Statement statement)
+			{
+				bool? result = null;
+				foreach (var leaf in statement.DescendantsAndSelf.OfType<Statement>().Where(s => s is not BlockStatement))
+				{
+					if (leaf.Annotation<SourceLayoutAnnotation>() is not { Width: > 0 } layout || !TopChecked(leaf).Any())
+						continue;
+					if (leaf is not (ExpressionStatement or ReturnStatement or VariableDeclarationStatement))
+						continue;
+					int bare = Width(leaf);
+					var clone = (Statement)leaf.Clone();
+					WrapChecked(clone);
+					int wrapped = Width(clone);
+					if (wrapped == layout.Width && bare != layout.Width)
+						result ??= true;
+					else if (bare == layout.Width)
+						return false;
+					else
+						return null;
+				}
+				return result;
+			}
+
+			int Width(AstNode node)
+			{
+				var clone = node.Clone();
+				clone.AcceptVisitor(new InsertParenthesesVisitor { InsertParenthesesForReadability = true });
+				var text = clone.ToString(context.Settings.CSharpFormattingOptions).Trim();
+				return text.IndexOf('\n') >= 0 ? -1 : text.Length;
+			}
+		}
+
+		/// <summary>The outermost expressions of a statement that need a checked context (not counting nested statements' own).</summary>
+		static IEnumerable<Expression> TopChecked(Statement statement)
+		{
+			return statement.Descendants.OfType<Expression>().Where(e => e.Annotations.Contains(AddCheckedBlocks.CheckedAnnotation)
+				&& !e.Ancestors.TakeWhile(a => a != statement).Any(a => a is Statement || a.Annotations.Contains(AddCheckedBlocks.CheckedAnnotation)));
+		}
+
+		static void WrapChecked(Statement statement)
+		{
+			foreach (var leaf in statement.DescendantsAndSelf.OfType<Statement>().ToList())
+			{
+				foreach (var expression in TopChecked(leaf).ToList())
+				{
+					var wrapped = new CheckedExpression();
+					expression.ReplaceWith(wrapped);
+					wrapped.Expression = expression;
+				}
+			}
 		}
 
 		/// <summary>
