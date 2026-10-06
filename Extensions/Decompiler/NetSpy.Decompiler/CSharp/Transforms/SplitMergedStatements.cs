@@ -22,6 +22,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection.Metadata;
 
+using NetSpy.Decompiler.CSharp.Resolver;
 using NetSpy.Decompiler.CSharp.Syntax;
 using NetSpy.Decompiler.IL;
 using NetSpy.Decompiler.IL.Transforms;
@@ -106,11 +107,16 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			for (int i = 2; usedNames.Contains(name); i++)
 				name = baseName + i;
 			usedNames.Add(name);
+			var reference = new IdentifierExpression(name);
+			candidate.ReplaceWith(reference);
+			// "(object)42" made the conversion the declaration did: "object o = 42;"
+			if (candidate is CastExpression { Expression: { } converted } && converted.GetResolveResult() is { Type: { Kind: not TypeKind.Unknown } convertedType }
+				&& CSharpConversions.Get(context.TypeSystem) is var conversions
+				&& conversions.ImplicitConversion(convertedType, type) is { IsValid: true, IsUserDefined: false })
+				candidate = converted.Detach();
 			AstType declaredType = context.Settings.ImplicitlyTypedLocals && IsTypeApparent(candidate) || type.ContainsAnonymousType()
 				? new SimpleType("var")
 				: context.TypeSystemAstBuilder.ConvertType(type);
-			var reference = new IdentifierExpression(name);
-			candidate.ReplaceWith(reference);
 			var declaration = new VariableDeclarationStatement(declaredType, name, candidate);
 			statement.Parent!.InsertChildBefore(statement, declaration, Slots.Statement);
 		}

@@ -1485,10 +1485,11 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			return () => type.ReplaceWith(old);
 		}
 
-		/// <summary>"1.0" → "1" for a double/float/decimal argument (the int converts implicitly).</summary>
+		/// <summary>"1.0" / "1L" → "1" for a double/float/decimal/long target (an argument, an operand, an assignment or an
+		/// explicitly typed local): the int converts implicitly.</summary>
 		static void AddIntegralLiteralSite(PrimitiveExpression literal, List<Site> sites)
 		{
-			if (literal.Value is not (double or float or decimal))
+			if (literal.Value is not (double or float or decimal or long or ulong))
 				return;
 			// the type the literal converts to: a parameter's, or the other operand's / the compound assignment's target
 			IType? parameterType = ParameterOf(literal)?.Type;
@@ -1500,11 +1501,15 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				if (other is not PrimitiveExpression)
 					parameterType = other?.GetResolveResult()?.Type;
 			}
-			if (parameterType is null && literal.Parent is AssignmentExpression { Operator: not AssignmentOperatorType.Assign } compound && compound.Right == literal)
+			if (parameterType is null && literal.Parent is AssignmentExpression compound && compound.Right == literal)
 				parameterType = compound.Left.GetResolveResult()?.Type;
+			// "double d = 4;" (not with var: the literal gives var its type)
+			if (parameterType is null && literal.Parent is VariableInitializer { Parent: VariableDeclarationStatement declaration } && !declaration.Type.IsVar())
+				parameterType = declaration.Type.GetResolveResult()?.Type;
 			if (parameterType is null || !parameterType.Equals(literal.GetResolveResult()?.Type))
 				return;
-			if (!(parameterType.IsKnownType(KnownTypeCode.Double) || parameterType.IsKnownType(KnownTypeCode.Single) || parameterType.IsKnownType(KnownTypeCode.Decimal)))
+			if (!(parameterType.IsKnownType(KnownTypeCode.Double) || parameterType.IsKnownType(KnownTypeCode.Single) || parameterType.IsKnownType(KnownTypeCode.Decimal)
+				|| parameterType.IsKnownType(KnownTypeCode.Int64) || parameterType.IsKnownType(KnownTypeCode.UInt64)))
 				return;
 			decimal value;
 			try
