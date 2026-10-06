@@ -63,6 +63,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				var sequencePoints = provider.GetSequencePoints((MethodDefinitionHandle)method.MetadataToken).Where(sp => !sp.IsHidden).ToList();
 				if (sequencePoints.Count == 0)
 					continue;
+				PlaceLocalFunctions(body, sequencePoints, provider, mainModule);
 				AnnotateStatements(body, sequencePoints);
 				bodies.Add((body, sequencePoints));
 			}
@@ -82,7 +83,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				Statement? previousStatement = null;
 				foreach (var statement in blockStatements)
 				{
-					var layout = GetLayout(statement, body, sequencePoints);
+					var layout = GetLayout(statement, body, sequencePoints) ?? statement.Annotation<SourceLayoutAnnotation>();
 					// NetSpy: a statement can't start before the previous one ends; a point that early belongs to shared IL
 					// (cached delegates...): use the statement's points after the previous statement
 					if (layout is not null && previous is not null && layout.StartLine < previous.EndLine
@@ -106,6 +107,49 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					previous = layout;
 					previousStatement = statement;
 				}
+			}
+		}
+
+		/// <summary>
+		/// NetSpy: the decompiler puts local functions at the end of their block; the source's place is known from the
+		/// function's own sequence points (its body's lines): before the first statement written below it.
+		/// </summary>
+		static void PlaceLocalFunctions(BlockStatement body, List<DebugInfo.SequencePoint> sequencePoints, DebugInfo.IDebugInfoProvider provider, IModule mainModule)
+		{
+			foreach (var localFunction in body.Descendants.OfType<LocalFunctionDeclarationStatement>().ToList())
+			{
+				if (localFunction.Parent is not BlockStatement block || IsInOtherFunction(block, body)
+					|| localFunction.Declaration.GetSymbol() is not IMethod { MetadataToken: { IsNil: false, Kind: HandleKind.MethodDefinition } token } method
+					|| method.ParentModule != mainModule)
+					continue;
+				var points = provider.GetSequencePoints((MethodDefinitionHandle)token).Where(sp => !sp.IsHidden).ToList();
+				if (points.Count == 0)
+					continue;
+				var first = points.OrderBy(sp => sp.StartLine).ThenBy(sp => sp.StartColumn).First();
+				// "{" on its own line: the signature is the line above
+				int line = IsBrace(first) ? first.StartLine - 1 : first.StartLine;
+				localFunction.AddAnnotation(new SourceLayoutAnnotation {
+					StartLine = line,
+					StartColumn = first.StartColumn,
+					EndLine = points.Max(sp => sp.EndLine),
+					IsSingleLine = points.All(sp => sp.StartLine == line && sp.EndLine == line),
+					Document = first.DocumentUrl,
+					Width = -1
+				});
+				var after = block.Statements.FirstOrDefault(s => s != localFunction && GetLayout(s, body, sequencePoints) is { } l && l.StartLine > line);
+				if (after == localFunction.NextSibling || after is null && localFunction.NextSibling is null)
+					continue;
+				// the variables it uses that this block declares must be declared before it
+				var target = after ?? (Statement?)null;
+				var declaredLater = new HashSet<string>(block.Statements.SkipWhile(s => s != target).TakeWhile(s => target is not null)
+					.OfType<VariableDeclarationStatement>().SelectMany(d => d.Variables).Select(v => v.Name));
+				if (target is not null && localFunction.Declaration.Descendants.OfType<IdentifierExpression>().Any(id => declaredLater.Contains(id.Identifier)))
+					continue;
+				localFunction.Remove();
+				if (target is null)
+					block.Statements.Add(localFunction);
+				else
+					block.Statements.InsertBefore(target, localFunction);
 			}
 		}
 
