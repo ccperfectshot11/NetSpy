@@ -428,7 +428,31 @@ namespace NetSpy.Decompiler.Engine.Core.CSharp {
 				extraTypeInfo.TupleElementNames = names;
 				found = true;
 			}
+			// NetSpy: a portable PDB keeps the dynamic flags on the local itself
+			if (extraTypeInfo.DynamicFlags is null && body.PdbMethod?.Scope is PdbScope localScope && TryGetDynamicFlags(localScope, index, out var flags)) {
+				extraTypeInfo.DynamicFlags = flags;
+				found = true;
+			}
 			return found;
+		}
+
+		static bool TryGetDynamicFlags(PdbScope scope, int index, out bool[] flags) {
+			foreach (var local in scope.Variables) {
+				if (local.Index != index)
+					continue;
+				foreach (var cdi in local.CustomDebugInfos) {
+					if (cdi is PdbDynamicLocalVariablesCustomDebugInfo dynamicInfo) {
+						flags = dynamicInfo.Flags;
+						return true;
+					}
+				}
+			}
+			foreach (var child in scope.Scopes) {
+				if (TryGetDynamicFlags(child, index, out flags))
+					return true;
+			}
+			flags = null!;
+			return false;
 		}
 
 		static bool TryGetTupleNames(PdbScope scope, int index, out string[] names) {

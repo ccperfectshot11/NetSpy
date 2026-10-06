@@ -93,7 +93,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			var inside = new HashSet<AstNode>(candidate.DescendantsAndSelf);
 			foreach (var node in statement.DescendantsAndSelf)
 			{
-				if (inside.Contains(node) || ancestors.Contains(node))
+				if (inside.Contains(node) || ancestors.Contains(node) || IsInOtherFunction(node, statement))
 					continue;
 				if (OwnRanges(node).Any(r => r.Start < split))
 					return;
@@ -114,6 +114,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				&& CSharpConversions.Get(context.TypeSystem) is var conversions
 				&& conversions.ImplicitConversion(convertedType, type) is { IsValid: true, IsUserDefined: false })
 				candidate = converted.Detach();
+			// "(Func<int, int>)(x => x + 1)": the declaration gave the lambda its delegate type
+			else if (candidate is CastExpression { Expression: LambdaExpression or AnonymousMethodExpression } delegateCast && type.Kind == TypeKind.Delegate)
+				candidate = delegateCast.Expression.Detach();
 			AstType declaredType = context.Settings.ImplicitlyTypedLocals && IsTypeApparent(candidate) || type.ContainsAnonymousType()
 				? new SimpleType("var")
 				: context.TypeSystemAstBuilder.ConvertType(type);
@@ -142,7 +145,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				or CastExpression or AsExpression or DefaultValueExpression or AnonymousTypeCreateExpression;
 		}
 
-		static IEnumerable<Interval> Ranges(AstNode node) => node.DescendantsAndSelf.SelectMany(OwnRanges);
+		// a lambda's body has the IL offsets of its own method: they say nothing about this one's sequence points
+		static IEnumerable<Interval> Ranges(AstNode node) => node.DescendantsAndSelf.Where(n => !IsInOtherFunction(n, node)).SelectMany(OwnRanges);
 
 		static IEnumerable<Interval> OwnRanges(AstNode node) => node.Annotations.OfType<ILInstruction>().SelectMany(i => i.ILRanges).Where(r => !r.IsEmpty);
 

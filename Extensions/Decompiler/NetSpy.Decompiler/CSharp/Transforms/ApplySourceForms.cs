@@ -119,7 +119,12 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				foreach (var whileStatement in rootNode.Descendants.OfType<WhileStatement>().ToList())
 					IntroduceOutVarInLoopCondition(whileStatement);
 				foreach (var declaration in rootNode.Descendants.OfType<VariableDeclarationStatement>().ToList())
+				{
 					IntroduceIsVar(declaration);
+					UseDynamicCreationType(declaration);
+				}
+				foreach (var block in rootNode.Descendants.OfType<BlockStatement>().ToList())
+					CollapseDynamicIncrement(block);
 				foreach (var checkedStatement in rootNode.Descendants.OfType<CheckedStatement>().ToList())
 					SplitCheckedBlock(checkedStatement);
 				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
@@ -818,6 +823,54 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			ifElse.TrueStatement = new BlockStatement { exit };
 			foreach (var statement in statements)
 				body.Statements.Add(statement.Detach());
+		}
+
+		/// <summary>
+		/// "var x = new List&lt;object&gt; { ... }" whose local the PDB types "List&lt;dynamic&gt;": the source created a
+		/// "new List&lt;dynamic&gt;" (dynamic exists only in the local's debug info).
+		/// </summary>
+		void UseDynamicCreationType(VariableDeclarationStatement declaration)
+		{
+			if (declaration.Variables.Count != 1 || declaration.Variables.Single() is not { Initializer: ObjectCreateExpression { Type: not null } creation } variable
+				|| variable.GetILVariable()?.Type is not { } localType || creation.GetResolveResult()?.Type is not { } created
+				|| !NormalizeTypeVisitor.TypeErasure.EquivalentTypes(localType, created)
+				|| NormalizeTypeVisitor.IgnoreNullabilityAndTuples.EquivalentTypes(localType, created))
+				return;
+			context.Step("Dynamic creation type", creation);
+			creation.Type = context.TypeSystemAstBuilder.ConvertType(localType);
+		}
+
+		/// <summary>
+		/// "dynamic t = x; dynamic u = t.P; t.P = ++u;" (the compiler's temporaries, one source statement) is "x.P++;".
+		/// </summary>
+		void CollapseDynamicIncrement(BlockStatement block)
+		{
+			var statements = block.Statements.ToList();
+			for (int i = 0; i + 2 < statements.Count; i++)
+			{
+				if (statements[i] is not VariableDeclarationStatement { Variables.Count: 1 } first
+					|| first.Variables.Single() is not { Initializer: IdentifierExpression or MemberReferenceExpression or ThisReferenceExpression } target
+					|| target.GetILVariable() is not { HasGeneratedName: true } targetVariable
+					|| statements[i + 1] is not VariableDeclarationStatement { Variables.Count: 1 } second
+					|| second.Variables.Single() is not { Initializer: MemberReferenceExpression { Target: IdentifierExpression read } member } value
+					|| read.GetILVariable() != targetVariable || value.GetILVariable() is not { HasGeneratedName: true } valueVariable
+					|| statements[i + 2] is not ExpressionStatement { Expression: AssignmentExpression { Operator: AssignmentOperatorType.Assign,
+						Left: MemberReferenceExpression { Target: IdentifierExpression write } written,
+						Right: UnaryOperatorExpression { Operator: UnaryOperatorType.Increment or UnaryOperatorType.Decrement, Expression: IdentifierExpression stepped } step } }
+					|| write.GetILVariable() != targetVariable || written.MemberName != member.MemberName || stepped.GetILVariable() != valueVariable
+					|| block.Descendants.OfType<IdentifierExpression>().Count(id => id.GetILVariable() == targetVariable) != 2
+					|| block.Descendants.OfType<IdentifierExpression>().Count(id => id.GetILVariable() == valueVariable) != 1)
+					continue;
+				context.Step("Collapse dynamic increment", first);
+				var operation = new UnaryOperatorExpression(step.Operator == UnaryOperatorType.Increment ? UnaryOperatorType.PostIncrement : UnaryOperatorType.PostDecrement,
+					new MemberReferenceExpression(target.Initializer.Detach(), member.MemberName));
+				var statement = new ExpressionStatement(operation);
+				statement.CopyAnnotationsFrom(first);
+				first.ReplaceWith(statement);
+				statements[i + 1].Remove();
+				statements[i + 2].Remove();
+				statements = block.Statements.ToList();
+			}
 		}
 
 		/// <summary>
