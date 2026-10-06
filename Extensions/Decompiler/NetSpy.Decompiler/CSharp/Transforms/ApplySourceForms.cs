@@ -114,6 +114,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					IntroduceNestedReturnTernary(ifElse);
 				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
 					IntroduceEarlyExit(ifElse);
+				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
+					IntroduceLateExit(ifElse);
 				foreach (var checkedStatement in rootNode.Descendants.OfType<CheckedStatement>().ToList())
 					SplitCheckedBlock(checkedStatement);
 				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
@@ -812,6 +814,35 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			ifElse.TrueStatement = new BlockStatement { exit };
 			foreach (var statement in statements)
 				body.Statements.Add(statement.Detach());
+		}
+
+		/// <summary>
+		/// "if (!C) { return x; } REST" closing a block, where the source put the exit after REST (its sequence point is on a
+		/// later line), was "if (C) { REST } else { return x; }"; as the only statement of an else it is an "else if".
+		/// </summary>
+		void IntroduceLateExit(IfElseStatement ifElse)
+		{
+			if (ifElse.FalseStatement is not null || ifElse.TrueStatement is not BlockStatement { Statements.Count: > 0 } exit
+				|| exit.Statements.Last() is not (ReturnStatement or ThrowStatement or ContinueStatement or BreakStatement or GotoStatement)
+				|| ifElse.Parent is not BlockStatement body || ifElse.NextSibling is null
+				|| exit.Statements.First().Annotation<SourceLayoutAnnotation>() is not { } exitLayout)
+				return;
+			var rest = new List<Statement>();
+			for (var next = ifElse.NextSibling as Statement; next is not null; next = next.NextSibling as Statement)
+				rest.Add(next);
+			var restLines = rest.SelectMany(s => s.DescendantsAndSelf).Select(n => n.Annotation<SourceLayoutAnnotation>()).Where(l => l is not null).ToList();
+			if (restLines.Count == 0 || restLines.Any(l => l!.StartLine >= exitLayout.StartLine)
+				|| rest.Any(s => s is LabelStatement || s.DescendantsAndSelf.OfType<VariableDeclarationStatement>().Any(d => d.Parent == body)))
+				return;
+			context.Step("Introduce late exit", ifElse);
+			var restBlock = new BlockStatement();
+			foreach (var statement in rest)
+				restBlock.Statements.Add(statement.Detach());
+			ifElse.Condition = IntroduceReturnTernaries.Negate(ifElse.Condition!.Detach());
+			ifElse.TrueStatement = restBlock;
+			ifElse.FalseStatement = exit.Detach();
+			if (body.Parent is IfElseStatement outer && outer.FalseStatement == body && body.Statements.Count == 1)
+				body.ReplaceWith(ifElse.Detach());
 		}
 
 		/// <summary>

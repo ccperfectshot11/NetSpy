@@ -216,10 +216,29 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						_ => BinaryOperatorType.LessThan
 					};
 					return comparison;
+				// De Morgan, when both sides negate without a "!": "!(a < b || c > d)" is "a >= b && c <= d"
+				case BinaryOperatorExpression { Operator: BinaryOperatorType.ConditionalAnd or BinaryOperatorType.ConditionalOr, Left: { } left, Right: { } right } logical
+					when NegatesCleanly(left) && NegatesCleanly(right):
+					logical.Operator = logical.Operator == BinaryOperatorType.ConditionalAnd ? BinaryOperatorType.ConditionalOr : BinaryOperatorType.ConditionalAnd;
+					var negatedLeft = Negate(left.Detach());
+					var negatedRight = Negate(right.Detach());
+					logical.Left = negatedLeft;
+					logical.Right = negatedRight;
+					return logical;
 				default:
 					return new UnaryOperatorExpression(UnaryOperatorType.Not, condition);
 			}
 		}
+
+		static bool NegatesCleanly(Expression condition) => condition switch {
+			UnaryOperatorExpression { Operator: UnaryOperatorType.Not } => true,
+			BinaryOperatorExpression { Operator: BinaryOperatorType.Equality or BinaryOperatorType.InEquality } => true,
+			BinaryOperatorExpression { Operator: BinaryOperatorType.LessThan or BinaryOperatorType.LessThanOrEqual
+				or BinaryOperatorType.GreaterThan or BinaryOperatorType.GreaterThanOrEqual, Left: { } left, Right: { } right } => !IsFloating(left) && !IsFloating(right),
+			BinaryOperatorExpression { Operator: BinaryOperatorType.ConditionalAnd or BinaryOperatorType.ConditionalOr, Left: { } left, Right: { } right }
+				=> NegatesCleanly(left) && NegatesCleanly(right),
+			_ => false
+		};
 
 		/// <summary>"!(a &lt;= b)" is not "a &gt; b" for NaN.</summary>
 		static bool IsFloating(Expression e)

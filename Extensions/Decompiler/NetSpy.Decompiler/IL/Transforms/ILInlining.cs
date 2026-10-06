@@ -712,6 +712,12 @@ namespace NetSpy.Decompiler.IL.Transforms
 				// NetSpy: "ref int slot = ref a[0];" with its name from the PDB: the source declared it
 				return false;
 			}
+			if (v.Kind == VariableKind.Local && v.HasGeneratedName && loadInst.Parent == next
+				&& next is StLoc { Variable: { Kind: VariableKind.Local, HasGeneratedName: false } })
+			{
+				// NetSpy: "named = temp;" where the PDB names the target but not the temporary: the compiler made the temporary
+				return true;
+			}
 			if (inlinedExpression.ResultType == StackType.Ref)
 			{
 				// VB likes to use ref locals for compound assignment

@@ -58,12 +58,19 @@ namespace NetSpy.Decompiler.IL.Transforms
 			}
 		}
 
+		/// <summary>
+		/// NetSpy: an initializer's array lives on the stack ("newarr; dup; ...; stloc x"); stored straight into a local the PDB
+		/// names ("int[][] a = new int[2][]; a[0] = ...;") its elements were assigned by separate statements.
+		/// </summary>
+		static bool IsSourceLocal(ILVariable v) => v.Kind == VariableKind.Local && !v.HasGeneratedName;
+
 		bool DoTransform(ILFunction function, Block body, int pos)
 		{
 			if (pos >= body.Instructions.Count - 2)
 				return false;
 			ILInstruction inst = body.Instructions[pos];
-			if (inst.MatchStLoc(out var v, out var newarrExpr) && MatchNewArr(newarrExpr, out var elementType, out var arrayLength))
+			if (inst.MatchStLoc(out var v, out var newarrExpr) && MatchNewArr(newarrExpr, out var elementType, out var arrayLength)
+				&& !IsSourceLocal(v))
 			{
 				if (HandleRuntimeHelpersInitializeArray(body, pos + 1, v, elementType, arrayLength, out var values, out var initArrayPos))
 				{
@@ -252,7 +259,8 @@ namespace NetSpy.Decompiler.IL.Transforms
 			if (pos >= body.Instructions.Count - 2)
 				return false;
 			ILInstruction inst = body.Instructions[pos];
-			if (inst.MatchStLoc(out var v, out var newarrExpr) && MatchNewArr(newarrExpr, out var elementType, out var length))
+			if (inst.MatchStLoc(out var v, out var newarrExpr) && MatchNewArr(newarrExpr, out var elementType, out var length)
+				&& !IsSourceLocal(v))
 			{
 				if (HandleRuntimeHelpersInitializeArray(body, pos + 1, v, elementType, length, out var values, out var initArrayPos))
 				{
