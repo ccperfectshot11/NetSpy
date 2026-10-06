@@ -326,16 +326,20 @@ namespace NetSpy.Decompiler.Engine.Core.CSharp {
 		public IList<Variable> GetVariables(MethodDefinitionHandle method) {
 			var list = new List<Variable>();
 			var md = GetMethod(method);
-			if (md?.Body?.PdbMethod?.Scope is PdbScope scope)
-				AddVariables(scope, list);
+			if (md?.Body is { PdbMethod.Scope: PdbScope scope } body && body.Instructions.Count > 0) {
+				var last = body.Instructions[body.Instructions.Count - 1];
+				AddVariables(scope, list, (int)last.Offset + last.GetSize());
+			}
 			return list;
 		}
 
-		static void AddVariables(PdbScope scope, List<Variable> list) {
+		static void AddVariables(PdbScope scope, List<Variable> list, int codeSize) {
+			int start = scope.Start is { } s ? (int)s.Offset : 0;
+			int end = scope.End is { } e ? (int)e.Offset : codeSize;
 			foreach (var local in scope.Variables)
-				list.Add(new Variable(local.Index, local.Name));
+				list.Add(new Variable(local.Index, local.Name) { ScopeStart = start, ScopeEnd = end });
 			foreach (var child in scope.Scopes)
-				AddVariables(child, list);
+				AddVariables(child, list, codeSize);
 		}
 
 		public bool TryGetName(MethodDefinitionHandle method, int index, out string name) {

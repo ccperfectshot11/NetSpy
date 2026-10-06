@@ -116,6 +116,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					IntroduceEarlyExit(ifElse);
 				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
 					IntroduceLateExit(ifElse);
+				foreach (var whileStatement in rootNode.Descendants.OfType<WhileStatement>().ToList())
+					IntroduceOutVarInLoopCondition(whileStatement);
 				foreach (var checkedStatement in rootNode.Descendants.OfType<CheckedStatement>().ToList())
 					SplitCheckedBlock(checkedStatement);
 				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
@@ -814,6 +816,32 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			ifElse.TrueStatement = new BlockStatement { exit };
 			foreach (var statement in statements)
 				body.Statements.Add(statement.Detach());
+		}
+
+		/// <summary>
+		/// "T x; while (M(out x)) { ... }" where the PDB scopes x to the loop's IL was "while (M(out T x)) { ... }"
+		/// (a declaration before the loop would belong to the enclosing block's scope).
+		/// </summary>
+		void IntroduceOutVarInLoopCondition(WhileStatement loop)
+		{
+			if (loop.PrevSibling is not VariableDeclarationStatement { Variables.Count: 1, Modifiers: Modifiers.None } declaration
+				|| declaration.Variables.Single() is not { Initializer: null } variable || variable.GetILVariable() is not { Kind: VariableKind.Local, HasGeneratedName: false } local
+				|| loop.Condition.Descendants.OfType<DirectionExpression>().Where(d => d.FieldDirection == FieldDirection.Out
+					&& d.Expression is IdentifierExpression id && id.GetILVariable() == local).ToList() is not { Count: 1 } outs
+				|| loop.Ancestors.OfType<EntityDeclaration>().FirstOrDefault()?.Annotation<ILFunction>() is not { } function
+				|| (function.MoveNextMethod ?? function.Method) is not { MetadataToken: { IsNil: false, Kind: HandleKind.MethodDefinition } token }
+				|| context.DecompileRun.DebugInfoProvider is not { } provider)
+				return;
+			var scope = provider.GetVariables((MethodDefinitionHandle)token).Where(v => v.Index == local.Index && v.Name == local.SourceName).ToList();
+			var ranges = loop.DescendantsAndSelf.SelectMany(n => n.Annotations.OfType<ILInstruction>()).SelectMany(i => i.ILRanges).Where(r => !r.IsEmpty).ToList();
+			if (scope.Count != 1 || scope[0].ScopeStart < 0 || ranges.Count == 0
+				|| scope[0].ScopeStart < ranges.Min(r => r.Start) || scope[0].ScopeEnd > ranges.Max(r => r.InclusiveEnd) + 1)
+				return;
+			context.Step("Out variable in loop condition", loop);
+			var outVar = new OutVarDeclarationExpression(declaration.Type.Detach(), variable.Name);
+			outVar.Variable.CopyAnnotationsFrom(variable);
+			outs[0].ReplaceWith(outVar);
+			declaration.Remove();
 		}
 
 		/// <summary>

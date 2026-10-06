@@ -33,6 +33,10 @@ namespace NetSpy.Decompiler.DebugInfo
 
 		public int Index { get; }
 		public string Name { get; }
+
+		/// <summary>NetSpy: the IL range [ScopeStart, ScopeEnd) of the local scope declaring the variable (-1: unknown).</summary>
+		public int ScopeStart { get; set; } = -1;
+		public int ScopeEnd { get; set; } = -1;
 	}
 
 	public struct PdbExtraTypeInfo
