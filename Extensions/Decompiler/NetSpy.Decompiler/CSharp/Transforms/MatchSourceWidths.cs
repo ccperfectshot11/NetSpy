@@ -1322,12 +1322,33 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			if (type is null || type.Kind is TypeKind.Unknown or TypeKind.ByReference || type.ContainsAnonymousType())
 				return;
 			AstType alternative = outVar.Type.IsVar() ? context.TypeSystemAstBuilder.ConvertType(type) : new SimpleType("var");
-			Add(sites).Alternatives.Add(() => {
+			var site = Add(sites);
+			site.Alternatives.Add(() => {
 				var old = outVar.Type;
 				alternative.CopyAnnotationsFrom(old);
 				old.ReplaceWith(alternative);
 				return () => alternative.ReplaceWith(old);
 			});
+			// "int x; M(out x);": the declaration has no sequence point of its own; an out variable declared in these
+			// statements belongs to the enclosing block anyway
+			if (outVar.Ancestors.OfType<Statement>().FirstOrDefault() is { Parent: BlockStatement block } statement
+				&& statement is ExpressionStatement or VariableDeclarationStatement or ReturnStatement or IfElseStatement
+				&& outVar.Variable.Annotation<ILVariableResolveResult>() is { } resolved)
+			{
+				site.Alternatives.Add(() => {
+					var reference = new IdentifierExpression(outVar.Variable.Name);
+					reference.AddAnnotation(resolved);
+					var declaration = new VariableDeclarationStatement(context.TypeSystemAstBuilder.ConvertType(type), outVar.Variable.Name);
+					declaration.Variables.Single().AddAnnotation(resolved);
+					var argument = new DirectionExpression(FieldDirection.Out, reference);
+					outVar.ReplaceWith(argument);
+					block.Statements.InsertBefore(statement, declaration);
+					return () => {
+						declaration.Remove();
+						argument.ReplaceWith(outVar);
+					};
+				});
+			}
 		}
 
 		/// <summary>"c ? a : (b ?? d)" → "c ? a : b ?? d", "x = (c ? a : b)" → "x = c ? a : b" (no readability parentheses).</summary>
