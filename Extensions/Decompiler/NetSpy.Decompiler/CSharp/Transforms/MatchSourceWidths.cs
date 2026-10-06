@@ -472,6 +472,13 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						break;
 					case PrimitiveExpression literal:
 						AddIntegralLiteralSite(literal, sites);
+						AddDefaultLiteralSite(literal, sites);
+						break;
+					case NullReferenceExpression nullLiteral:
+						AddNullLiteralForgivingSite(nullLiteral, sites);
+						break;
+					case ExpressionStatement expressionStatement:
+						AddDiscardSite(expressionStatement, sites);
 						break;
 					case DirectionExpression direction:
 						AddDirectionSite(direction, sites);
@@ -1365,6 +1372,60 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					invocation.Remove();
 					placeholder.ReplaceWith(invocation);
 				};
+			});
+		}
+
+		/// <summary>"M();" → "_ = M();" (an explicit discard of the result: the same IL).</summary>
+		static void AddDiscardSite(ExpressionStatement statement, List<Site> sites)
+		{
+			if (statement.Expression is not InvocationExpression call
+				|| call.GetResolveResult()?.Type is not { Kind: not (TypeKind.Void or TypeKind.Unknown) }
+				|| statement.Ancestors.OfType<EntityDeclaration>().FirstOrDefault() is not { } entity
+				|| entity.Descendants.Any(n => n is VariableInitializer { Name: "_" } or ParameterDeclaration { Name: "_" }))
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var assignment = new AssignmentExpression(new IdentifierExpression("_"), new NullReferenceExpression());
+				call.ReplaceWith(assignment);
+				assignment.Right = call;
+				return () => {
+					call.Remove();
+					assignment.ReplaceWith(call);
+				};
+			});
+		}
+
+		/// <summary>"P = null" → "P = null!" for a member or parameter annotated not nullable.</summary>
+		static void AddNullLiteralForgivingSite(NullReferenceExpression literal, List<Site> sites)
+		{
+			IType? target = ParameterOf(literal)?.Type;
+			if (target is null && literal.Parent is AssignmentExpression { Operator: AssignmentOperatorType.Assign } assignment && assignment.Right == literal)
+				target = (assignment.Left.GetSymbol() as IMember)?.ReturnType;
+			if (target is not { Nullability: Nullability.NotNullable, IsReferenceType: true })
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var placeholder = new UnaryOperatorExpression();
+				literal.ReplaceWith(placeholder);
+				placeholder.Operator = UnaryOperatorType.SuppressNullableWarning;
+				placeholder.Expression = literal;
+				return () => {
+					literal.Remove();
+					placeholder.ReplaceWith(literal);
+				};
+			});
+		}
+
+		/// <summary>"int x = 0;" → "int x = default;" where the target has exactly the literal's type.</summary>
+		void AddDefaultLiteralSite(PrimitiveExpression literal, List<Site> sites)
+		{
+			if (!context.Settings.DefaultLiterals || literal.Value is not (0 or 0L or 0u or 0UL or 0.0 or 0f or false or ' ' or (short)0 or (byte)0)
+				|| literal.Value is decimal || literal.GetResolveResult()?.Type is not { } type || TargetType(literal) is not { } target
+				|| !type.Equals(target) || literal.Value is double d && BitConverter.DoubleToInt64Bits(d) != 0)
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var defaultLiteral = new DefaultValueExpression();
+				defaultLiteral.CopyAnnotationsFrom(literal);
+				literal.ReplaceWith(defaultLiteral);
+				return () => defaultLiteral.ReplaceWith(literal);
 			});
 		}
 
