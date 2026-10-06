@@ -122,14 +122,14 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				FieldDeclaration { Variables.Count: 1 } f => f.Variables.Single().Initializer,
 				_ => null
 			};
-			if (initializer is not ObjectCreateExpression creation || creation.Annotation<TargetTypedNewAnnotation>() is not null
-				|| member.GetSymbol() is not IMember { DeclaringTypeDefinition: { } type } symbol
-				|| creation.GetResolveResult()?.Type is not { } created || !NormalizeTypeVisitor.IgnoreNullability.EquivalentTypes(created, symbol.ReturnType)
+			if (initializer is null || member.GetSymbol() is not IMember { DeclaringTypeDefinition: { } type } symbol
 				|| context.DecompileRun.DebugInfoProvider is not { } provider)
 				return;
 			// a property's initializer has a sequence point over its value, on the property's line (the getter's);
 			// a field's covers the whole declaration
 			int? propertyLine = symbol is IProperty { Getter: { } getter } ? FirstLine(getter, provider) : null;
+			if (member is PropertyDeclaration && propertyLine is null)
+				return;
 			var widths = new HashSet<int>();
 			foreach (var constructor in type.Methods.Where(m => m.IsConstructor && !m.MetadataToken.IsNil))
 			{
@@ -145,17 +145,85 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				{
 				}
 			}
-			if (member is PropertyDeclaration && propertyLine is null)
-				return;
-			AstNode measured = member is PropertyDeclaration ? creation : member;
-			int current = measured is EntityDeclaration ? DeclarationWidth(member) : Measure(creation);
+			int MeasureMember() => member is PropertyDeclaration property ? Measure(property.Initializer!) : DeclarationWidth(member);
+			int current = MeasureMember();
 			if (current < 0 || widths.Contains(current))
 				return;
-			creation.AddAnnotation(TargetTypedNewAnnotation.Instance);
-			if (!widths.Contains(measured is EntityDeclaration ? DeclarationWidth(member) : Measure(creation)))
+			if (initializer is ObjectCreateExpression creation && creation.Annotation<TargetTypedNewAnnotation>() is null
+				&& creation.GetResolveResult()?.Type is { } created && NormalizeTypeVisitor.IgnoreNullability.EquivalentTypes(created, symbol.ReturnType))
+			{
+				creation.AddAnnotation(TargetTypedNewAnnotation.Instance);
+				if (widths.Contains(MeasureMember()))
+				{
+					context.Step("Match initializer width", member);
+					return;
+				}
 				creation.RemoveAnnotations<TargetTypedNewAnnotation>();
-			else
+			}
+			// the other spellings: the fewest changes that reach one of the widths, when only one combination does
+			var sites = new List<Site>();
+			CollectSites(initializer, sites);
+			if (member is FieldDeclaration field)
+				AddBareArrayInitializerSite(field.Variables.Single(), sites);
+			if (sites.Count == 0 || sites.Count > MaxSites)
+				return;
+			foreach (var site in sites)
+			{
+				foreach (var alternative in site.Alternatives)
+				{
+					var undo = alternative();
+					int w = MeasureMember();
+					undo();
+					site.Deltas.Add(w < 0 ? int.MinValue : w - current);
+				}
+			}
+			var found = new List<int[]>();
+			int fewest = int.MaxValue;
+			var choice = new int[sites.Count];
+			void Search(int index, int delta, int count)
+			{
+				if (count > fewest)
+					return;
+				if (index == sites.Count)
+				{
+					if (count == 0 || !widths.Contains(current + delta))
+						return;
+					if (count < fewest)
+					{
+						fewest = count;
+						found.Clear();
+					}
+					found.Add((int[])choice.Clone());
+					return;
+				}
+				choice[index] = -1;
+				Search(index + 1, delta, count);
+				var site = sites[index];
+				for (int i = 0; i < site.Deltas.Count; i++)
+				{
+					if (site.Deltas[i] == int.MinValue || site.Deltas[i] == 0)
+						continue;
+					choice[index] = i;
+					Search(index + 1, delta + site.Deltas[i], count + 1);
+				}
+				choice[index] = -1;
+			}
+			Search(0, 0, 0);
+			if (found.Count != 1)
+				return;
+			var undos = new List<Action>();
+			for (int i = 0; i < sites.Count; i++)
+			{
+				if (found[0][i] >= 0)
+					undos.Add(sites[i].Alternatives[found[0][i]]());
+			}
+			if (widths.Contains(MeasureMember()))
+			{
 				context.Step("Match initializer width", member);
+				return;
+			}
+			for (int i = undos.Count - 1; i >= 0; i--)
+				undos[i]();
 		}
 
 		static int? FirstLine(IMethod method, DebugInfo.IDebugInfoProvider provider)
@@ -750,12 +818,14 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// <summary>"var a = new int[,] { ... };" ↔ "int[,] a = { ... };"</summary>
 		void AddBareArrayInitializerSite(VariableInitializer variable, List<Site> sites)
 		{
-			if (variable.Parent is not VariableDeclarationStatement { Variables.Count: 1 } declaration
+			// a field's type is always spelled out
+			var declaration = variable.Parent as VariableDeclarationStatement;
+			if (declaration is not { Variables.Count: 1 } && variable.Parent is not FieldDeclaration { Variables.Count: 1 }
 				|| variable.Initializer is not ArrayCreateExpression { Initializer: { } initializer, Arguments.Count: 0 } creation
 				|| creation.GetResolveResult()?.Type is not ArrayType arrayType)
 				return;
 			Add(sites).Alternatives.Add(() => {
-				var undoType = declaration.Type.IsVar() ? SetDeclarationType(declaration, context.TypeSystemAstBuilder.ConvertType(arrayType)) : null;
+				var undoType = declaration is not null && declaration.Type.IsVar() ? SetDeclarationType(declaration, context.TypeSystemAstBuilder.ConvertType(arrayType)) : null;
 				var bare = (ArrayInitializerExpression)initializer.Clone();
 				bare.CopyAnnotationsFrom(creation);
 				creation.ReplaceWith(bare);
