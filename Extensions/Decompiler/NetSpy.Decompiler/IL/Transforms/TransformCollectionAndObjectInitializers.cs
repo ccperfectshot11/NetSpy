@@ -58,6 +58,8 @@ namespace NetSpy.Decompiler.IL.Transforms
 			{
 				case NewObj newObjInst:
 					if (newObjInst.ILStackWasEmpty && v.Kind == VariableKind.Local
+						// NetSpy: unless the PDB names the function's locals but not this one (the compiler's temporary)
+						&& !(v.HasGeneratedName && context.Function.Variables.Any(x => x.Kind == VariableKind.Local && !x.HasGeneratedName))
 						&& !TypeContainsInitOnlyProperties(newObjInst.Method.DeclaringTypeDefinition)
 						&& !currentMethod.IsConstructor
 						&& !currentMethod.IsCompilerGeneratedOrIsInCompilerGeneratedClass())
