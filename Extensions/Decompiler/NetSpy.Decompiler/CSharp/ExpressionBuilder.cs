@@ -2634,7 +2634,9 @@ namespace NetSpy.Decompiler.CSharp
 			}
 			else if (settings.UseLambdaSyntax && settings.ImplicitlyTypedLambdas && !parametersAreUsed && ame.Parameters.Count > 0
 				&& settings.Discards && ame.Parameters.All(p => p.ParameterModifier == ReferenceKind.None && !p.IsParams)
-				&& ParameterTypesAreAccessible(function))
+				&& ParameterTypesAreAccessible(function)
+				// the source's own names ("(s, e) => ...") stay; "_" and the compiler's "<p0>" don't name anything
+				&& function.Method!.Parameters.All(p => p.Name == "_" || string.IsNullOrEmpty(p.Name) || p.Name.IndexOf('<') >= 0))
 			{
 				// NetSpy: "delegate { ... }" with unused parameters is "(_, _) => ..." in modern code
 				foreach (var p in ame.Parameters)
@@ -4640,6 +4642,10 @@ namespace NetSpy.Decompiler.CSharp
 					// Ignore copy, never introduce a cast
 					return true;
 				}
+				// NetSpy: a primitive's ToString() doesn't change it: the copy can't be observed
+				if (loadAddress.Parent is CallInstruction { Method: { Name: "ToString", Parameters.Count: 0 } } call && call.Arguments.FirstOrDefault() == loadAddress
+					&& inst.Type.GetDefinition()?.KnownTypeCode is >= KnownTypeCode.Boolean and <= KnownTypeCode.Decimal)
+					return true;
 				return false;
 			}
 		}

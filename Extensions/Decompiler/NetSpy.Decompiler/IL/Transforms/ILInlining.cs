@@ -389,7 +389,10 @@ namespace NetSpy.Decompiler.IL.Transforms
 						return true;
 					case ExpressionClassification.MutableLValue:
 						// For struct method calls on mutable lvalues, the C# compiler never generates temporaries.
-						return false;
+						// NetSpy: except the copy string concatenation makes for "a.ToString()" ("a + s"); a primitive's
+						// ToString() changes nothing, so the copy doesn't matter
+						return v.HasGeneratedName && method is { Name: "ToString", Parameters.Count: 0 }
+							&& v.Type.GetDefinition()?.KnownTypeCode is >= KnownTypeCode.Boolean and <= KnownTypeCode.Decimal;
 					case ExpressionClassification.ReadonlyLValue:
 						// For struct method calls on readonly lvalues, the C# compiler
 						// only generates a temporary if it isn't a "readonly struct"
