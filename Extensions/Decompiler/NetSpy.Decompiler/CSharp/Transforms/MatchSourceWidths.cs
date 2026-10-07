@@ -480,6 +480,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					case ExpressionStatement expressionStatement:
 						AddDiscardSite(expressionStatement, sites);
 						break;
+					case IndexerExpression indexer:
+						AddIndexFromEndSite(indexer, sites);
+						break;
 					case DirectionExpression direction:
 						AddDirectionSite(direction, sites);
 						if (direction.FieldDirection == FieldDirection.Ref && direction.Expression is ConditionalExpression)
@@ -1375,6 +1378,24 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					invocation.Remove();
 					placeholder.ReplaceWith(invocation);
 				};
+			});
+		}
+
+		/// <summary>"a[a.Length - 1]" → "a[^1]" (a an array read without side effects: the same IL).</summary>
+		void AddIndexFromEndSite(IndexerExpression indexer, List<Site> sites)
+		{
+			if (!context.Settings.Ranges || indexer.Arguments.Count != 1 || indexer.Target is not { } array
+				|| array.GetResolveResult()?.Type is not ArrayType { Dimensions: 1 }
+				|| indexer.Arguments.Single() is not BinaryOperatorExpression { Operator: BinaryOperatorType.Subtract } subtract
+				|| subtract.Left is not MemberReferenceExpression { MemberName: "Length", Target: { } lengthTarget }
+				|| subtract.Right is not PrimitiveExpression { Value: int fromEnd } || fromEnd <= 0
+				|| lengthTarget.ToString() != array.ToString()
+				|| array.DescendantsAndSelf.Any(n => n is InvocationExpression or AssignmentExpression or UnaryOperatorExpression))
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var hat = new UnaryOperatorExpression(UnaryOperatorType.IndexFromEnd, new PrimitiveExpression(fromEnd));
+				subtract.ReplaceWith(hat);
+				return () => hat.ReplaceWith(subtract);
 			});
 		}
 

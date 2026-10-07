@@ -132,7 +132,10 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					UseDynamicCreationType(declaration);
 				}
 				foreach (var block in rootNode.Descendants.OfType<BlockStatement>().ToList())
+				{
 					CollapseDynamicIncrement(block);
+					InlineSameStatementTemporaries(block);
+				}
 				foreach (var checkedStatement in rootNode.Descendants.OfType<CheckedStatement>().ToList())
 					SplitCheckedBlock(checkedStatement);
 				foreach (var ifElse in rootNode.Descendants.OfType<IfElseStatement>().ToList())
@@ -846,6 +849,52 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			context.Step("Dynamic creation type", creation);
 			creation.Type = context.TypeSystemAstBuilder.ConvertType(localType);
+		}
+
+		/// <summary>
+		/// "T t = e; S(t);" where both are one source statement (the same sequence point) and t is a temporary the PDB
+		/// doesn't name, used once and evaluated first in S: the compiler kept e in a local; the source wrote "S(e)".
+		/// </summary>
+		void InlineSameStatementTemporaries(BlockStatement block)
+		{
+			var statements = block.Statements.ToList();
+			for (int i = 0; i + 1 < statements.Count; i++)
+			{
+				if (statements[i] is not VariableDeclarationStatement { Variables.Count: 1, Modifiers: Modifiers.None } declaration
+					|| declaration.Variables.Single() is not { Initializer: { } value } variable
+					|| variable.GetILVariable() is not { Kind: VariableKind.Local, HasGeneratedName: true, SourceName: null } temp
+					|| declaration.Annotation<SourceLayoutAnnotation>() is not { } layout
+					|| statements[i + 1] is not (ExpressionStatement or ReturnStatement or VariableDeclarationStatement or ThrowStatement)
+					|| statements[i + 1].Annotation<SourceLayoutAnnotation>() is not { } next
+					|| next.StartLine != layout.StartLine || next.StartColumn != layout.StartColumn
+					|| value is LambdaExpression or AnonymousMethodExpression or StackAllocExpression or ArrayInitializerExpression
+					|| block.Ancestors.OfType<EntityDeclaration>().FirstOrDefault() is not { } entity)
+					continue;
+				var uses = entity.Descendants.OfType<IdentifierExpression>().Where(id => id.GetILVariable() == temp).ToList();
+				if (uses.Count != 1 || !uses[0].Ancestors.Contains(statements[i + 1]) || uses[0].Ancestors.Any(a => a is LambdaExpression or AnonymousMethodExpression)
+					|| uses[0].Parent is DirectionExpression || uses[0].Parent is AssignmentExpression assigned && assigned.Left == uses[0])
+					continue;
+				// everything evaluated before the use has no effect: literals, names, member reads
+				var ancestors = new HashSet<AstNode>(uses[0].Ancestors);
+				bool pure = true;
+				foreach (var node in statements[i + 1].DescendantsAndSelf)
+				{
+					if (node == uses[0])
+						break;
+					if (ancestors.Contains(node) || node is not Expression || node is PrimitiveExpression or IdentifierExpression or TypeReferenceExpression
+						or MemberReferenceExpression { Parent: not InvocationExpression })
+						continue;
+					pure = false;
+					break;
+				}
+				if (!pure)
+					continue;
+				context.Step("Inline same-statement temporary", declaration);
+				uses[0].ReplaceWith(value.Detach());
+				declaration.Remove();
+				statements = block.Statements.ToList();
+				i = Math.Max(-1, i - 2);
+			}
 		}
 
 		/// <summary>

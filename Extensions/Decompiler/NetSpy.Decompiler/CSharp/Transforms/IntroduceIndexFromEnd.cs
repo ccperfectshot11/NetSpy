@@ -62,6 +62,20 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					: null;
 				if (uses is not { Count: 2 })
 					continue;
+				// "t.Substring(0, t.Length - K)" is "x[..^K]" (a string range)
+				if (uses[0].Parent is MemberReferenceExpression { MemberName: "Substring", Parent: InvocationExpression { Arguments.Count: 2 } substring } substringTarget
+					&& substringTarget.Target == uses[0] && substring.Ancestors.Contains(statements[i + 1])
+					&& substring.Arguments.First() is PrimitiveExpression { Value: 0 }
+					&& substring.Arguments.Last() is BinaryOperatorExpression { Operator: BinaryOperatorType.Subtract,
+						Left: MemberReferenceExpression { MemberName: "Length" } stringLength, Right: PrimitiveExpression { Value: int end } endLiteral }
+					&& stringLength.Target == uses[1] && end > 0 && tempType.IsKnownType(KnownTypeCode.String))
+				{
+					var range = new BinaryOperatorExpression(null!, BinaryOperatorType.Range,
+						new UnaryOperatorExpression(UnaryOperatorType.IndexFromEnd, endLiteral.Detach()));
+					substring.ReplaceWith(new IndexerExpression(source.Detach(), range));
+					decl.Remove();
+					continue;
+				}
 				if (uses[0].Parent is not IndexerExpression indexer || indexer.Target != uses[0] || indexer.Arguments.Count != 1
 					|| !indexer.Ancestors.Contains(statements[i + 1]))
 					continue;
@@ -78,7 +92,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 
 		/// <summary>A local, parameter, "this.field" or field: reading it twice is the same as once.</summary>
 		static bool IsSimpleRead(Expression e) => e switch {
-			IdentifierExpression => true,
+			IdentifierExpression or PrimitiveExpression => true,
 			MemberReferenceExpression { Target: ThisReferenceExpression or BaseReferenceExpression } member => member.GetSymbol() is IField,
 			MemberReferenceExpression member => member.GetSymbol() is IField && IsSimpleRead(member.Target!),
 			_ => false
