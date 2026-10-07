@@ -212,11 +212,15 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 			}
 			if (types.Count == 0)
 				return;
+			// the replacements each statement could take
+			var candidates = new Dictionary<Statement, List<MemberReferenceExpression>>();
 			foreach (var member in syntaxTree.Descendants.OfType<MemberReferenceExpression>().ToList())
 			{
 				if (member.Parent is null || member.Target is not TypeReferenceExpression target
 					|| StaticTarget(target) is not { } targetType || !types.Any(t => t.Equals(targetType))
-					|| (member.GetSymbol() ?? (member.Parent as InvocationExpression)?.GetSymbol()) is not IMember { IsStatic: true } symbol
+					// a constant the decompiler wrote back ("Math.PI") has no symbol of its own
+					|| (member.GetSymbol() ?? (member.Parent as InvocationExpression)?.GetSymbol()
+						?? targetType.GetFields(f => f.Name == member.MemberName && f.IsConst).FirstOrDefault()) is not IMember { IsStatic: true } symbol
 					|| symbol is IMethod { IsExtensionMethod: true })
 					continue;
 				// the name must not mean anything else where it is used
@@ -225,17 +229,128 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 					|| member.Ancestors.OfType<TypeDeclaration>().Any(t => (t.GetSymbol() as ITypeDefinition)?.GetMembers(m => m.Name == member.MemberName).Any() == true))
 					continue;
 				var statement = member.Ancestors.OfType<Statement>().FirstOrDefault(s => s.Annotation<Transforms.SourceLayoutAnnotation>() is not null);
-				if (statement?.Annotation<Transforms.SourceLayoutAnnotation>() is not { Width: > 0 } layout)
+				if (statement?.Annotation<Transforms.SourceLayoutAnnotation>() is not { Width: > 0 })
 					continue;
-				int before = Width(statement, formattingOptions);
-				if (before == layout.Width)
+				if (!candidates.TryGetValue(statement, out var list))
+					candidates[statement] = list = new List<MemberReferenceExpression>();
+				list.Add(member);
+			}
+			foreach (var pair in candidates)
+			{
+				var statement = pair.Key;
+				var members = pair.Value;
+				int target = statement.Annotation<Transforms.SourceLayoutAnnotation>()!.Width;
+				if (Width(statement, formattingOptions) == target)
 					continue;
-				var identifier = new IdentifierExpression(member.MemberName);
-				identifier.TypeArguments.AddRange(member.TypeArguments.Select(t => t.Clone()));
-				identifier.CopyAnnotationsFrom(member);
-				member.ReplaceWith(identifier);
-				if (Width(statement, formattingOptions) != layout.Width)
-					identifier.ReplaceWith(member);
+				// the changes: "T.M" -> "M", and a widening cast the decompiler wrote ("(double)(a + b) + PI")
+				var changes = new List<Func<Action>>();
+				foreach (var member in members)
+				{
+					changes.Add(() => {
+						var identifier = new IdentifierExpression(member.MemberName);
+						identifier.TypeArguments.AddRange(member.TypeArguments.Select(t => t.Clone()));
+						identifier.CopyAnnotationsFrom(member);
+						member.ReplaceWith(identifier);
+						return () => identifier.ReplaceWith(member);
+					});
+				}
+				foreach (var cast in statement.Descendants.OfType<CastExpression>().Where(c => c.Parent is BinaryOperatorExpression && IsWidening(c)).ToList())
+				{
+					changes.Add(() => {
+						var inner = cast.Expression is ParenthesizedExpression parenthesized ? parenthesized.Expression : cast.Expression;
+						var placeholder = new NullReferenceExpression();
+						inner.ReplaceWith(placeholder);
+						cast.ReplaceWith(inner);
+						return () => {
+							inner.ReplaceWith(cast);
+							placeholder.ReplaceWith(inner);
+						};
+					});
+				}
+				if (changes.Count > 10)
+					continue;
+				// the fewest changes that give the source's width, when only one combination does
+				int found = -1, foundSize = int.MaxValue, foundCount = 0;
+				for (int mask = 1; mask < (1 << changes.Count); mask++)
+				{
+					int size = 0;
+					for (int bits = mask; bits != 0; bits &= bits - 1)
+						size++;
+					if (size > foundSize)
+						continue;
+					var undos = Apply(changes, mask);
+					bool fits = Width(statement, formattingOptions) == target;
+					for (int i = undos.Count - 1; i >= 0; i--)
+						undos[i]();
+					if (!fits)
+						continue;
+					if (size < foundSize)
+					{
+						foundSize = size;
+						foundCount = 0;
+					}
+					found = mask;
+					foundCount++;
+				}
+				if (foundCount == 1)
+					Apply(changes, found);
+			}
+
+			static List<Action> Apply(List<Func<Action>> changes, int mask)
+			{
+				var undos = new List<Action>();
+				for (int i = 0; i < changes.Count; i++)
+				{
+					if ((mask & (1 << i)) != 0)
+						undos.Add(changes[i]());
+				}
+				return undos;
+			}
+
+			// a constant the decompiler wrote back ("Math.PI") has no resolve result: its field's type
+			static IType? TypeOf(Expression? expression)
+			{
+				if (expression?.GetResolveResult()?.Type is { Kind: not TypeKind.Unknown } type)
+					return type;
+				switch (expression)
+				{
+					case ParenthesizedExpression parenthesized:
+						return TypeOf(parenthesized.Expression);
+					case MemberReferenceExpression { Target: TypeReferenceExpression target } member when StaticTarget(target) is { } owner:
+						return owner.GetFields(f => f.Name == member.MemberName && f.IsConst).FirstOrDefault()?.Type;
+					case InvocationExpression invocation:
+						if (invocation.GetSymbol() is IMethod method)
+							return method.ReturnType;
+						// unresolved "Math.Max(3, 9)": the overload whose parameters are exactly the arguments' types
+						if (invocation.Target is MemberReferenceExpression { Target: TypeReferenceExpression callTarget } called && StaticTarget(callTarget) is { } callOwner)
+						{
+							var argumentTypes = invocation.Arguments.Select(TypeOf).ToList();
+							if (argumentTypes.Any(t => t is null))
+								return null;
+							var overloads = callOwner.GetMethods(m => m.Name == called.MemberName && m.IsStatic && m.Parameters.Count == argumentTypes.Count
+								&& m.Parameters.Select(p => p.Type).SequenceEqual(argumentTypes!)).ToList();
+							return overloads.Count == 1 ? overloads[0].ReturnType : null;
+						}
+						return null;
+					case BinaryOperatorExpression { Operator: BinaryOperatorType.Add or BinaryOperatorType.Subtract or BinaryOperatorType.Multiply } arithmetic
+						when TypeOf(arithmetic.Left) is { } left && TypeOf(arithmetic.Right) is { } right && left.Equals(right):
+						return left;
+					default:
+						return null;
+				}
+			}
+
+			// int/long -> double/float/decimal, int -> long: the conversion happens anyway, with the same value
+			static bool IsWidening(CastExpression cast)
+			{
+				var to = cast.GetResolveResult()?.Type;
+				var from = TypeOf(cast.Expression);
+				if (to is null || from is null || cast.Parent is not BinaryOperatorExpression binary
+					|| TypeOf(binary.Left == cast ? binary.Right : binary.Left) is not { } other || !other.Equals(to))
+					return false;
+				bool fromInt = from.IsKnownType(KnownTypeCode.Int32) || from.IsKnownType(KnownTypeCode.Int64);
+				return fromInt && (to.IsKnownType(KnownTypeCode.Double) || to.IsKnownType(KnownTypeCode.Single) || to.IsKnownType(KnownTypeCode.Decimal))
+					|| from.IsKnownType(KnownTypeCode.Int32) && to.IsKnownType(KnownTypeCode.Int64);
 			}
 		}
 
