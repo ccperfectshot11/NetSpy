@@ -483,6 +483,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					case IndexerExpression indexer:
 						AddIndexFromEndSite(indexer, sites);
 						break;
+					case InvocationExpression { Target: MemberReferenceExpression { MemberName: "Substring" or "Slice" } } sliceCall:
+						AddRangeSite(sliceCall, sites);
+						break;
 					case DirectionExpression direction:
 						AddDirectionSite(direction, sites);
 						if (direction.FieldDirection == FieldDirection.Ref && direction.Expression is ConditionalExpression)
@@ -1399,6 +1402,29 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			});
 		}
 
+		/// <summary>"s.Substring(6)" → "s[6..]", "span.Slice(1, 2)" → "span[1..3]" (what the compiler makes of ranges).</summary>
+		void AddRangeSite(InvocationExpression call, List<Site> sites)
+		{
+			var member = (MemberReferenceExpression)call.Target;
+			if (!context.Settings.Ranges || member.Target is not { } target || target is TypeReferenceExpression
+				|| target.GetResolveResult()?.Type is not { } type)
+				return;
+			Func<Expression> range;
+			if (member.MemberName == "Substring" && type.IsKnownType(KnownTypeCode.String) && call.Arguments.Count == 1)
+				range = () => new BinaryOperatorExpression(call.Arguments.Single().Clone(), BinaryOperatorType.Range, null!);
+			else if (member.MemberName == "Slice" && type.Name is "Span" or "ReadOnlySpan" && call.Arguments.Count == 2
+				&& call.Arguments.First() is PrimitiveExpression { Value: int start } && call.Arguments.Last() is PrimitiveExpression { Value: int count })
+				range = () => new BinaryOperatorExpression(new PrimitiveExpression(start), BinaryOperatorType.Range, new PrimitiveExpression(start + count));
+			else
+				return;
+			Add(sites).Alternatives.Add(() => {
+				var indexer = new IndexerExpression(target.Clone(), range());
+				indexer.CopyAnnotationsFrom(call);
+				call.ReplaceWith(indexer);
+				return () => indexer.ReplaceWith(call);
+			});
+		}
+
 		/// <summary>"M();" → "_ = M();" (an explicit discard of the result: the same IL).</summary>
 		static void AddDiscardSite(ExpressionStatement statement, List<Site> sites)
 		{
@@ -1520,6 +1546,30 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// <summary>"x += y" → "x = x + y" (statement level, simple targets, types where both mean the same).</summary>
 		static void AddCompoundAssignmentSite(AssignmentExpression assignment, List<Site> sites)
 		{
+			// the other way: "x = x + y" → "x += y" (the decompiler leaves it expanded around an await)
+			if (assignment.Parent is ExpressionStatement && assignment.Operator == AssignmentOperatorType.Assign
+				&& assignment.Left is IdentifierExpression { Identifier: var name } && assignment.Right is BinaryOperatorExpression
+				{ Left: IdentifierExpression { Identifier: var same }, Operator: BinaryOperatorType.Add or BinaryOperatorType.Subtract or BinaryOperatorType.Multiply } binary
+				&& same == name && assignment.Left.GetResolveResult()?.Type.GetDefinition()?.KnownTypeCode is KnownTypeCode.Int32 or KnownTypeCode.Int64
+					or KnownTypeCode.Double or KnownTypeCode.Decimal or KnownTypeCode.String)
+			{
+				var compoundOperator = binary.Operator switch {
+					BinaryOperatorType.Add => AssignmentOperatorType.Add,
+					BinaryOperatorType.Subtract => AssignmentOperatorType.Subtract,
+					_ => AssignmentOperatorType.Multiply
+				};
+				Add(sites).Alternatives.Add(() => {
+					var right = binary.Right!;
+					var compound = new AssignmentExpression(assignment.Left.Clone(), compoundOperator, right.Detach());
+					compound.CopyAnnotationsFrom(assignment);
+					assignment.ReplaceWith(compound);
+					return () => {
+						binary.Right = right.Detach();
+						compound.ReplaceWith(assignment);
+					};
+				});
+				return;
+			}
 			if (assignment.Parent is not ExpressionStatement || AssignmentExpression.GetCorrespondingBinaryOperator(assignment.Operator) is not { } op
 				|| op == BinaryOperatorType.NullCoalescing)
 				return;

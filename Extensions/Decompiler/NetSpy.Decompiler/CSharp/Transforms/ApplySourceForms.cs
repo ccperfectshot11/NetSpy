@@ -862,7 +862,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			{
 				if (statements[i] is not VariableDeclarationStatement { Variables.Count: 1, Modifiers: Modifiers.None } declaration
 					|| declaration.Variables.Single() is not { Initializer: { } value } variable
-					|| variable.GetILVariable() is not { Kind: VariableKind.Local, HasGeneratedName: true, SourceName: null } temp
+					|| variable.GetILVariable() is not { Kind: VariableKind.Local or VariableKind.StackSlot, HasGeneratedName: true, SourceName: null } temp
 					|| declaration.Annotation<SourceLayoutAnnotation>() is not { } layout
 					|| statements[i + 1] is not (ExpressionStatement or ReturnStatement or VariableDeclarationStatement or ThrowStatement)
 					|| statements[i + 1].Annotation<SourceLayoutAnnotation>() is not { } next
@@ -882,7 +882,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					if (node == uses[0])
 						break;
 					if (ancestors.Contains(node) || node is not Expression || node is PrimitiveExpression or IdentifierExpression or TypeReferenceExpression
-						or MemberReferenceExpression { Parent: not InvocationExpression })
+						or MemberReferenceExpression { Parent: not InvocationExpression } or MemberReferenceExpression { Target: TypeReferenceExpression or IdentifierExpression })
 						continue;
 					pure = false;
 					break;
