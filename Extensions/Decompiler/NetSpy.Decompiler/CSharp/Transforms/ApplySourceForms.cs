@@ -1080,6 +1080,39 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				variable.Name = source;
 			}
 
+			// lambda and anonymous method parameters: their names are in the metadata ("delegate (int value)" renamed
+			// "num2" because another "value" exists elsewhere in the method)
+			var methodParameters = new HashSet<string?>(entity.Descendants.OfType<ParameterDeclaration>().Where(p => p.Parent == entity).Select(p => p.Name));
+			foreach (var function in entity.Descendants.Where(n => n is LambdaExpression or AnonymousMethodExpression).ToList())
+			{
+				var parameters = function is LambdaExpression lambda ? lambda.Parameters : ((AnonymousMethodExpression)function).Parameters;
+				if (function.Annotation<ILFunction>()?.Method is not { } method || method.Parameters.Count != parameters.Count)
+					continue;
+				int index = 0;
+				foreach (var parameter in parameters.ToList())
+				{
+					string source = method.Parameters[index++].Name;
+					if (string.IsNullOrEmpty(source) || source == parameter.Name || source == "_" || source.IndexOf('<') >= 0
+						|| parameter.Annotation<ILVariableResolveResult>()?.Variable is not { } variable)
+						continue;
+					// no declaration of the name whose scope contains the lambda, no other use of it inside
+					bool clash = methodParameters.Contains(source)
+						|| declarations.Any(d => GetName(d.Node) == source && !d.Node.Ancestors.Contains(function) && function.Ancestors.Contains(d.Scope))
+						|| function.Ancestors.Where(a => a is LambdaExpression or AnonymousMethodExpression).Any(outer =>
+							(outer is LambdaExpression l ? l.Parameters : ((AnonymousMethodExpression)outer).Parameters).Any(p => p.Name == source))
+						|| function.Descendants.OfType<IdentifierExpression>().Any(id => id.Identifier == source && id.GetILVariable() != variable)
+						|| function.Descendants.OfType<ParameterDeclaration>().Any(p => p != parameter && p.Name == source)
+						|| function.Descendants.OfType<VariableInitializer>().Any(v => v.Name == source);
+					if (clash)
+						continue;
+					context.Step("Restore lambda parameter name", parameter);
+					parameter.Name = source;
+					foreach (var id in function.Descendants.OfType<IdentifierExpression>().Where(id => id.GetILVariable() == variable))
+						id.Identifier = source;
+					variable.Name = source;
+				}
+			}
+
 			// a case label's variables belong to its switch section, others to the block around their statement
 			static AstNode? PatternScope(SingleVariableDesignation designation)
 			{
