@@ -308,6 +308,12 @@ namespace NetSpy.Decompiler.IL.Transforms
 				{
 					inst = ldLen.Array;
 				}
+				else if (inst is LdObj { Target: LdElema } elementRead)
+				{
+					// NetSpy: "a?[0]" reading a value-type element (ldobj of the element's address)
+					inst = elementRead.Target;
+					continue;
+				}
 				else if (inst is LdElema ldElema)
 				{
 					inst = ldElema.Array;
