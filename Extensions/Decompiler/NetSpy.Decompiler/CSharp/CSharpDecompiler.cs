@@ -127,6 +127,8 @@ namespace NetSpy.Decompiler.CSharp
 				// re-run DetectExitPoints after loop detection
 				new DetectExitPoints(),
 				new PatternMatchingTransform(), // must run after LoopDetection and before ConditionDetection
+				// NetSpy: also before the conditions are built, so "bool flag = true; x = flag ? a : b;" keeps its ternary
+				new IntroduceVariablesForConstantConditions { PlainConstantsOnly = true },
 				new BlockILTransform { // per-block transforms
 					PostOrderTransforms = {
 						new ConditionDetection(),

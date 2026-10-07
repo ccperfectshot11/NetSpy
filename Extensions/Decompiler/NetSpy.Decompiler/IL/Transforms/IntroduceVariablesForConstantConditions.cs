@@ -33,16 +33,33 @@ namespace NetSpy.Decompiler.IL.Transforms
 	/// </summary>
 	public class IntroduceVariablesForConstantConditions : IILTransform
 	{
+		/// <summary>
+		/// NetSpy: the early run (before the conditions are detected) only takes plain "if (ldc.i4 1) br": the source's
+		/// "bool flag = true; flag ? a : b" with its polarity; negated constants are left to the final run.
+		/// </summary>
+		public bool PlainConstantsOnly { get; set; }
+
 		public void Run(ILFunction function, ILTransformContext context)
 		{
 			foreach (var ifInst in function.Descendants.OfType<IfInstruction>().ToArray())
 			{
+				if (PlainConstantsOnly && ifInst.Condition is not LdcI4)
+					continue;
 				if (!TryEvaluate(ifInst.Condition, out bool value))
 					continue;
 				var statement = GetStatement(ifInst);
 				if (statement?.Parent is not Block block)
 					continue;
 				context.Step("Introduce variable for constant condition", ifInst);
+				// "if (false) A else B" is "if (true) B else A": the source's "bool flag = true; flag ? B : A" (the branch
+				// order was inverted when the conditions were detected)
+				if (!value && !ifInst.FalseInst.MatchNop())
+				{
+					var trueInst = ifInst.TrueInst;
+					ifInst.TrueInst = ifInst.FalseInst;
+					ifInst.FalseInst = trueInst;
+					value = true;
+				}
 				var variable = new ILVariable(VariableKind.Local, context.TypeSystem.FindType(KnownTypeCode.Boolean), StackType.I4);
 				function.Variables.Add(variable);
 				block.Instructions.Insert(statement.ChildIndex, new StLoc(variable, new LdcI4(value ? 1 : 0)));

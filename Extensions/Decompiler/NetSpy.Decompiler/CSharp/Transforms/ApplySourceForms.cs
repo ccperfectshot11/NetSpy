@@ -134,6 +134,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				foreach (var block in rootNode.Descendants.OfType<BlockStatement>().ToList())
 				{
 					CollapseDynamicIncrement(block);
+					IntroduceDeclarationTernary(block);
 					InlineSameStatementTemporaries(block);
 				}
 				foreach (var checkedStatement in rootNode.Descendants.OfType<CheckedStatement>().ToList())
@@ -849,6 +850,47 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			context.Step("Dynamic creation type", creation);
 			creation.Type = context.TypeSystemAstBuilder.ConvertType(localType);
+		}
+
+		/// <summary>
+		/// "T t; if (c) { t = a; } else { t = b; } T y = t;" with t a temporary the PDB doesn't name, all one source
+		/// statement, is "T y = c ? a : b;" (the ternary's target type gives "1 : null" its type).
+		/// </summary>
+		void IntroduceDeclarationTernary(BlockStatement block)
+		{
+			var statements = block.Statements.ToList();
+			for (int i = 0; i + 2 < statements.Count; i++)
+			{
+				if (statements[i] is not VariableDeclarationStatement { Variables.Count: 1 } temporary
+					|| temporary.Variables.Single() is not { Initializer: null } tempVariable
+					|| tempVariable.GetILVariable() is not { HasGeneratedName: true, SourceName: null } temp
+					|| statements[i + 1] is not IfElseStatement { Condition: { } condition, TrueStatement: BlockStatement trueBlock, FalseStatement: BlockStatement falseBlock }
+					|| Assigned(trueBlock) is not { } whenTrue || Assigned(falseBlock) is not { } whenFalse
+					|| statements[i + 2] is not VariableDeclarationStatement { Variables.Count: 1 } target || target.Type.IsVar()
+					|| target.Variables.Single() is not { Initializer: IdentifierExpression read } || read.GetILVariable() != temp
+					|| statements[i + 2].Annotation<SourceLayoutAnnotation>() is not { } layout
+					|| statements[i + 1].Annotation<SourceLayoutAnnotation>() is { } ifLayout && ifLayout.StartLine != layout.StartLine)
+					continue;
+				context.Step("Introduce declaration ternary", statements[i + 1]);
+				read.ReplaceWith(new ConditionalExpression(condition.Detach(), whenTrue.Detach(), whenFalse.Detach()));
+				statements[i].Remove();
+				statements[i + 1].Remove();
+				statements = block.Statements.ToList();
+
+				// "t = v;", or "U u = v; t = u;" (another temporary)
+				Expression? Assigned(BlockStatement branch)
+				{
+					var inner = branch.Statements.ToList();
+					if (inner.Count is < 1 or > 2 || inner.Last() is not ExpressionStatement { Expression: AssignmentExpression
+						{ Operator: AssignmentOperatorType.Assign, Left: IdentifierExpression left, Right: { } right } } || left.GetILVariable() != temp)
+						return null;
+					if (inner.Count == 1)
+						return right;
+					return inner[0] is VariableDeclarationStatement { Variables.Count: 1 } copy && copy.Variables.Single() is { Initializer: { } value } copied
+						&& copied.GetILVariable() is { HasGeneratedName: true } copyVariable && right is IdentifierExpression copyRead && copyRead.GetILVariable() == copyVariable
+						? value : null;
+				}
+			}
 		}
 
 		/// <summary>
