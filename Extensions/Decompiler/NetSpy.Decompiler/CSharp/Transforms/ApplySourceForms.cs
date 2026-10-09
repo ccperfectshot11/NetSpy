@@ -135,6 +135,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				{
 					CollapseDynamicIncrement(block);
 					IntroduceDeclarationTernary(block);
+					IntroduceHoistedArrayForeach(block);
 					InlineSameStatementTemporaries(block);
 				}
 				foreach (var checkedStatement in rootNode.Descendants.OfType<CheckedStatement>().ToList())
@@ -850,6 +851,53 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			context.Step("Dynamic creation type", creation);
 			creation.Type = context.TypeSystemAstBuilder.ConvertType(localType);
+		}
+
+		/// <summary>
+		/// In an async method or iterator "foreach (T x in e)" over an array keeps the array and the index in state machine
+		/// fields ("&lt;&gt;7__wrap1"), so it comes back as
+		/// "T[] a = e; for (int i = 0; i &lt; a.Length; i++) { T x = a[i]; ... }": the compiler's fields, used nowhere else.
+		/// </summary>
+		void IntroduceHoistedArrayForeach(BlockStatement block)
+		{
+			var statements = block.Statements.ToList();
+			for (int i = 0; i + 1 < statements.Count; i++)
+			{
+				if (statements[i] is not VariableDeclarationStatement { Variables.Count: 1 } arrayDeclaration
+					|| arrayDeclaration.Variables.Single() is not { Initializer: { } collection } arrayVariable
+					|| arrayVariable.GetILVariable() is not { } array || !IsCompilerField(array)
+					|| statements[i + 1] is not ForStatement { Initializers.Count: 1, Iterators.Count: 1 } loop
+					|| loop.Initializers.Single() is not VariableDeclarationStatement { Variables.Count: 1 } indexDeclaration
+					|| indexDeclaration.Variables.Single() is not { Initializer: PrimitiveExpression { Value: 0 } } indexVariable
+					|| indexVariable.GetILVariable() is not { } index
+					|| loop.Condition is not BinaryOperatorExpression { Operator: BinaryOperatorType.LessThan, Left: IdentifierExpression testedIndex,
+						Right: MemberReferenceExpression { MemberName: "Length", Target: IdentifierExpression testedArray } }
+					|| testedIndex.GetILVariable() != index || testedArray.GetILVariable() != array
+					|| loop.EmbeddedStatement is not BlockStatement { Statements.Count: > 0 } body
+					|| body.Statements.First() is not VariableDeclarationStatement { Variables.Count: 1 } element
+					|| element.Variables.Single() is not { Initializer: IndexerExpression { Target: IdentifierExpression elementArray, Arguments.Count: 1 } read } elementVariable
+					|| elementArray.GetILVariable() != array || read.Arguments.Single() is not IdentifierExpression elementIndex || elementIndex.GetILVariable() != index
+					|| block.Ancestors.OfType<EntityDeclaration>().FirstOrDefault() is not { } entity
+					|| Uses(entity, array) != 2 || Uses(entity, index) != 3)
+					continue;
+				context.Step("Introduce foreach over a hoisted array", loop);
+				var designation = new SingleVariableDesignation { Identifier = elementVariable.Name };
+				designation.CopyAnnotationsFrom(elementVariable);
+				element.Remove();
+				var foreachStatement = new ForeachStatement {
+					VariableType = element.Type.Detach(),
+					VariableDesignation = designation,
+					InExpression = collection.Detach(),
+					EmbeddedStatement = body.Detach()
+				};
+				foreachStatement.CopyAnnotationsFrom(loop);
+				loop.ReplaceWith(foreachStatement);
+				arrayDeclaration.Remove();
+				statements = block.Statements.ToList();
+			}
+
+			static bool IsCompilerField(ILVariable variable) => variable.StateMachineField?.Name.StartsWith("<>", StringComparison.Ordinal) == true;
+			static int Uses(AstNode root, ILVariable variable) => root.Descendants.OfType<IdentifierExpression>().Count(id => id.GetILVariable() == variable);
 		}
 
 		/// <summary>
