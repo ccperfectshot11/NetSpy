@@ -41,6 +41,9 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 
 		public bool IsAsync { get; set; }
 
+		/// <summary>NetSpy: "static x => ..." (C# 9: captures nothing; the same IL as without the modifier).</summary>
+		public bool IsStatic { get; set; }
+
 		[Slot("Parameter")]
 		public partial AstNodeCollection<ParameterDeclaration> Parameters { get; }
 

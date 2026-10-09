@@ -1187,6 +1187,11 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 		{
 			StartNode(lambdaExpression);
 			WriteAttributes(lambdaExpression.Attributes);
+			if (lambdaExpression.IsStatic)
+			{
+				WriteKeyword("static");
+				Space();
+			}
 			if (lambdaExpression.IsAsync)
 			{
 				WriteKeyword(LambdaExpression.AsyncModifier);

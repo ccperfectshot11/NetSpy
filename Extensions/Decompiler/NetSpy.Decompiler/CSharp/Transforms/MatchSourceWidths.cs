@@ -500,6 +500,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						break;
 					case LambdaExpression lambda:
 						AddAnonymousMethodSite(lambda, sites);
+						AddStaticLambdaSite(lambda, sites);
 						break;
 					case BinaryOperatorExpression { Operator: BinaryOperatorType.NullCoalescing } coalescing:
 						AddGetValueOrDefaultSite(coalescing, sites);
@@ -1422,6 +1423,21 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				indexer.CopyAnnotationsFrom(call);
 				call.ReplaceWith(indexer);
 				return () => indexer.ReplaceWith(call);
+			});
+		}
+
+		/// <summary>"x => x * x" → "static x => x * x" (C# 9: a lambda that captures nothing; the same IL).</summary>
+		void AddStaticLambdaSite(LambdaExpression lambda, List<Site> sites)
+		{
+			if (lambda.IsStatic || context.Settings.GetMinimumRequiredVersion() < LanguageVersion.CSharp9_0
+				|| lambda.Annotation<NetSpy.Decompiler.IL.ILFunction>() is not { } function
+				|| lambda.Descendants.Any(n => n is ThisReferenceExpression or BaseReferenceExpression
+					|| n is IdentifierExpression id && (id.GetILVariable() is { } v && v.Function != function && !function.Descendants.OfType<NetSpy.Decompiler.IL.ILFunction>().Contains(v.Function)
+						|| id.GetSymbol() is IMember { IsStatic: false })))
+				return;
+			Add(sites).Alternatives.Add(() => {
+				lambda.IsStatic = true;
+				return () => lambda.IsStatic = false;
 			});
 		}
 
