@@ -1731,7 +1731,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// explicitly typed local): the int converts implicitly.</summary>
 		static void AddIntegralLiteralSite(PrimitiveExpression literal, List<Site> sites)
 		{
-			if (literal.Value is not (double or float or decimal or long or ulong))
+			if (literal.Value is not (double or float or decimal or long or ulong or uint))
 				return;
 			// the type the literal converts to: a parameter's, or the other operand's / the compound assignment's target
 			IType? parameterType = ParameterOf(literal)?.Type;
@@ -1748,10 +1748,19 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			// "double d = 4;" (not with var: the literal gives var its type)
 			if (parameterType is null && literal.Parent is VariableInitializer { Parent: VariableDeclarationStatement declaration } && !declaration.Type.IsVar())
 				parameterType = declaration.Type.GetResolveResult()?.Type;
+			// "new[] { -20.0, 0, 15 }": an element of a double array (not the first of "new[]": it gives the array its type)
+			if (parameterType is null && literal.Parent is ArrayInitializerExpression { Parent: ArrayCreateExpression arrayCreation } elements
+				&& arrayCreation.GetResolveResult()?.Type is ArrayType { ElementType: var elementType }
+				&& (arrayCreation.Type is not null || elements.Elements.FirstOrDefault() != literal))
+				parameterType = elementType;
+			// "nuint n = 6;" (6u in the decompiled code): the constant converts implicitly
+			if (literal.Value is uint && parameterType is not null && (parameterType.IsKnownType(KnownTypeCode.UInt32) || parameterType.IsKnownType(KnownTypeCode.UIntPtr)
+				|| parameterType.IsKnownType(KnownTypeCode.UInt64) || parameterType.Kind == TypeKind.NUInt))
+				parameterType = literal.GetResolveResult()?.Type;
 			if (parameterType is null || !parameterType.Equals(literal.GetResolveResult()?.Type))
 				return;
 			if (!(parameterType.IsKnownType(KnownTypeCode.Double) || parameterType.IsKnownType(KnownTypeCode.Single) || parameterType.IsKnownType(KnownTypeCode.Decimal)
-				|| parameterType.IsKnownType(KnownTypeCode.Int64) || parameterType.IsKnownType(KnownTypeCode.UInt64)))
+				|| parameterType.IsKnownType(KnownTypeCode.Int64) || parameterType.IsKnownType(KnownTypeCode.UInt64) || parameterType.IsKnownType(KnownTypeCode.UInt32)))
 				return;
 			decimal value;
 			try
