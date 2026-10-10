@@ -57,6 +57,9 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 		/// </summary>
 		public abstract void WriteInterpolatedText(string text);
 
+		/// <summary>NetSpy: text of a verbatim or raw interpolated string, written as is (no escapes).</summary>
+		public virtual void WriteVerbatimText(string text) => WriteInterpolatedText(text);
+
 		public abstract void Space();
 		public abstract void Indent();
 		public abstract void Unindent();
@@ -144,6 +147,11 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 		public override void WriteInterpolatedText(string text)
 		{
 			decoratedWriter.WriteInterpolatedText(text);
+		}
+
+		public override void WriteVerbatimText(string text)
+		{
+			decoratedWriter.WriteVerbatimText(text);
 		}
 
 		public override void Space()

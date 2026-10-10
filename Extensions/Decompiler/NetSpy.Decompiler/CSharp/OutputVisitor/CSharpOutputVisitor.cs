@@ -1346,12 +1346,22 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 		{
 			StartNode(interpolatedStringExpression);
 
-			writer.WriteToken("$\"");
+			// NetSpy: verbatim ($@"...") and single-line raw ($$"""...""") forms
+			string close = "\"";
+			if (interpolatedStringExpression.RawDollars > 0)
+			{
+				close = interpolatedStringExpression.RawQuotes();
+				writer.WriteToken(new string('$', interpolatedStringExpression.RawDollars) + close);
+			}
+			else
+			{
+				writer.WriteToken(interpolatedStringExpression.IsVerbatim ? "$@\"" : "$\"");
+			}
 			foreach (var element in interpolatedStringExpression.Content)
 			{
 				element.AcceptVisitor(this);
 			}
-			writer.WriteToken("\"");
+			writer.WriteToken(close);
 			isAfterSpace = false;
 
 			EndNode(interpolatedStringExpression);
@@ -1361,7 +1371,9 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 		{
 			StartNode(interpolation);
 
-			writer.WriteToken("{");
+			int braces = (interpolation.Parent as InterpolatedStringExpression)?.RawDollars ?? 0;
+			bool asIs = braces > 0 || interpolation.Parent is InterpolatedStringExpression { IsVerbatim: true };
+			writer.WriteToken(new string('{', System.Math.Max(1, braces)));
 			interpolation.Expression.AcceptVisitor(this);
 			if (interpolation.Alignment != 0)
 			{
@@ -1371,9 +1383,12 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			if (interpolation.Suffix != null)
 			{
 				writer.WriteToken(":");
-				writer.WriteInterpolatedText(interpolation.Suffix);
+				if (asIs)
+					writer.WriteVerbatimText(interpolation.Suffix);
+				else
+					writer.WriteInterpolatedText(interpolation.Suffix);
 			}
-			writer.WriteToken("}");
+			writer.WriteToken(new string('}', System.Math.Max(1, braces)));
 
 			EndNode(interpolation);
 		}
@@ -1381,7 +1396,13 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 		public virtual void VisitInterpolatedStringText(InterpolatedStringText interpolatedStringText)
 		{
 			StartNode(interpolatedStringText);
-			writer.WriteInterpolatedText(interpolatedStringText.Text);
+			// the text keeps "{{" / "}}" as in a regular interpolated string
+			if (interpolatedStringText.Parent is InterpolatedStringExpression { RawDollars: > 0 })
+				writer.WriteVerbatimText(interpolatedStringText.Text.Replace("{{", "{").Replace("}}", "}"));
+			else if (interpolatedStringText.Parent is InterpolatedStringExpression { IsVerbatim: true })
+				writer.WriteVerbatimText(interpolatedStringText.Text.Replace("\"", "\"\""));
+			else
+				writer.WriteInterpolatedText(interpolatedStringText.Text);
 			EndNode(interpolatedStringText);
 		}
 		#endregion

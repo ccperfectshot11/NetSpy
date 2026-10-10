@@ -19,6 +19,7 @@
 #nullable enable
 
 using System.Collections.Generic;
+using System.Linq;
 
 namespace NetSpy.Decompiler.CSharp.Syntax
 {
@@ -33,6 +34,28 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 
 		[Slot("Content")]
 		public partial AstNodeCollection<InterpolatedStringContent> Content { get; }
+
+		/// <summary>NetSpy: written $@"..." (backslashes and quotes as they are).</summary>
+		public bool IsVerbatim { get; set; }
+
+		/// <summary>NetSpy: written as a single-line raw string with this many '$' ($$"""{"a": {{x}}}"""); 0: not raw.</summary>
+		public int RawDollars { get; set; }
+
+		/// <summary>NetSpy: the quotes a raw form needs (one more than the longest run of quotes in its text, at least three).</summary>
+		public string RawQuotes()
+		{
+			int longest = 0;
+			foreach (var text in Content.OfType<InterpolatedStringText>())
+			{
+				int run = 0;
+				foreach (char c in text.Text)
+				{
+					run = c == '"' ? run + 1 : 0;
+					longest = System.Math.Max(longest, run);
+				}
+			}
+			return new string('"', System.Math.Max(3, longest + 1));
+		}
 
 		public InterpolatedStringExpression(IList<InterpolatedStringContent> content)
 		{

@@ -534,6 +534,9 @@ namespace NetSpy.Decompiler.Engine.Core.CSharp {
 		public override void WriteInterpolatedText(string text) =>
 			output.Write(TextWriterTokenWriter.ConvertString(text), BoxedTextColor.String);
 
+		public override void WriteVerbatimText(string text) =>
+			output.Write(text, BoxedTextColor.String);
+
 		public override void WritePrimitiveType(string type) {
 			switch (type) {
 			case "new":

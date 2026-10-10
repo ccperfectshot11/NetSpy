@@ -53,7 +53,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		const int MaxSites = 12;
 
 		static readonly char[] Escaped = { '\n', '\r' };
-		static readonly char[] EscapedInInterpolation = { '"', '\\', '\n', '\r', '\t', '{', '}' };
+		static readonly char[] EscapedInInterpolation = { '\n', '\r', '\t' };
 
 		public void Run(AstNode rootNode, TransformContext context)
 		{
@@ -482,6 +482,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						break;
 					case IndexerExpression indexer:
 						AddIndexFromEndSite(indexer, sites);
+						break;
+					case InterpolatedStringExpression interpolated:
+						AddInterpolatedFormSite(interpolated, sites);
 						break;
 					case InvocationExpression { Target: MemberReferenceExpression { MemberName: "Substring" or "Slice" } } sliceCall:
 						AddRangeSite(sliceCall, sites);
@@ -1383,6 +1386,51 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					placeholder.ReplaceWith(invocation);
 				};
 			});
+		}
+
+		/// <summary>$"C:\{x}" → $@"C:\{x}", $"{{\"a\": {x}}}" → $$"""{"a": {{x}}}""" (the same string).</summary>
+		static void AddInterpolatedFormSite(InterpolatedStringExpression interpolated, List<Site> sites)
+		{
+			if (interpolated.IsVerbatim || interpolated.RawDollars > 0)
+				return;
+			var texts = interpolated.Content.OfType<InterpolatedStringText>().Select(t => t.Text).ToList();
+			if (texts.Any(t => t.Any(char.IsControl)) || interpolated.Content.OfType<Interpolation>().Any(i => i.Suffix?.Any(c => c == '"' || c == '\\' || char.IsControl(c)) == true))
+				return;
+			var site = new Site();
+			if (texts.Any(t => t.IndexOf('\\') >= 0 || t.IndexOf('"') >= 0))
+			{
+				site.Alternatives.Add(() => {
+					interpolated.IsVerbatim = true;
+					return () => interpolated.IsVerbatim = false;
+				});
+			}
+			// raw: one more '$' than the longest run of braces in the text; it can't start or end with a quote
+			var unescaped = texts.Select(t => t.Replace("{{", "{").Replace("}}", "}")).ToList();
+			if (unescaped.Any(t => t.IndexOf('"') >= 0 || t.IndexOf('{') >= 0)
+				&& !(interpolated.Content.FirstOrDefault() is InterpolatedStringText { Text: var head } && head.StartsWith("\"", StringComparison.Ordinal))
+				&& !(interpolated.Content.LastOrDefault() is InterpolatedStringText { Text: var tail } && tail.EndsWith("\"", StringComparison.Ordinal)))
+			{
+				int longest = 0;
+				foreach (var text in unescaped)
+				{
+					// runs of the same brace ("{}" is two runs of one)
+					int run = 0;
+					char previous = '\0';
+					foreach (char c in text)
+					{
+						run = c is '{' or '}' ? (c == previous ? run + 1 : 1) : 0;
+						previous = c;
+						longest = Math.Max(longest, run);
+					}
+				}
+				int dollars = longest + 1;
+				site.Alternatives.Add(() => {
+					interpolated.RawDollars = dollars;
+					return () => interpolated.RawDollars = 0;
+				});
+			}
+			if (site.Alternatives.Count > 0)
+				sites.Add(site);
 		}
 
 		/// <summary>"a[a.Length - 1]" → "a[^1]" (a an array read without side effects: the same IL).</summary>

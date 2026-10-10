@@ -462,6 +462,11 @@ namespace NetSpy.Decompiler
 			output.Write(TextWriterTokenWriter.ConvertString(text));
 		}
 
+		public override void WriteVerbatimText(string text)
+		{
+			output.Write(text);
+		}
+
 		public override void WritePrimitiveType(string type)
 		{
 			switch (type)

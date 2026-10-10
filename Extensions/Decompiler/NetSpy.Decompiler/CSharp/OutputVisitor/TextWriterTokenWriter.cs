@@ -513,6 +513,13 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			textWriter.Write(ConvertString(text));
 		}
 
+		public override void WriteVerbatimText(string text)
+		{
+			textWriter.Write(text);
+			column += text.Length;
+			Length += text.Length;
+		}
+
 		/// <summary>
 		/// Gets the escape sequence for the specified character within a char literal.
 		/// Does not include the single quotes surrounding the char literal.
