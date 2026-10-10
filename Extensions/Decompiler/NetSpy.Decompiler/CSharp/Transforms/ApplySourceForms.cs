@@ -100,6 +100,15 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 			foreach (var type in rootNode.Descendants.OfType<TypeDeclaration>().ToList())
 				HoistUnsafe(type);
+			// "M((TBase)(object)x)" with x a TDerived where TDerived : TBase: the conversion is implicit (the IL boxes)
+			foreach (var cast in rootNode.Descendants.OfType<CastExpression>().ToList())
+			{
+				if (cast.Expression is CastExpression { Type: Syntax.PrimitiveType { Keyword: "object" }, Expression: { } value } && cast.Parent is InvocationExpression or ObjectCreateExpression
+					&& (cast.Parent is InvocationExpression invocation ? invocation.Arguments.Contains(cast) : ((ObjectCreateExpression)cast.Parent).Arguments.Contains(cast))
+					&& cast.GetResolveResult()?.Type is ITypeParameter target
+					&& value.GetResolveResult()?.Type is ITypeParameter source && source.DirectBaseTypes.Any(t => t.ReflectionName == target.ReflectionName))
+					cast.ReplaceWith(value.Detach());
+			}
 			foreach (var attribute in rootNode.Descendants.OfType<Syntax.Attribute>().ToList())
 			{
 				UseNameofInAttribute(attribute);
@@ -986,6 +995,11 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						break;
 					if (ancestors.Contains(node) || node is not Expression || node is PrimitiveExpression or IdentifierExpression or TypeReferenceExpression
 						or MemberReferenceExpression { Parent: not InvocationExpression } or MemberReferenceExpression { Target: TypeReferenceExpression or IdentifierExpression })
+						continue;
+					// built-in operators (no user-defined operator method), parentheses, conditionals
+					if (node is BinaryOperatorExpression or UnaryOperatorExpression { Operator: not (UnaryOperatorType.Increment or UnaryOperatorType.Decrement
+						or UnaryOperatorType.PostIncrement or UnaryOperatorType.PostDecrement or UnaryOperatorType.Await) } && node.GetSymbol() is not IMethod
+						|| node is ParenthesizedExpression or ConditionalExpression)
 						continue;
 					pure = false;
 					break;
