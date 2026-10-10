@@ -1898,6 +1898,10 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		static bool IsDefaultArgument(Expression argument, IParameter parameter)
 		{
 			var resolved = argument.GetResolveResult();
+			// [CallerMemberName] / [CallerLineNumber] / [CallerFilePath]: the compiler passes a constant of the call site
+			if (resolved is { IsCompileTimeConstant: true } && parameter.GetAttributes().Any(a => a.AttributeType.Namespace == "System.Runtime.CompilerServices"
+				&& a.AttributeType.Name is "CallerMemberNameAttribute" or "CallerLineNumberAttribute" or "CallerFilePathAttribute"))
+				return true;
 			if (parameter.HasConstantValueInSignature)
 				return resolved is { IsCompileTimeConstant: true } && ConstantsEqual(resolved.ConstantValue, parameter.GetConstantValue());
 			var defaultValue = parameter.GetAttributes()
