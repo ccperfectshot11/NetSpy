@@ -2025,6 +2025,12 @@ namespace NetSpy.Decompiler.CSharp
 						default:
 							throw new ArgumentOutOfRangeException();
 					}
+					// NetSpy: "Blue = 0x7FFFFFFFFF": a big mask-like value reads as written in hex
+					foreach (var enumMember in typeDecl.Members.OfType<EnumMemberDeclaration>())
+					{
+						if (enumMember.Initializer is PrimitiveExpression { Format: LiteralFormat.None, Value: { } hexCandidate } literal && LooksHex(hexCandidate))
+							literal.Format = LiteralFormat.HexadecimalNumber;
+					}
 					foreach (var item in typeDecl.Members)
 					{
 						if (item is not EnumMemberDeclaration)
@@ -2202,6 +2208,25 @@ namespace NetSpy.Decompiler.CSharp
 					entityMap.Add(extMember, extMemberDecl);
 				}
 			}
+		}
+
+		/// <summary>
+		/// NetSpy: a constant of 6+ hex digits made of at most two distinct digits (0x7FFFFFFFFF, 0xF0F0F0F0, 0xFF0000)
+		/// was written in hex: in decimal such values look arbitrary.
+		/// </summary>
+		internal static bool LooksHex(object value)
+		{
+			ulong number;
+			switch (value)
+			{
+				case int i when i > 0: number = (ulong)i; break;
+				case uint u: number = u; break;
+				case long l when l > 0: number = (ulong)l; break;
+				case ulong ul: number = ul; break;
+				default: return false;
+			}
+			string hex = number.ToString("X", System.Globalization.CultureInfo.InvariantCulture);
+			return hex.Length >= 6 && hex.Distinct().Count() <= 2;
 		}
 
 		EnumValueDisplayMode DetectBestEnumValueDisplayMode(ITypeDefinition typeDef, MetadataFile module)

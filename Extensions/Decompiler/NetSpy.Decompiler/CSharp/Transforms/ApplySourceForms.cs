@@ -100,6 +100,14 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 			foreach (var type in rootNode.Descendants.OfType<TypeDeclaration>().ToList())
 				HoistUnsafe(type);
+			// a mask-like constant whose hex spelling is as wide as the decimal one (the width can't tell): hex
+			foreach (var literal in rootNode.Descendants.OfType<PrimitiveExpression>().ToList())
+			{
+				if (literal.Format == LiteralFormat.None && literal.Value is { } number && CSharpDecompiler.LooksHex(number)
+					&& Convert.ToUInt64(number, System.Globalization.CultureInfo.InvariantCulture) is var unsigned
+					&& unsigned.ToString(System.Globalization.CultureInfo.InvariantCulture).Length == unsigned.ToString("X", System.Globalization.CultureInfo.InvariantCulture).Length + 2)
+					literal.Format = LiteralFormat.HexadecimalNumber;
+			}
 			// "M((TBase)(object)x)" with x a TDerived where TDerived : TBase: the conversion is implicit (the IL boxes)
 			foreach (var cast in rootNode.Descendants.OfType<CastExpression>().ToList())
 			{
