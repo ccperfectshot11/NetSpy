@@ -113,6 +113,25 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			}
 		}
 
+		/// <summary>NetSpy: a raw string keeps the value only without line breaks, or with one kind of them (written as is).</summary>
+		static bool CanWriteRaw(string text)
+		{
+			if (text.IndexOf('\n') < 0 && text.IndexOf('\r') < 0)
+				return true;
+			return text.IndexOf("\r\n", StringComparison.Ordinal) >= 0 ? text.Replace("\r\n", "").IndexOfAny(new[] { '\r', '\n' }) < 0 : text.IndexOf('\r') < 0;
+		}
+
+		/// <summary>NetSpy: a line break inside a raw string literal, with the string's own line break characters.</summary>
+		void RawNewLine(string newLine)
+		{
+			textWriter.Write(newLine);
+			column = 1;
+			line++;
+			Length += newLine.Length;
+			needsIndent = true;
+			isAtStartOfLine = true;
+		}
+
 		public override void NewLine()
 		{
 			textWriter.WriteLine();
@@ -264,7 +283,7 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			}
 
 			// NetSpy: verbatim (@"...") and single-line raw ("""...""") string literals
-			if (value is string text && format is LiteralFormat.VerbatimStringLiteral or LiteralFormat.RawStringLiteral)
+			if (value is string text && (format == LiteralFormat.VerbatimStringLiteral || format == LiteralFormat.RawStringLiteral && CanWriteRaw(text)))
 			{
 				string literal;
 				if (format == LiteralFormat.VerbatimStringLiteral)
@@ -280,6 +299,35 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 						longest = Math.Max(longest, run);
 					}
 					string quotes = new string('"', Math.Max(3, longest + 1));
+					// the line breaks the string has: a raw string's value takes them from the file ("\n" in a "\r\n" file is fine)
+					string newLine = text.IndexOf("\r\n", StringComparison.Ordinal) >= 0 ? "\r\n" : "\n";
+					if (text.IndexOf('\n') >= 0 && (newLine == "\r\n" ? text.Replace("\r\n", "").IndexOf('\n') < 0 : text.IndexOf('\r') < 0))
+					{
+						// NetSpy: multi-line raw string: the content and the closing quotes one level deeper than the statement
+						// (the closing quotes' indentation is removed from every line, so the value is the same)
+						Indentation++;
+						textWriter.Write(quotes);
+						column += quotes.Length;
+						Length += quotes.Length;
+						foreach (var line in text.Split(new[] { newLine }, StringSplitOptions.None))
+						{
+							RawNewLine(newLine);
+							if (line.Length > 0)
+							{
+								WriteIndentation();
+								textWriter.Write(line);
+								column += line.Length;
+								Length += line.Length;
+							}
+						}
+						RawNewLine(newLine);
+						WriteIndentation();
+						textWriter.Write(quotes);
+						column += quotes.Length;
+						Length += quotes.Length;
+						Indentation--;
+						return;
+					}
 					literal = quotes + text + quotes;
 				}
 				textWriter.Write(literal);

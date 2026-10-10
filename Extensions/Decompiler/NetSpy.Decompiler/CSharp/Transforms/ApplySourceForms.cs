@@ -126,6 +126,18 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					IntroduceLateExit(ifElse);
 				foreach (var whileStatement in rootNode.Descendants.OfType<WhileStatement>().ToList())
 					IntroduceOutVarInLoopCondition(whileStatement);
+				// a string with n lines in a statement whose single sequence point spans n + 1 more lines: a multi-line raw
+				// string ("""<newline> lines <newline>""")
+				foreach (var literal in rootNode.Descendants.OfType<PrimitiveExpression>().ToList())
+				{
+					if (literal.Value is not string text || literal.Format != LiteralFormat.None || text.IndexOf('\n') < 0
+						|| literal.Ancestors.OfType<Statement>().FirstOrDefault(s => s.Annotation<SourceLayoutAnnotation>() is not null) is not { } statement
+						|| statement.Annotation<SourceLayoutAnnotation>() is not { IsMultiLine: true } layout
+						|| statement.Descendants.OfType<PrimitiveExpression>().Count(p => p.Value is string s && s.IndexOf('\n') >= 0) != 1
+						|| layout.EndLine - layout.StartLine != text.Split('\n').Length + 1)
+						continue;
+					literal.Format = LiteralFormat.RawStringLiteral;
+				}
 				foreach (var declaration in rootNode.Descendants.OfType<VariableDeclarationStatement>().ToList())
 				{
 					IntroduceIsVar(declaration);
