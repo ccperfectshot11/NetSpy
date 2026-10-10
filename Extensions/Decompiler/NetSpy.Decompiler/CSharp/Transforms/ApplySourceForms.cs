@@ -955,8 +955,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					|| variable.GetILVariable() is not { Kind: VariableKind.Local or VariableKind.StackSlot, HasGeneratedName: true, SourceName: null } temp
 					|| declaration.Annotation<SourceLayoutAnnotation>() is not { } layout
 					|| statements[i + 1] is not (ExpressionStatement or ReturnStatement or VariableDeclarationStatement or ThrowStatement)
-					|| statements[i + 1].Annotation<SourceLayoutAnnotation>() is not { } next
-					|| next.StartLine != layout.StartLine || next.StartColumn != layout.StartColumn
+					// after an await's resumption the rest of the statement may have no sequence point of its own
+					|| statements[i + 1].Annotation<SourceLayoutAnnotation>() is { } next
+						&& (next.StartLine != layout.StartLine || next.StartColumn != layout.StartColumn)
 					|| value is LambdaExpression or AnonymousMethodExpression or StackAllocExpression or ArrayInitializerExpression
 					|| block.Ancestors.OfType<EntityDeclaration>().FirstOrDefault() is not { } entity)
 					continue;

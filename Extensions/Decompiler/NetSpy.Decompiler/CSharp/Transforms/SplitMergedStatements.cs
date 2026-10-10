@@ -81,7 +81,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			var ranges = (statement is FixedStatement fixedStatement ? fixedStatement.Variables.SelectMany(Ranges) : Ranges(statement)).ToList();
 			if (ranges.Count == 0)
 				return;
-			var covering = points.Where(sp => ranges.Any(r => r.Start < sp.EndOffset && sp.Offset <= r.InclusiveEnd)).ToList();
+			// a point overlapping the statement's IL, or starting inside it (IL without annotations, e.g. a spilled "ldstr")
+			int first = ranges.Min(r => r.Start), last = ranges.Max(r => r.InclusiveEnd);
+			var covering = points.Where(sp => ranges.Any(r => r.Start < sp.EndOffset && sp.Offset <= r.InclusiveEnd) || sp.Offset > first && sp.Offset <= last).ToList();
 			if (covering.Count != 2 || covering[0].StartLine >= covering[1].StartLine)
 				return;
 			int split = covering[1].Offset;
