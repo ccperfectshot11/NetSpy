@@ -1546,11 +1546,19 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// <summary>"M().P" → "M()!.P" (the source's null-forgiving operator; no IL).</summary>
 		static void AddNullForgivingSite(MemberReferenceExpression member, List<Site> sites)
 		{
-			if (member.Target is not (InvocationExpression or MemberReferenceExpression) || member.Target.GetResolveResult()?.Type is not { IsReferenceType: true })
-				return;
-			// only after a value the API annotates as nullable ("GetField(...)!")
-			if (member.Target.GetSymbol() is not IMember { ReturnType.Nullability: Nullability.Nullable })
-				return;
+			// after a parameter declared nullable ("string? text" ... "text!.Length")
+			bool nullableParameter = member.Target is IdentifierExpression { Identifier: var name }
+				&& member.Ancestors.OfType<EntityDeclaration>().FirstOrDefault() is { } entity
+				&& entity.Descendants.OfType<ParameterDeclaration>().Any(p => p.Name == name && p.Parent == entity && p.Type is ComposedType { HasNullableSpecifier: true })
+				&& member.Target.GetResolveResult()?.Type is { IsReferenceType: true };
+			if (!nullableParameter)
+			{
+				if (member.Target is not (InvocationExpression or MemberReferenceExpression) || member.Target.GetResolveResult()?.Type is not { IsReferenceType: true })
+					return;
+				// only after a value the API annotates as nullable ("GetField(...)!")
+				if (member.Target.GetSymbol() is not IMember { ReturnType.Nullability: Nullability.Nullable })
+					return;
+			}
 			Add(sites).Alternatives.Add(() => {
 				var target = member.Target;
 				var placeholder = new UnaryOperatorExpression(UnaryOperatorType.SuppressNullableWarning, target.Detach());

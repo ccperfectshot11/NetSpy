@@ -100,6 +100,20 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 			foreach (var type in rootNode.Descendants.OfType<TypeDeclaration>().ToList())
 				HoistUnsafe(type);
+			// "EventHandler? handler = changed;": in nullable-enabled code a local typed explicitly from a member annotated
+			// nullable is declared nullable (without "?" the source would have had warning CS8600)
+			foreach (var declaration in rootNode.Descendants.OfType<VariableDeclarationStatement>().ToList())
+			{
+				if (declaration.Type is SimpleType or MemberType && !declaration.Type.IsVar() && declaration.Variables.Count == 1
+					&& declaration.Variables.Single().Initializer is { } source and (MemberReferenceExpression or IdentifierExpression)
+					&& source.GetSymbol() is IMember { ReturnType: { Nullability: Nullability.Nullable, IsReferenceType: true } })
+				{
+					var plain = declaration.Type;
+					var nullable = new ComposedType { HasNullableSpecifier = true };
+					plain.ReplaceWith(nullable);
+					nullable.BaseType = plain;
+				}
+			}
 			// a mask-like constant whose hex spelling is as wide as the decimal one (the width can't tell): hex
 			foreach (var literal in rootNode.Descendants.OfType<PrimitiveExpression>().ToList())
 			{

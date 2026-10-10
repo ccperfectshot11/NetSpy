@@ -17,6 +17,7 @@
 // DEALINGS IN THE SOFTWARE.
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 
@@ -44,6 +45,33 @@ namespace NetSpy.Decompiler.IL.Transforms
 		public NullPropagationTransform(ILTransformContext context)
 		{
 			this.context = context;
+		}
+
+		/// <summary>
+		/// NetSpy: "if (handler != null) { handler(...); }" with handler a local the PDB names, whose test and use are on
+		/// different source lines, was written that way (a "?." is one sequence point).
+		/// </summary>
+		bool IsSourceIfStatement(ILVariable testedVar, params ILInstruction[] parts)
+		{
+			if (testedVar.Kind is not (VariableKind.Local or VariableKind.Parameter) || testedVar.Kind == VariableKind.Local && testedVar.HasGeneratedName
+				|| context.DebugInfo is not { } debugInfo
+				|| (context.Function.MoveNextMethod ?? context.Function.Method) is not { } method || method.MetadataToken.IsNil
+				|| method.MetadataToken.Kind != System.Reflection.Metadata.HandleKind.MethodDefinition)
+				return false;
+			var ranges = parts.SelectMany(p => p.Descendants).SelectMany(i => i.ILRanges).Where(r => !r.IsEmpty).ToList();
+			if (ranges.Count == 0)
+				return false;
+			int start = ranges.Min(r => r.Start), end = ranges.Max(r => r.InclusiveEnd);
+			IList<DebugInfo.SequencePoint> points;
+			try
+			{
+				points = debugInfo.GetSequencePoints((System.Reflection.Metadata.MethodDefinitionHandle)method.MetadataToken);
+			}
+			catch (System.Exception)
+			{
+				return false;
+			}
+			return points.Where(sp => !sp.IsHidden && sp.Offset >= start && sp.Offset <= end).Select(sp => sp.StartLine).Distinct().Count() >= 2;
 		}
 
 		enum Mode
@@ -109,6 +137,8 @@ namespace NetSpy.Decompiler.IL.Transforms
 		ILInstruction TryNullPropagation(ILVariable testedVar, ILInstruction nonNullInst, ILInstruction nullInst,
 			Mode mode)
 		{
+			if (IsSourceIfStatement(testedVar, nonNullInst, nullInst))
+				return null;
 			bool removedRewrapOrNullableCtor = false;
 			if (NullableLiftingTransform.MatchNullableCtor(nonNullInst, out _, out var arg))
 			{
@@ -227,7 +257,7 @@ namespace NetSpy.Decompiler.IL.Transforms
 
 		void TryNullPropForVoidCall(ILVariable testedVar, Mode mode, Block body, IfInstruction ifInst)
 		{
-			if (body == null || body.Instructions.Count != 1)
+			if (body == null || body.Instructions.Count != 1 || IsSourceIfStatement(testedVar, ifInst))
 				return;
 			var bodyInst = body.Instructions[0];
 			if (bodyInst.MatchNullableRewrap(out var arg, out _))
