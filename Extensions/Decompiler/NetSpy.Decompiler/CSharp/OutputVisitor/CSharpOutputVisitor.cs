@@ -1870,8 +1870,10 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 					{
 						if (previous is not null)
 						{
-							// NetSpy: consecutive fields are grouped without empty lines (as usually written)
+							// NetSpy: consecutive fields are grouped without empty lines (as usually written), except
+							// around a field with attributes (its attribute lines make it a block of its own)
 							int blankLines = previous is FieldDeclaration && member is FieldDeclaration
+								&& previous.Attributes.Count == 0 && member.Attributes.Count == 0
 								? policy.MinimumBlankLinesBetweenFields
 								: policy.MinimumBlankLinesBetweenMembers;
 							for (int i = 0; i < blankLines; i++)
