@@ -1740,7 +1740,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 			// C# 10 natural lambda type: "Func<string, int> f = s => ..." → "var f = (string s) => ..."
 			if (!isVar && initializer is LambdaExpression { IsAsync: false } lambda && lambda.Parameters.Count > 0
-				&& lambda.Parameters.All(p => p.Type is null) && lambda.Attributes.Count == 0
+				// typed already ("[A] (int x) => ...") or not at all
+				&& (lambda.Parameters.All(p => p.Type is null) || lambda.Parameters.All(p => p.Type is not null))
 				&& context.Settings.GetMinimumRequiredVersion() >= LanguageVersion.CSharp10_0
 				&& variableType is ParameterizedType { Namespace: "System", Name: "Func" or "Action" } delegateType
 				&& lambda.Annotation<IL.ILFunction>()?.Method is { } lambdaMethod
@@ -1751,7 +1752,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					var undoType = SetDeclarationType(declaration, new SimpleType("var"));
 					var parameters = lambda.Parameters.ToList();
 					var added = new List<AstType>();
-					for (int i = 0; i < parameters.Count; i++)
+					for (int i = 0; i < parameters.Count && parameters[i].Type is null; i++)
 					{
 						var parameterType = context.TypeSystemAstBuilder.ConvertType(lambdaMethod.Parameters[i].Type);
 						parameters[i].Type = parameterType;

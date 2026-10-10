@@ -1284,10 +1284,12 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						|| parameter.Annotation<ILVariableResolveResult>()?.Variable is not { } variable)
 						continue;
 					// no declaration of the name whose scope contains the lambda, no other use of it inside
-					bool clash = methodParameters.Contains(source)
+					// (C# 8 lets a lambda's parameters shadow the enclosing locals and parameters)
+					bool shadowingAllowed = context.Settings.GetMinimumRequiredVersion() >= LanguageVersion.CSharp8_0;
+					bool clash = !shadowingAllowed && (methodParameters.Contains(source)
 						|| declarations.Any(d => GetName(d.Node) == source && !d.Node.Ancestors.Contains(function) && function.Ancestors.Contains(d.Scope))
 						|| function.Ancestors.Where(a => a is LambdaExpression or AnonymousMethodExpression).Any(outer =>
-							(outer is LambdaExpression l ? l.Parameters : ((AnonymousMethodExpression)outer).Parameters).Any(p => p.Name == source))
+							(outer is LambdaExpression l ? l.Parameters : ((AnonymousMethodExpression)outer).Parameters).Any(p => p.Name == source)))
 						|| function.Descendants.OfType<IdentifierExpression>().Any(id => id.Identifier == source && id.GetILVariable() != variable)
 						|| function.Descendants.OfType<ParameterDeclaration>().Any(p => p != parameter && p.Name == source)
 						|| function.Descendants.OfType<VariableInitializer>().Any(v => v.Name == source);
