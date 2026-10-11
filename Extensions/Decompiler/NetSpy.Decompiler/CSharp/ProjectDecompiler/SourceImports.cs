@@ -119,7 +119,8 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 		/// Replaces the usings the decompiler computed with the file's original ones; the namespaces the decompiled
 		/// code needs and that neither those nor the global usings import are kept (so it always compiles).
 		/// </summary>
-		public void Apply(SyntaxTree syntaxTree, string fileName, MetadataModule module, CSharpFormattingOptions formattingOptions)
+		public void Apply(SyntaxTree syntaxTree, string fileName, MetadataModule module, CSharpFormattingOptions formattingOptions,
+			string? containingNamespace = null)
 		{
 			if (!Files.TryGetValue(fileName, out var own))
 				return;
@@ -131,7 +132,10 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 			{
 				node.Remove();
 				// NetSpy: a namespace the original file didn't import: its types were written fully qualified
-				if (node is UsingDeclaration { IsStatic: false } u && !imported.Contains(u.Namespace) && !QualifyNamespace(syntaxTree, u.Namespace))
+				// (a type shown without its namespace declaration keeps "using <its namespace>;")
+				if (node is UsingDeclaration { IsStatic: false } shown && shown.Namespace == containingNamespace)
+					directives.Add(node);
+				else if (node is UsingDeclaration { IsStatic: false } u && !imported.Contains(u.Namespace) && !QualifyNamespace(syntaxTree, u.Namespace))
 					directives.Add(node);
 				else if (node is UsingAliasDeclaration a && !aliases.Contains(a.Alias))
 					directives.Add(node);
@@ -472,7 +476,7 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 			return text.ToString();
 		}
 
-		static AstNode? CreateDirective(SourceImport import, MetadataModule module)
+		internal static AstNode? CreateDirective(SourceImport import, MetadataModule module)
 		{
 			switch (import.Kind)
 			{
@@ -501,6 +505,66 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 					return import.Alias is null ? null : new UsingAliasDeclaration { Alias = import.Alias, Import = syntax };
 				default:
 					return null;
+			}
+		}
+	}
+	/// <summary>
+	/// NetSpy: the original using directives (and the using static / alias spellings they allow) for a single type shown
+	/// in the editor, like a whole-project export writes them; the global usings are shown as ordinary directives.
+	/// </summary>
+	public static class SourceImportsForType
+	{
+		static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MetadataReader, Box> cache = new System.Runtime.CompilerServices.ConditionalWeakTable<MetadataReader, Box>();
+
+		sealed class Box
+		{
+			public Dictionary<TypeDefinitionHandle, (string FileName, int Line)>? SourceFiles;
+			public SourceImports? Imports;
+		}
+
+		public static void Apply(SyntaxTree syntaxTree, MetadataModule module, IDebugInfoProvider provider, TypeDefinitionHandle type, CSharpFormattingOptions formattingOptions)
+		{
+			if (provider is not ISourceImportProvider importProvider)
+				return;
+			var metadata = module.MetadataFile.Metadata;
+			Box box;
+			lock (cache)
+			{
+				if (!cache.TryGetValue(metadata, out box!))
+				{
+					box = new Box();
+					try
+					{
+						box.SourceFiles = SourceFileLayout.Compute(metadata, provider, out _);
+						box.Imports = box.SourceFiles is null ? null : SourceImports.Compute(metadata, importProvider, box.SourceFiles);
+					}
+					catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
+					{
+						box.Imports = null;
+					}
+					cache.Add(metadata, box);
+				}
+			}
+			// a nested type is in its outermost type's file
+			var top = type;
+			while (metadata.GetTypeDefinition(top).GetDeclaringType() is { IsNil: false } parent)
+				top = parent;
+			if (box.Imports is not { } imports || box.SourceFiles is null || !box.SourceFiles.TryGetValue(top, out var file))
+				return;
+			var definition = metadata.GetTypeDefinition(top);
+			string? containingNamespace = definition.Namespace.IsNil ? null : metadata.GetString(definition.Namespace);
+			imports.Apply(syntaxTree, file.FileName, module, formattingOptions, containingNamespace);
+			// the global usings (a project gets them in their own file)
+			var present = new HashSet<string>(syntaxTree.Children.Where(n => n is UsingDeclaration or UsingAliasDeclaration).Select(n => n.ToString().Trim()));
+			AstNode? first = syntaxTree.Children.FirstOrDefault(n => n is UsingDeclaration or UsingAliasDeclaration);
+			foreach (var global in imports.Global)
+			{
+				if (SourceImports.CreateDirective(global, module) is not { } directive || present.Contains(directive.ToString().Trim()))
+					continue;
+				if (first is null)
+					syntaxTree.InsertChildBefore(syntaxTree.FirstChild, directive, Slots.Member);
+				else
+					syntaxTree.InsertChildBefore(first, directive, Slots.Member);
 			}
 		}
 	}

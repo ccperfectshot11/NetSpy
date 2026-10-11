@@ -57,6 +57,12 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				foreach (var identifier in rootNode.Descendants.OfType<Identifier>().Where(i => i.Name == definition.Name).ToList())
 					identifier.Name = name;
 			}
+			// references to a file-local type declared elsewhere (a single type shown in the editor): its declared name
+			foreach (var identifier in rootNode.Descendants.OfType<Identifier>().ToList())
+			{
+				if (IsFileLocalName(identifier.Name, out _, out var declared))
+					identifier.Name = declared;
+			}
 		}
 	}
 }

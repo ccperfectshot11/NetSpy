@@ -117,8 +117,17 @@ namespace NetSpy.Decompiler.Engine.Core.CSharp {
 			Run(ev.Module, output, ctx, CreateSettings(isSingleMember: true), d => d.Decompile(ToHandle(ev)));
 		}
 
-		public override void Decompile(TypeDef type, IDecompilerOutput output, DecompilationContext ctx) =>
-			Run(type.Module, output, ctx, CreateSettings(), d => d.Decompile(ToHandle(type)));
+		public override void Decompile(TypeDef type, IDecompilerOutput output, DecompilationContext ctx) {
+			var settings = CreateSettings();
+			Run(type.Module, output, ctx, settings, d => {
+				var syntaxTree = d.Decompile(ToHandle(type));
+				// NetSpy: the original file's using directives (using static, aliases), as a project export writes them
+				if (settings.UsingDeclarations && settings.SourceLayoutFromPdb && d.DebugInfoProvider is { } provider)
+					NetSpy.Decompiler.CSharp.ProjectDecompiler.SourceImportsForType.Apply(syntaxTree, d.TypeSystem.MainModule, provider,
+						(SRM.TypeDefinitionHandle)ToHandle(type), settings.CSharpFormattingOptions);
+				return syntaxTree;
+			});
+		}
 
 		public override void Decompile(AssemblyDef asm, IDecompilerOutput output, DecompilationContext ctx) {
 			WriteAssembly(asm, output, ctx);
