@@ -116,6 +116,22 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					continue;
 				Process(expressionBody, width);
 			}
+			// "x => expr": the lambda is a method of its own whose single sequence point is the expression
+			if (context.DecompileRun.DebugInfoProvider is { } lambdaProvider)
+			{
+				foreach (var lambda in rootNode.Descendants.OfType<LambdaExpression>().ToList())
+				{
+					if (lambda.Body is not Expression body || lambda.Parent is null
+						|| lambda.Annotation<IL.ILFunction>()?.Method is not { MetadataToken: { IsNil: false, Kind: System.Reflection.Metadata.HandleKind.MethodDefinition } token })
+						continue;
+					var points = lambdaProvider.GetSequencePoints((System.Reflection.Metadata.MethodDefinitionHandle)token).Where(sp => !sp.IsHidden).ToList();
+					if (points.Count != 1 || points[0].StartLine != points[0].EndLine
+						|| body.DescendantsAndSelf.Any(n => n is LambdaExpression or AnonymousMethodExpression
+							|| n is PrimitiveExpression { Value: string text } && text.IndexOfAny(Escaped) >= 0))
+						continue;
+					Process(lambda, points[0].EndColumn - points[0].StartColumn);
+				}
+			}
 		}
 
 		void ProcessMemberInitializer(EntityDeclaration member)
@@ -364,6 +380,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// <summary>The node the sequence point covers: the expression of "=> expr" bodies, else the statement.</summary>
 		internal static AstNode MeasuredNode(AstNode statement)
 		{
+			// a lambda's sequence point is its body
+			if (statement is LambdaExpression { Body: Expression lambdaBody })
+				return lambdaBody;
 			if (statement.Parent is BlockStatement { Statements.Count: 1 } body
 				&& (AnnotateAccessorStyles.StyleOf(body) is { } style
 					? style is AccessorStyle.ExpressionBody or AccessorStyle.PropertyExpressionBody
@@ -400,7 +419,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			if (statement is VariableDeclarationStatement declaration)
 				AddDeclarationSite(declaration, sites);
 			// an if: only its condition is in the sequence point
-			AstNode root = statement is IfElseStatement { Condition: { } condition } ? condition : statement;
+			AstNode root = statement is IfElseStatement { Condition: { } condition } ? condition
+				: statement is LambdaExpression { Body: { } lambdaBody } ? lambdaBody : statement;
 			foreach (var node in root.DescendantsAndSelf)
 			{
 				if (node is PrimitiveExpression { Value: string name })
