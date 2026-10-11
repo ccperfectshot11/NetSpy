@@ -109,6 +109,9 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				};
 				if (expressionBody is null || (member.GetSymbol() as IProperty)?.Getter is not { } getter || GetterWidth(getter) is not int width)
 					continue;
+				// for the later passes (using static, aliases): the source width of "=> expr"
+				if (expressionBody.Annotation<SourceLayoutAnnotation>() is null)
+					expressionBody.AddAnnotation(new SourceLayoutAnnotation { Width = width });
 				if (expressionBody.DescendantsAndSelf.Any(n => n is PrimitiveExpression { Value: string text } && text.IndexOfAny(Escaped) >= 0))
 					continue;
 				Process(expressionBody, width);

@@ -213,7 +213,7 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 			if (types.Count == 0)
 				return;
 			// the replacements each statement could take
-			var candidates = new Dictionary<Statement, List<MemberReferenceExpression>>();
+			var candidates = new Dictionary<AstNode, List<MemberReferenceExpression>>();
 			foreach (var member in syntaxTree.Descendants.OfType<MemberReferenceExpression>().ToList())
 			{
 				if (member.Parent is null || member.Target is not TypeReferenceExpression target
@@ -228,7 +228,9 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 				if (currentType is null || currentType.GetMembers(m => m.Name == member.MemberName).Any()
 					|| member.Ancestors.OfType<TypeDeclaration>().Any(t => (t.GetSymbol() as ITypeDefinition)?.GetMembers(m => m.Name == member.MemberName).Any() == true))
 					continue;
-				var statement = member.Ancestors.OfType<Statement>().FirstOrDefault(s => s.Annotation<Transforms.SourceLayoutAnnotation>() is not null);
+				// a statement, or the expression of "=> expr" (its source width from the getter's sequence point)
+				var statement = member.Ancestors.FirstOrDefault(a => a is Statement && a.Annotation<Transforms.SourceLayoutAnnotation>() is not null
+					|| a is Expression && a.Parent is PropertyDeclaration or IndexerDeclaration && a.Annotation<Transforms.SourceLayoutAnnotation>() is not null);
 				if (statement?.Annotation<Transforms.SourceLayoutAnnotation>() is not { Width: > 0 })
 					continue;
 				if (!candidates.TryGetValue(statement, out var list))
@@ -444,7 +446,7 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 		}
 
 		/// <summary>The length of a statement written on one line with the output's formatting (-1 if it takes several).</summary>
-		static int Width(Statement statement, CSharpFormattingOptions formattingOptions)
+		static int Width(AstNode statement, CSharpFormattingOptions formattingOptions)
 		{
 			// "=> expr": the sequence point covers the expression only
 			AstNode measured = Transforms.MatchSourceWidths.MeasuredNode(statement);
