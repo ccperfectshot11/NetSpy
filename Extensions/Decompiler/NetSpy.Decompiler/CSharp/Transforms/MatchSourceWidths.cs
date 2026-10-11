@@ -1682,7 +1682,12 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				site.Alternatives.Add(() => {
 					var reference = new IdentifierExpression(outVar.Variable.Name);
 					reference.AddAnnotation(resolved);
-					var declaration = new VariableDeclarationStatement(context.TypeSystemAstBuilder.ConvertType(type), outVar.Variable.Name);
+					AstType declaredType = context.TypeSystemAstBuilder.ConvertType(type);
+					// "List<int>? found; M(out found)" where the API may leave it null (nullable-enabled code)
+					if (type.IsReferenceType == true && ApplySourceForms.OutParameterMayBeNull(outVar)
+						&& outVar.Ancestors.OfType<TypeDeclaration>().FirstOrDefault() is { } owner && ApplySourceForms.InNullableContext(owner))
+						declaredType = new ComposedType { BaseType = declaredType, HasNullableSpecifier = true };
+					var declaration = new VariableDeclarationStatement(declaredType, outVar.Variable.Name);
 					declaration.Variables.Single().AddAnnotation(resolved);
 					var argument = new DirectionExpression(FieldDirection.Out, reference);
 					outVar.ReplaceWith(argument);

@@ -1989,6 +1989,15 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 		/// 1) it allows customizing the BraceStyle
 		/// 2) it does not write a trailing newline after the '}' (this job is left to the caller)
 		/// </summary>
+		/// <summary>
+		/// NetSpy: the source had an empty line before the statement (PDB); a declaration without a value and without a
+		/// point right before it ("List&lt;int&gt; found;") fills the line that looked empty.
+		/// </summary>
+		static bool HasBlankLineBefore(Statement statement) =>
+			statement.Annotation<Transforms.SourceLayoutAnnotation>() is { BlankLineBefore: true }
+			&& !(statement.PrevSibling is VariableDeclarationStatement uninitialized && uninitialized.Annotation<Transforms.SourceLayoutAnnotation>() is null
+				&& uninitialized.Variables.All(v => v.Initializer is null));
+
 		protected virtual void WriteBlock(BlockStatement blockStatement, BraceStyle style)
 		{
 			StartNode(blockStatement);
@@ -1997,7 +2006,7 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			foreach (var node in blockStatement.Statements)
 			{
 				// NetSpy: the empty lines of the original (known from the PDB)
-				if (!first && node.Annotation<Transforms.SourceLayoutAnnotation>() is { BlankLineBefore: true })
+				if (!first && HasBlankLineBefore(node))
 					NewLine();
 				first = false;
 				node.AcceptVisitor(this);
@@ -2493,7 +2502,7 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 					foreach (var node in blockStatement.Statements)
 					{
 						// NetSpy: the source's empty lines (PDB) also in the rest of the block a "using var" covers
-						if (!firstInBody && node.Annotation<Transforms.SourceLayoutAnnotation>() is { BlankLineBefore: true })
+						if (!firstInBody && HasBlankLineBefore(node))
 							NewLine();
 						firstInBody = false;
 						node.AcceptVisitor(this);
@@ -3062,7 +3071,7 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			for (AstNode? node = syntaxTree.FirstChild; node != null; node = node.NextSibling)
 			{
 				// NetSpy: empty lines between top-level statements (from the PDB)
-				if (node is Statement && node.PrevSibling is Statement && node.Annotation<Transforms.SourceLayoutAnnotation>() is { BlankLineBefore: true })
+				if (node is Statement statementNode && node.PrevSibling is Statement && HasBlankLineBefore(statementNode))
 					NewLine();
 				node.AcceptVisitor(this);
 				MaybeNewLinesAfterUsings(node);

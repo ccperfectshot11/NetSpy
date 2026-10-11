@@ -122,9 +122,15 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					continue;
 				foreach (var declaration in typeDeclaration.Descendants.OfType<VariableDeclarationStatement>().ToList())
 				{
+					// initialized with null, or assigned null later
 					if (declaration.Type is SimpleType or MemberType && !declaration.Type.IsVar() && declaration.Variables.Count == 1
-						&& declaration.Variables.Single() is { Initializer: NullReferenceExpression } variable
-						&& variable.GetILVariable()?.Type is { IsReferenceType: true })
+						&& declaration.Variables.Single() is { } variable && variable.GetILVariable() is { Type.IsReferenceType: true } local
+						&& (variable.Initializer is NullReferenceExpression
+							|| typeDeclaration.Descendants.OfType<AssignmentExpression>().Any(a => a.Operator == AssignmentOperatorType.Assign
+								&& a.Right is NullReferenceExpression && a.Left is IdentifierExpression assigned && assigned.GetILVariable() == local)
+							// or passed "out" where the API may leave null ([MaybeNullWhen(false)] out T value)
+							|| typeDeclaration.Descendants.OfType<DirectionExpression>().Any(d => d.FieldDirection == FieldDirection.Out
+								&& d.Expression is IdentifierExpression outVariable && outVariable.GetILVariable() == local && OutParameterMayBeNull(d))))
 					{
 						var plain = declaration.Type;
 						var nullable = new ComposedType { HasNullableSpecifier = true };
@@ -161,6 +167,20 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				var cast = new CastExpression(castType, new NullReferenceExpression());
 				cast.CopyAnnotationsFrom(creation);
 				creation.ReplaceWith(cast);
+			}
+			// "false & x" → "x & false": with a constant, & and | on bool / bool? commute (the source names the variable first)
+			foreach (var binary in rootNode.Descendants.OfType<BinaryOperatorExpression>().ToList())
+			{
+				if (binary.Operator is BinaryOperatorType.BitwiseAnd or BinaryOperatorType.BitwiseOr
+					&& binary.Left is PrimitiveExpression { Value: bool } constant && binary.Right is { } other and not PrimitiveExpression
+					&& other.GetResolveResult()?.Type is { } operandType
+					&& (operandType.IsKnownType(KnownTypeCode.Boolean) || NullableType.IsNullable(operandType) && NullableType.GetUnderlyingType(operandType).IsKnownType(KnownTypeCode.Boolean)))
+				{
+					other.Remove();
+					constant.Remove();
+					binary.Left = other;
+					binary.Right = constant;
+				}
 			}
 			// a mask-like constant whose hex spelling is as wide as the decimal one (the width can't tell): hex
 			foreach (var literal in rootNode.Descendants.OfType<PrimitiveExpression>().ToList())
@@ -977,11 +997,25 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			creation.Type = context.TypeSystemAstBuilder.ConvertType(localType);
 		}
 
+		/// <summary>The out parameter an argument goes to is annotated nullable or [MaybeNullWhen] / [NotNullWhen].</summary>
+		internal static bool OutParameterMayBeNull(Expression argument)
+		{
+			if (argument.Parent is not InvocationExpression call || call.GetSymbol() is not IMethod method)
+				return false;
+			int index = call.Arguments.TakeWhile(a => a != argument).Count() + (method.IsExtensionMethod && call.Target is MemberReferenceExpression { Target: not TypeReferenceExpression } ? 1 : 0);
+			if (index >= method.Parameters.Count)
+				return false;
+			var parameter = method.Parameters[index];
+			var definition = method.MemberDefinition is IMethod generic && index < generic.Parameters.Count ? generic.Parameters[index] : parameter;
+			return parameter.Type.Nullability == Nullability.Nullable
+				|| definition.GetAttributes().Any(a => a.AttributeType.Name is "MaybeNullWhenAttribute" or "NotNullWhenAttribute" or "MaybeNullAttribute");
+		}
+
 		/// <summary>
 		/// The type was compiled with nullable reference types enabled: a reference type in its members' signatures is
 		/// annotated (nullable or not) rather than oblivious.
 		/// </summary>
-		static bool InNullableContext(TypeDeclaration typeDeclaration)
+		internal static bool InNullableContext(TypeDeclaration typeDeclaration)
 		{
 			if (typeDeclaration.GetSymbol() is not ITypeDefinition type)
 				return false;
