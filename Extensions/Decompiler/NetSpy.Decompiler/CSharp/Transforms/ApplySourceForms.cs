@@ -145,6 +145,23 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					}
 				}
 			}
+			// "M(params object[] a)" called as "M(new object[1])": the source passed one null element, "M((object)null)"
+			// (the same width, and nobody writes an empty params array of length one)
+			foreach (var creation in rootNode.Descendants.OfType<ArrayCreateExpression>().ToList())
+			{
+				if (creation.Initializer is { Elements.Count: > 0 } || creation.Arguments.Count != 1 || creation.Arguments.Single() is not PrimitiveExpression { Value: 1 }
+					|| creation.Parent is not InvocationExpression call || call.Arguments.LastOrDefault() != creation
+					|| call.GetSymbol() is not IMethod { Parameters: { Count: > 0 } parameters } || !parameters[parameters.Count - 1].IsParams
+					|| parameters.Count != call.Arguments.Count || creation.Type is not { } elementType
+					|| creation.GetResolveResult()?.Type is not ArrayType { ElementType.IsReferenceType: true })
+					continue;
+				AstType castType = elementType.Clone();
+				if (creation.Ancestors.OfType<TypeDeclaration>().FirstOrDefault() is { } owner && InNullableContext(owner))
+					castType = new ComposedType { BaseType = castType, HasNullableSpecifier = true };
+				var cast = new CastExpression(castType, new NullReferenceExpression());
+				cast.CopyAnnotationsFrom(creation);
+				creation.ReplaceWith(cast);
+			}
 			// a mask-like constant whose hex spelling is as wide as the decimal one (the width can't tell): hex
 			foreach (var literal in rootNode.Descendants.OfType<PrimitiveExpression>().ToList())
 			{

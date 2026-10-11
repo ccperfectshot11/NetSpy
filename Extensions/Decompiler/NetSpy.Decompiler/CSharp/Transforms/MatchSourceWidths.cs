@@ -564,6 +564,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						AddTypeArgumentsSite(invocation, sites);
 						AddOmittedArgumentsSite(invocation, invocation.Arguments, sites);
 						AddNullForgivingResultSite(invocation, sites);
+						AddDelegateInvokeSite(invocation, sites);
 						break;
 					case ObjectCreateExpression creation:
 						AddOmittedArgumentsSite(creation, creation.Arguments, sites);
@@ -1534,6 +1535,49 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				lambda.IsStatic = true;
 				return () => lambda.IsStatic = false;
 			});
+		}
+
+		/// <summary>
+		/// "d(x)" → "d.Invoke(x)" / "d!.Invoke(x)" for a delegate local; with "!" the local was declared nullable (the "?" goes
+		/// on its declaration, which is another statement).
+		/// </summary>
+		static void AddDelegateInvokeSite(InvocationExpression invocation, List<Site> sites)
+		{
+			if (invocation.Target is not IdentifierExpression { } target || target.GetResolveResult()?.Type is not { Kind: TypeKind.Delegate }
+				|| target.GetILVariable() is not { } variable)
+				return;
+			var declaration = invocation.Ancestors.OfType<EntityDeclaration>().FirstOrDefault()?.Descendants.OfType<VariableDeclarationStatement>()
+				.FirstOrDefault(d => d.Variables.Count == 1 && d.Variables.Single().GetILVariable() == variable && d.Type is SimpleType or MemberType);
+			var site = Add(sites);
+			foreach (bool forgiving in new[] { false, true })
+			{
+				if (forgiving && declaration is null)
+					continue;
+				site.Alternatives.Add(() => {
+					var receiver = new IdentifierExpression(target.Identifier);
+					receiver.CopyAnnotationsFrom(target);
+					Expression member = forgiving ? new UnaryOperatorExpression(UnaryOperatorType.SuppressNullableWarning, receiver) : receiver;
+					var invoke = new MemberReferenceExpression(member, "Invoke");
+					target.ReplaceWith(invoke);
+					AstType? plain = null;
+					ComposedType? nullable = null;
+					if (forgiving)
+					{
+						plain = declaration!.Type;
+						nullable = new ComposedType { HasNullableSpecifier = true };
+						plain.ReplaceWith(nullable);
+						nullable.BaseType = plain;
+					}
+					return () => {
+						if (nullable is not null)
+						{
+							plain!.Remove();
+							nullable.ReplaceWith(plain);
+						}
+						invoke.ReplaceWith(target);
+					};
+				});
+			}
 		}
 
 		/// <summary>"M();" → "_ = M();" (an explicit discard of the result: the same IL).</summary>
