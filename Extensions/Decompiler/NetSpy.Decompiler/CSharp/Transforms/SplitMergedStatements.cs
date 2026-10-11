@@ -88,12 +88,17 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			int split = covering[1].Offset;
 			// the first subexpression (pre-order) whose IL is all before the second statement
-			var candidate = statement.Descendants.OfType<Expression>().FirstOrDefault(e => Ranges(e).Any() && Ranges(e).All(r => r.InclusiveEnd < split));
+			// an assigned element whose address computation runs up to the second point ("dup" there) comes first
+			var candidate = statement.Descendants.OfType<Expression>().FirstOrDefault(e => IsRefTarget(e)
+				&& Ranges(e).Any() && Ranges(e).All(r => r.Start < split && r.InclusiveEnd <= split))
+				?? statement.Descendants.OfType<Expression>().FirstOrDefault(e => Ranges(e).Any() && Ranges(e).All(r => r.InclusiveEnd < split));
 			// "string text = "pinned"; fixed (char* p = text)": the pinned value's IL runs into the header's
 			if (candidate is null && statement is FixedStatement { Variables.Count: 1 } header
 				&& header.Variables.Single().Initializer is { } pinned and not UnaryOperatorExpression { Operator: UnaryOperatorType.AddressOf })
 				candidate = pinned;
-			if (candidate is null || !CanBeLocal(candidate))
+			// "ref int r = ref a[0]; r += 5;" (the ref local optimized away): an element or field assigned to
+			bool asRef = candidate is not null && IsRefTarget(candidate);
+			if (candidate is null || !asRef && !CanBeLocal(candidate))
 				return;
 			// everything else (except the operations consuming it) is evaluated after it
 			var ancestors = new HashSet<AstNode>(candidate.Ancestors);
@@ -127,9 +132,24 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			AstType declaredType = context.Settings.ImplicitlyTypedLocals && IsTypeApparent(candidate) || type.ContainsAnonymousType()
 				? new SimpleType("var")
 				: context.TypeSystemAstBuilder.ConvertType(type);
+			if (asRef)
+			{
+				declaredType = new ComposedType { BaseType = declaredType, HasRefSpecifier = true };
+				candidate = new DirectionExpression(FieldDirection.Ref, candidate);
+			}
 			var declaration = new VariableDeclarationStatement(declaredType, name, candidate);
 			statement.Parent!.InsertChildBefore(statement, declaration, Slots.Statement);
 		}
+
+		static bool IsRefTarget(Expression e) => IsAssigned(e)
+			&& (e is IndexerExpression { Target: { } array } && (array.GetResolveResult()?.Type is ArrayType
+				|| e.GetSymbol() is IProperty { ReturnType.Kind: TypeKind.ByReference })
+				|| e is MemberReferenceExpression && e.GetSymbol() is IField { IsConst: false })
+			&& !e.Ancestors.Any(a => a is LambdaExpression or AnonymousMethodExpression or QueryExpression);
+
+		static bool IsAssigned(Expression expression) => expression.Parent is AssignmentExpression assignment && assignment.Left == expression
+			|| expression.Parent is UnaryOperatorExpression { Operator: UnaryOperatorType.Increment or UnaryOperatorType.Decrement
+				or UnaryOperatorType.PostIncrement or UnaryOperatorType.PostDecrement };
 
 		static bool CanBeLocal(Expression expression)
 		{
