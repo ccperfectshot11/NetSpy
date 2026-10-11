@@ -180,6 +180,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					IntroduceDeclarationTernary(block);
 					IntroduceHoistedArrayForeach(block);
 					InlineSameStatementTemporaries(block);
+					IntroduceImplicitIndexInitializer(block);
 				}
 				foreach (var checkedStatement in rootNode.Descendants.OfType<CheckedStatement>().ToList())
 					SplitCheckedBlock(checkedStatement);
@@ -894,6 +895,68 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			context.Step("Dynamic creation type", creation);
 			creation.Type = context.TypeSystemAstBuilder.ConvertType(localType);
+		}
+
+		/// <summary>
+		/// "var t = new T(); t.M[t.M.Length - 1] = a; t.M[0] = b; T x = t;" (one source statement, t the compiler's) is
+		/// "var x = new T { M = { [^1] = a, [0] = b } };" (C# 13 implicit index in an object initializer).
+		/// </summary>
+		void IntroduceImplicitIndexInitializer(BlockStatement block)
+		{
+			var statements = block.Statements.ToList();
+			for (int i = 0; i + 2 < statements.Count; i++)
+			{
+				if (statements[i] is not VariableDeclarationStatement { Variables.Count: 1 } tempDeclaration
+					|| tempDeclaration.Variables.Single() is not { Initializer: ObjectCreateExpression creation } tempVariable
+					|| tempVariable.GetILVariable() is not { HasGeneratedName: true, SourceName: null } temp
+					|| tempDeclaration.Annotation<SourceLayoutAnnotation>() is not { } layout)
+					continue;
+				var stores = new List<(string Member, Expression Index, Expression Value)>();
+				int j = i + 1;
+				for (; j < statements.Count; j++)
+				{
+					if (statements[j].Annotation<SourceLayoutAnnotation>() is { } l && l.StartLine != layout.StartLine
+						|| statements[j] is not ExpressionStatement { Expression: AssignmentExpression { Operator: AssignmentOperatorType.Assign,
+							Left: IndexerExpression { Target: MemberReferenceExpression { Target: IdentifierExpression owner } member, Arguments.Count: 1 } indexer, Right: { } value } }
+						|| owner.GetILVariable() != temp)
+						break;
+					var index = indexer.Arguments.Single();
+					if (index is BinaryOperatorExpression { Operator: BinaryOperatorType.Subtract, Left: MemberReferenceExpression { MemberName: "Length" or "Count",
+						Target: MemberReferenceExpression { Target: IdentifierExpression lengthOwner } lengthMember }, Right: PrimitiveExpression { Value: int fromEnd } }
+						&& lengthOwner.GetILVariable() == temp && lengthMember.MemberName == member.MemberName && fromEnd > 0)
+						index = new UnaryOperatorExpression(UnaryOperatorType.IndexFromEnd, new PrimitiveExpression(fromEnd));
+					else if (index.DescendantsAndSelf.OfType<IdentifierExpression>().Any(id => id.GetILVariable() == temp))
+						break;
+					stores.Add((member.MemberName, index, value));
+				}
+				if (stores.Count == 0 || j >= statements.Count
+					|| statements[j] is not VariableDeclarationStatement { Variables.Count: 1 } target
+					|| target.Variables.Single() is not { Initializer: IdentifierExpression read } targetVariable || read.GetILVariable() != temp
+					|| statements[j].Annotation<SourceLayoutAnnotation>() is { } last && last.StartLine != layout.StartLine
+					|| block.Ancestors.OfType<EntityDeclaration>().FirstOrDefault() is not { } entity
+					|| entity.Descendants.OfType<IdentifierExpression>().Count(id => id.GetILVariable() == temp) != stores.Count + 1
+						+ stores.Count(s => s.Index is UnaryOperatorExpression { Operator: UnaryOperatorType.IndexFromEnd }))
+					continue;
+				context.Step("Introduce implicit index initializer", statements[i]);
+				if (creation.Initializer is null)
+					creation.Initializer = new ArrayInitializerExpression();
+				var initializer = creation.Initializer;
+				foreach (var group in stores.GroupBy(s => s.Member))
+				{
+					var elements = new ArrayInitializerExpression();
+					foreach (var store in group)
+						elements.Elements.Add(new AssignmentExpression(new IndexerExpression(null!, store.Index.Detach()), store.Value.Detach()));
+					initializer.Elements.Add(new NamedExpression(group.Key, elements));
+				}
+				var type = tempDeclaration.Type.Detach();
+				target.Type = type;
+				read.ReplaceWith(creation.Detach());
+				target.RemoveAnnotations<SourceLayoutAnnotation>();
+				target.AddAnnotation(layout);
+				for (int k = i; k < j; k++)
+					statements[k].Remove();
+				statements = block.Statements.ToList();
+			}
 		}
 
 		/// <summary>
