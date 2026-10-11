@@ -296,10 +296,27 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			return callChainLength;
 		}
 
+		/// <summary>NetSpy: a call chain the PDB shows wrapped (".Where(...)" on its own line) wraps exactly there.</summary>
+		static bool HasChainWraps(MemberReferenceExpression expr)
+		{
+			for (var node = expr; node is not null; node = node.Target is InvocationExpression { Target: MemberReferenceExpression inner } ? inner : null)
+			{
+				if (node.Annotation<Transforms.ChainWrapAnnotation>() is not null)
+					return true;
+			}
+			return false;
+		}
+
+		static bool HasChainWrapsBelow(MemberReferenceExpression expr) =>
+			expr.Target is InvocationExpression { Target: MemberReferenceExpression inner } && HasChainWraps(inner);
+
 		int ShouldInsertNewLineWhenInMethodCallChain(MemberReferenceExpression expr)
 		{
 			int callChainLength = GetCallChainLengthLimited(expr);
 			if (callChainLength < 3)
+				return 0;
+			// NetSpy: the PDB's wraps decide instead
+			if (HasChainWraps(expr) || expr.Parent is InvocationExpression { Parent: MemberReferenceExpression outer } && HasChainWraps(outer))
 				return 0;
 			if (expr.GetParent(n => n is Statement || n is LambdaExpression || n is InterpolatedStringContent) is InterpolatedStringContent)
 				return 0;
@@ -1168,6 +1185,8 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 				{
 					if (ShouldInsertNewLineWhenInMethodCallChain(mre) >= 3)
 						writer.Unindent();
+					if (HasChainWraps(mre))
+						writer.Unindent();
 				}
 			}
 			EndNode(invocationExpression);
@@ -1244,6 +1263,15 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			StartNode(memberReferenceExpression);
 			memberReferenceExpression.Target.AcceptVisitor(this);
 			bool insertedNewLine = InsertNewLineWhenInMethodCallChain(memberReferenceExpression);
+			if (memberReferenceExpression.Annotation<Transforms.ChainWrapAnnotation>() is not null)
+			{
+				// the first wrap of the chain indents it (undone after the chain's last call)
+				if (!HasChainWrapsBelow(memberReferenceExpression))
+					writer.Indent();
+				writer.NewLine();
+				isAtStartOfLine = true;
+				isAfterSpace = false;
+			}
 			WriteToken(Tokens.Dot);
 			WriteIdentifier(memberReferenceExpression.MemberNameToken);
 			WriteTypeArguments(memberReferenceExpression.TypeArguments);

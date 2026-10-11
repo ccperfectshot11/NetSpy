@@ -196,6 +196,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					IntroduceAnonymousWith(creation);
 				foreach (var query in rootNode.Descendants.OfType<QueryExpression>().ToList())
 					AlignQuery(query);
+				foreach (var invocation in rootNode.Descendants.OfType<InvocationExpression>().ToList())
+					WrapCallChain(invocation);
 			}
 			// "++x;" â†’ "x++;" (statement level: the same; the usual spelling)
 			foreach (var statement in rootNode.Descendants.OfType<ExpressionStatement>().ToList())
@@ -903,6 +905,53 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			context.Step("Dynamic creation type", creation);
 			creation.Type = context.TypeSystemAstBuilder.ConvertType(localType);
+		}
+
+		/// <summary>
+		/// "customers\n.Where(c => ...)\n.Select(...)": a call chain written over several lines. Each lambda is a method of
+		/// its own whose sequence point gives its line; a call on a later line than the part before it was wrapped there.
+		/// Applied only when the wraps account for every line of the statement.
+		/// </summary>
+		void WrapCallChain(InvocationExpression outermost)
+		{
+			if (outermost.Parent is MemberReferenceExpression || outermost.Target is not MemberReferenceExpression
+				|| outermost.Ancestors.OfType<Statement>().FirstOrDefault() is not { } statement
+				|| statement.Annotation<SourceLayoutAnnotation>() is not { } layout || layout.EndLine <= layout.StartLine
+				|| outermost.Ancestors.Any(a => a is LambdaExpression or AnonymousMethodExpression)
+				|| context.DecompileRun.DebugInfoProvider is not { } provider)
+				return;
+			// the calls, innermost first
+			var calls = new List<(MemberReferenceExpression Member, InvocationExpression Call)>();
+			for (var call = outermost; call?.Target is MemberReferenceExpression member; call = member.Target as InvocationExpression)
+				calls.Insert(0, (member, call));
+			if (calls.Count < 2)
+				return;
+			var wraps = new List<MemberReferenceExpression>();
+			int line = layout.StartLine;
+			foreach (var (member, call) in calls)
+			{
+				var lambda = call.Arguments.FirstOrDefault(a => a is LambdaExpression or AnonymousMethodExpression);
+				if (lambda?.Annotation<ILFunction>()?.Method is not { MetadataToken: { IsNil: false, Kind: HandleKind.MethodDefinition } token })
+					continue;
+				var points = provider.GetSequencePoints((MethodDefinitionHandle)token).Where(sp => !sp.IsHidden).ToList();
+				if (points.Count == 0)
+					return;
+				int lambdaLine = points.Min(sp => sp.StartLine);
+				if (lambdaLine < line)
+					return;
+				if (lambdaLine > line)
+				{
+					if (lambdaLine != line + 1)
+						return;
+					wraps.Add(member);
+					line = lambdaLine;
+				}
+			}
+			if (wraps.Count == 0 || line != layout.EndLine)
+				return;
+			context.Step("Wrap call chain", outermost);
+			foreach (var member in wraps)
+				member.AddAnnotation(ChainWrapAnnotation.Instance);
 		}
 
 		/// <summary>

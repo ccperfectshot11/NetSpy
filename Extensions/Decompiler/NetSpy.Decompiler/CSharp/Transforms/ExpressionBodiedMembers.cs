@@ -143,6 +143,18 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		}
 	}
 
+	/// <summary>
+	/// NetSpy: the annotated member access of a call chain starts a new line, one level deeper (".Where(...)").
+	/// </summary>
+	public sealed class ChainWrapAnnotation
+	{
+		public static readonly ChainWrapAnnotation Instance = new ChainWrapAnnotation();
+
+		ChainWrapAnnotation()
+		{
+		}
+	}
+
 	public sealed class ExpressionBodyAnnotation
 	{
 		public static readonly ExpressionBodyAnnotation Instance = new ExpressionBodyAnnotation();
