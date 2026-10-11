@@ -409,40 +409,110 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			var statements = block.Statements.ToList();
 			for (int i = 0; i < statements.Count; i++)
 			{
-				if (Single(statements[i]) is not { } firstVariable || statements[i].Annotation<SourceLayoutAnnotation>() is not { } layout)
+				if (Part(statements[i]) is not { } first || statements[i].Annotation<SourceLayoutAnnotation>() is not { } layout)
 					continue;
-				var group = new List<VariableDeclarationStatement> { (VariableDeclarationStatement)statements[i] };
-				for (int j = i + 1; j < statements.Count && Single(statements[j]) is not null
+				// declarations ("T a = v") and assignments to locals ("a = v") of one source statement
+				var group = new List<(Statement Statement, ILVariable Variable, string Name, Expression Value, AstType? Type, AstNode Annotated)> { first };
+				for (int j = i + 1; j < statements.Count && Part(statements[j]) is { } next
 					&& statements[j].Annotation<SourceLayoutAnnotation>() is { } other
 					&& other.StartLine == layout.StartLine && other.StartColumn == layout.StartColumn; j++)
-					group.Add((VariableDeclarationStatement)statements[j]);
-				if (group.Count < 2)
+					group.Add(next);
+				if (group.Count < 2 || group.Select(g => g.Variable).Distinct().Count() != group.Count)
 					continue;
-				var variables = group.Select(g => g.Variables.Single()).ToList();
 				// a tuple literal evaluates every value before assigning: no value may read the variables
-				var ilVariables = variables.Select(v => v.GetILVariable()).ToList();
-				if (ilVariables.Any(v => v is null || v.HasGeneratedName) || variables.Any(v => v.Initializer!.DescendantsAndSelf.OfType<IdentifierExpression>().Any(id => ilVariables.Contains(id.GetILVariable()))))
+				var ilVariables = group.Select(g => g.Variable).ToList();
+				if (group.Any(g => g.Value.DescendantsAndSelf.OfType<IdentifierExpression>().Any(id => id.GetILVariable() is { } read && ilVariables.Contains(read))))
 					continue;
-				context.Step("Introduce tuple declaration", group[0]);
-				var designation = new ParenthesizedVariableDesignation();
-				var values = new TupleExpression();
-				foreach (var variable in variables)
+				bool allDeclared = group.All(g => g.Type is not null);
+				var options = context.Settings.CSharpFormattingOptions;
+				string values = "(" + string.Join(", ", group.Select(g => g.Value.ToString(options).Trim())) + ")";
+				// the spellings, by their width: "var (a, b) = ...", "(int a, b) = ..." and, declared before, "(a, b) = ..."
+				int Width(string left) => (left + " = " + values + ";").Length;
+				string Typed() => "(" + string.Join(", ", group.Select(g => g.Type is null ? g.Name : g.Type.ToString(options).Trim() + " " + g.Name)) + ")";
+				string Names() => "(" + string.Join(", ", group.Select(g => g.Name)) + ")";
+				int form;
+				if (layout.Width > 0)
 				{
-					var single = new SingleVariableDesignation { Identifier = variable.Name };
-					single.CopyAnnotationsFrom(variable);
-					designation.VariableDesignations.Add(single);
-					values.Elements.Add(variable.Initializer!.Detach());
+					if (allDeclared && layout.Width == Width("var " + Names()))
+						form = 0;
+					else if (group.Any(g => g.Type is not null) && layout.Width == Width(Typed()))
+						form = 1;
+					else if (layout.Width == Width(Names()))
+						form = 2;
+					else
+						continue;
 				}
-				var statement = new ExpressionStatement(new AssignmentExpression(new DeclarationExpression { Type = new SimpleType("var"), Designation = designation }, values));
-				statement.CopyAnnotationsFrom(group[0]);
-				group[0].ReplaceWith(statement);
+				else if (allDeclared)
+					form = 0;
+				else
+					continue;
+				context.Step("Introduce tuple declaration", group[0].Statement);
+				var tuple = new TupleExpression();
+				foreach (var g in group)
+					tuple.Elements.Add(g.Value.Detach());
+				Expression left;
+				if (form == 0)
+				{
+					var designation = new ParenthesizedVariableDesignation();
+					foreach (var g in group)
+					{
+						var single = new SingleVariableDesignation { Identifier = g.Name };
+						single.CopyAnnotationsFrom(g.Annotated);
+						designation.VariableDesignations.Add(single);
+					}
+					left = new DeclarationExpression { Type = new SimpleType("var"), Designation = designation };
+				}
+				else
+				{
+					var targets = new TupleExpression();
+					foreach (var g in group)
+					{
+						var reference = new IdentifierExpression(g.Name);
+						reference.AddAnnotation(new ILVariableResolveResult(g.Variable, g.Variable.Type));
+						if (form == 1 && g.Type is not null)
+						{
+							var single = new SingleVariableDesignation { Identifier = g.Name };
+							single.CopyAnnotationsFrom(g.Annotated);
+							targets.Elements.Add(new DeclarationExpression { Type = g.Type.Clone(), Designation = single });
+						}
+						else
+						{
+							targets.Elements.Add(reference);
+						}
+					}
+					left = targets;
+				}
+				var statement = new ExpressionStatement(new AssignmentExpression(left, tuple));
+				statement.CopyAnnotationsFrom(group[0].Statement);
+				group[0].Statement.ReplaceWith(statement);
 				foreach (var g in group.Skip(1))
-					g.Remove();
+					g.Statement.Remove();
+				// "(a, b) = ...": the variables were declared on their own before
+				if (form == 2)
+				{
+					foreach (var g in group.Where(g => g.Type is not null))
+					{
+						var declaration = new VariableDeclarationStatement(g.Type!.Clone(), g.Name);
+						declaration.Variables.Single().CopyAnnotationsFrom(g.Annotated);
+						block.Statements.InsertBefore(statement, declaration);
+					}
+				}
 				statements = block.Statements.ToList();
 			}
 
-			static VariableInitializer? Single(Statement statement) => statement is VariableDeclarationStatement { Variables.Count: 1, Modifiers: Modifiers.None } d
-				&& d.Variables.Single() is { Initializer: not null } v && v.Initializer is not (LambdaExpression or AnonymousMethodExpression or StackAllocExpression) ? v : null;
+			static (Statement, ILVariable, string, Expression, AstType?, AstNode)? Part(Statement statement)
+			{
+				if (statement is VariableDeclarationStatement { Variables.Count: 1, Modifiers: Modifiers.None } d
+					&& d.Variables.Single() is { Initializer: { } value } v && value is not (LambdaExpression or AnonymousMethodExpression or StackAllocExpression)
+					&& v.GetILVariable() is { HasGeneratedName: false } local)
+					return (statement, local, v.Name, value, d.Type, v);
+				if (statement is ExpressionStatement { Expression: AssignmentExpression { Operator: AssignmentOperatorType.Assign,
+					Left: IdentifierExpression { Identifier: var name } target, Right: { } assigned } }
+					&& assigned is not (LambdaExpression or AnonymousMethodExpression or StackAllocExpression)
+					&& target.GetILVariable() is { Kind: VariableKind.Local, HasGeneratedName: false } assignedLocal)
+					return (statement, assignedLocal, name, assigned, null, target);
+				return null;
+			}
 		}
 
 		/// <summary>
