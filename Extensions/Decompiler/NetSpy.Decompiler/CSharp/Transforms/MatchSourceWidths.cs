@@ -498,6 +498,37 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					case CastExpression cast:
 						AddImplicitCastSite(cast, sites);
 						break;
+					case BinaryOperatorExpression { Operator: BinaryOperatorType.Equality, Left: CastExpression { Type: Syntax.PrimitiveType { Keyword: "object" }, Expression: { } first }, Right: { } second } referenceEquality:
+						// "(object)a == b" ↔ "ReferenceEquals(a, b)" (inside a class: object's static method)
+						Add(sites).Alternatives.Add(() => {
+							// (another change of the same combination may have replaced an ancestor)
+							if (referenceEquality.Parent is null)
+								return () => { };
+							var call = new InvocationExpression(new IdentifierExpression("ReferenceEquals"), first.Clone(), second.Clone());
+							call.CopyAnnotationsFrom(referenceEquality);
+							referenceEquality.ReplaceWith(call);
+							return () => call.ReplaceWith(referenceEquality);
+						});
+						break;
+					case MemberReferenceExpression { Target: TypeReferenceExpression { Type: SimpleType { TypeArguments.Count: 0 } simpleType } typeTarget } qualified
+						when typeTarget.GetResolveResult()?.Type is { Namespace.Length: > 0 } qualifiedType:
+						// "Math.Abs" → "global::System.Math.Abs" / "System.Math.Abs"
+						foreach (bool global in new[] { true })
+						{
+							Add(sites).Alternatives.Add(() => {
+								// global::System.Math: "global" :: "System" . "Math" (one MemberType per segment)
+								var parts = qualifiedType.Namespace.Split('.');
+								AstType full = global
+									? new MemberType { Target = new SimpleType("global"), MemberName = parts[0], IsDoubleColon = true }
+									: new SimpleType(parts[0]);
+								foreach (string part in parts.Skip(1).Append(simpleType.Identifier ?? ""))
+									full = new MemberType { Target = full, MemberName = part };
+								full.CopyAnnotationsFrom(simpleType);
+								simpleType.ReplaceWith(full);
+								return () => full.ReplaceWith(simpleType);
+							});
+						}
+						break;
 					case ConditionalExpression or VariableInitializer:
 						AddMinimalParenthesesSite(node, sites);
 						break;
@@ -1831,6 +1862,21 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					return () => {
 						creation.RemoveAnnotations<TargetTypedNewAnnotation>();
 						undoType?.Invoke();
+					};
+				});
+			}
+			// "T x = default;" ↔ "var x = new T();" for a struct without a parameterless constructor (both are zeroed)
+			if (initializer is DefaultValueExpression && variableType.Kind == TypeKind.Struct && !isVar
+				&& variableType.GetDefinition() is { } structDefinition && !structDefinition.Methods.Any(m => m.IsConstructor && !m.IsStatic && m.Parameters.Count == 0 && !m.MetadataToken.IsNil))
+			{
+				site.Alternatives.Add(() => {
+					var undoType = SetDeclarationType(declaration, new SimpleType("var"));
+					var creation = new ObjectCreateExpression(context.TypeSystemAstBuilder.ConvertType(variableType));
+					creation.CopyAnnotationsFrom(initializer);
+					initializer.ReplaceWith(creation);
+					return () => {
+						creation.ReplaceWith(initializer);
+						undoType();
 					};
 				});
 			}
