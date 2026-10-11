@@ -713,6 +713,16 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						Format(LiteralFormat.RawStringLiteral);
 					break;
 			}
+			// "(int)'\e'" (C# 13)
+			if (literal.Value is 27 && literal.Parent is not CastExpression)
+			{
+				site.Alternatives.Add(() => {
+					var cast = new CastExpression(new PrimitiveType("int"), new PrimitiveExpression((char)27) { Format = LiteralFormat.EscapeCharLiteral });
+					cast.CopyAnnotationsFrom(literal);
+					literal.ReplaceWith(cast);
+					return () => cast.ReplaceWith(literal);
+				});
+			}
 			// an int the source wrote as a char constant: "(int)'\''"
 			if (literal.Value is int code && code is >= 9 and <= 126 && (code >= 32 || code is 9 or 10 or 13) && literal.Parent is not CastExpression)
 			{

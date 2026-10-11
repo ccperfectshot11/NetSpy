@@ -335,6 +335,13 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 				Length += literal.Length;
 				return;
 			}
+			if (value is (char)27 && format == LiteralFormat.EscapeCharLiteral)
+			{
+				textWriter.Write(@"'\e'");
+				column += 4;
+				Length += 4;
+				return;
+			}
 			if (value is char unicode && format == LiteralFormat.UnicodeCharLiteral)
 			{
 				string literal = "'\\u" + ((int)unicode).ToString("X4", NumberFormatInfo.InvariantInfo) + "'";

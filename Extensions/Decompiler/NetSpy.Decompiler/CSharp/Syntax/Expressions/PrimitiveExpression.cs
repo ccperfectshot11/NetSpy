@@ -51,6 +51,8 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 		ScientificNumber,
 		/// <summary>NetSpy: a whole float written with a decimal point (1.0f)</summary>
 		DecimalPointNumber,
+		/// <summary>NetSpy: the C# 13 escape '\e' (U+001B)</summary>
+		EscapeCharLiteral,
 	}
 
 	/// <summary>
