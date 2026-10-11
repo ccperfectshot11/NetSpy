@@ -239,6 +239,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					IntroduceOutVarInLoopCondition(whileStatement);
 				foreach (var forStatement in rootNode.Descendants.OfType<ForStatement>().ToList())
 					MoveConditionIntoBody(forStatement);
+				foreach (var switchStatement in rootNode.Descendants.OfType<SwitchStatement>().ToList())
+					UnwrapSwitchSectionBlocks(switchStatement);
 				// a string with n lines in a statement whose single sequence point spans n + 1 more lines: a multi-line raw
 				// string ("""<newline> lines <newline>""")
 				foreach (var literal in rootNode.Descendants.OfType<PrimitiveExpression>().ToList())
@@ -1079,6 +1081,59 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			context.Step("Dynamic creation type", creation);
 			creation.Type = context.TypeSystemAstBuilder.ConvertType(localType);
+		}
+
+		/// <summary>
+		/// "case 1: { int x = ...; ... }": the decompiler wraps a section declaring locals in a block. The sections of a
+		/// switch share one scope, so the block is only needed when another section declares the same name.
+		/// </summary>
+		void UnwrapSwitchSectionBlocks(SwitchStatement switchStatement)
+		{
+			var sectionNames = switchStatement.SwitchSections.ToDictionary(s => s, s => new HashSet<string>(SectionDeclarations(s)));
+			foreach (var section in switchStatement.SwitchSections)
+			{
+				if (section.Statements.Count != 1 || section.Statements.Single() is not BlockStatement block || block.Statements.Count == 0)
+					continue;
+				var names = SectionDeclarations(block).ToList();
+				if (names.Any(n => switchStatement.SwitchSections.Any(other => other != section && sectionNames[other].Contains(n))))
+					continue;
+				context.Step("Unwrap switch section block", section);
+				var inner = block.Statements.ToList();
+				block.Remove();
+				foreach (var statement in inner)
+					section.Statements.Add(statement.Detach());
+				sectionNames[section] = new HashSet<string>(names);
+			}
+
+			// the names a section (or its block) declares in the switch's scope: its own declarations, not nested ones
+			static IEnumerable<string> SectionDeclarations(AstNode container)
+			{
+				var statements = container is Syntax.SwitchSection s ? s.Statements : ((BlockStatement)container).Statements;
+				foreach (var statement in statements)
+				{
+					if (statement is BlockStatement nested)
+					{
+						foreach (var name in SectionDeclarations(nested))
+							yield return name;
+						continue;
+					}
+					if (statement is LocalFunctionDeclarationStatement localFunction)
+						yield return localFunction.Declaration.Name;
+					foreach (var node in statement.DescendantsAndSelf)
+					{
+						// declarations scoped to the statement itself (using / for / foreach / lambdas / nested blocks) don't leak
+						if (node.Ancestors.TakeWhile(a => a != statement).Any(a => a is BlockStatement or LambdaExpression or AnonymousMethodExpression
+							or UsingStatement or ForStatement or ForeachStatement or LocalFunctionDeclarationStatement))
+							continue;
+						if (node is VariableInitializer { Parent: VariableDeclarationStatement } variable && node.Parent == statement)
+							yield return variable.Name;
+						else if (node is SingleVariableDesignation designation && node.Parent is not ForeachStatement)
+							yield return designation.Identifier;
+						else if (node is OutVarDeclarationExpression outVar)
+							yield return outVar.Variable.Name;
+					}
+				}
+			}
 		}
 
 		/// <summary>
