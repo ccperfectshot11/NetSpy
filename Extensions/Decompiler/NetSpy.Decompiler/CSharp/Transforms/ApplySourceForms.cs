@@ -104,7 +104,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			// nullable is declared nullable (without "?" the source would have had warning CS8600)
 			foreach (var declaration in rootNode.Descendants.OfType<VariableDeclarationStatement>().ToList())
 			{
-				if (declaration.Type is SimpleType or MemberType && !declaration.Type.IsVar() && declaration.Variables.Count == 1
+				if (declaration.Type is SimpleType or MemberType or Syntax.PrimitiveType { Keyword: "string" or "object" } && !declaration.Type.IsVar() && declaration.Variables.Count == 1
 					&& declaration.Variables.Single().Initializer is { } source and (MemberReferenceExpression or IdentifierExpression)
 					&& source.GetSymbol() is IMember { ReturnType: { Nullability: Nullability.Nullable, IsReferenceType: true } })
 				{
@@ -123,7 +123,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				foreach (var declaration in typeDeclaration.Descendants.OfType<VariableDeclarationStatement>().ToList())
 				{
 					// initialized with null, or assigned null later
-					if (declaration.Type is SimpleType or MemberType && !declaration.Type.IsVar() && declaration.Variables.Count == 1
+					if (declaration.Type is SimpleType or MemberType or Syntax.PrimitiveType { Keyword: "string" or "object" } && !declaration.Type.IsVar() && declaration.Variables.Count == 1
 						&& declaration.Variables.Single() is { } variable && variable.GetILVariable() is { Type.IsReferenceType: true } local
 						&& (variable.Initializer is NullReferenceExpression
 							|| typeDeclaration.Descendants.OfType<AssignmentExpression>().Any(a => a.Operator == AssignmentOperatorType.Assign
@@ -136,6 +136,18 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						var nullable = new ComposedType { HasNullableSpecifier = true };
 						plain.ReplaceWith(nullable);
 						nullable.BaseType = plain;
+					}
+				}
+				// "foreach (object? x in list)": a non-generic IEnumerable's Current is object?
+				foreach (var loop in typeDeclaration.Descendants.OfType<ForeachStatement>().ToList())
+				{
+					if (loop.VariableType is Syntax.PrimitiveType { Keyword: "object" } objectType
+						&& loop.InExpression.GetResolveResult()?.Type is { } collectionType
+						&& collectionType.IsKnownType(KnownTypeCode.IEnumerable))
+					{
+						var nullable = new ComposedType { HasNullableSpecifier = true };
+						objectType.ReplaceWith(nullable);
+						nullable.BaseType = objectType;
 					}
 				}
 				foreach (var creation in typeDeclaration.Descendants.OfType<ArrayCreateExpression>().ToList())

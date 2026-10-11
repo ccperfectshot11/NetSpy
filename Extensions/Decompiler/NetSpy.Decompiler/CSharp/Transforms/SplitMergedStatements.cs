@@ -144,7 +144,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		static bool IsRefTarget(Expression e) => IsAssigned(e)
 			&& (e is IndexerExpression { Target: { } array } && (array.GetResolveResult()?.Type is ArrayType
 				|| e.GetSymbol() is IProperty { ReturnType.Kind: TypeKind.ByReference })
-				|| e is MemberReferenceExpression && e.GetSymbol() is IField { IsConst: false })
+				|| e is MemberReferenceExpression && e.GetSymbol() is IField { IsConst: false }
+				|| e is InvocationExpression && e.GetSymbol() is IMethod { ReturnType.Kind: TypeKind.ByReference })
 			&& !e.Ancestors.Any(a => a is LambdaExpression or AnonymousMethodExpression or QueryExpression);
 
 		static bool IsAssigned(Expression expression) => expression.Parent is AssignmentExpression assignment && assignment.Left == expression

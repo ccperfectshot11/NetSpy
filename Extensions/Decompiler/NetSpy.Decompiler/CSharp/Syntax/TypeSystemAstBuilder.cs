@@ -1378,7 +1378,23 @@ namespace NetSpy.Decompiler.CSharp.Syntax
 						break;
 				}
 				Expression? negatedExpr = null;
-				foreach (var (fieldValue, field, weight) in fields.OrderByDescending(f => f.weight))
+				// NetSpy: a member of the enum itself is written from the single-bit members, in order ("All = Read | Write | Execute"),
+				// when they cover the value
+				var ordered = fields.OrderByDescending(f => f.weight).ToList();
+				if (declaringEnumMember != null)
+				{
+					var singles = fields.Where(f => f.weight == 1 && f.field != declaringEnumMember
+						&& declaringTokenRowNumber >= MetadataTokens.GetRowNumber(f.field.MetadataToken)).OrderBy(f => f.value).ToList();
+					long covered = 0;
+					foreach (var single in singles)
+					{
+						if ((single.value & val) == single.value)
+							covered |= single.value;
+					}
+					if (covered == val)
+						ordered = singles;
+				}
+				foreach (var (fieldValue, field, weight) in ordered)
 				{
 					if (fieldValue == 0 || field == declaringEnumMember)
 						continue;   // skip None enum value

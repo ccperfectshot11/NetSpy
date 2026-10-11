@@ -291,7 +291,9 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			// There's a nasty issue in the C# grammar: cast expressions including certain operators are ambiguous in some cases
 			// "(int)-1" is fine, but "(A)-b" is not a cast.
 			UnaryOperatorExpression? uoe = castExpression.Expression as UnaryOperatorExpression;
-			if (uoe != null && !(uoe.Operator == UnaryOperatorType.BitNot || uoe.Operator == UnaryOperatorType.Not))
+			// (postfix operators start with their operand: "(A)x!" is unambiguous)
+			if (uoe != null && !(uoe.Operator == UnaryOperatorType.BitNot || uoe.Operator == UnaryOperatorType.Not
+				|| uoe.Operator is UnaryOperatorType.SuppressNullableWarning or UnaryOperatorType.PostIncrement or UnaryOperatorType.PostDecrement))
 			{
 				if (TypeCanBeMisinterpretedAsExpression(castExpression.Type))
 				{
