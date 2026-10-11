@@ -574,7 +574,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			var site = new Site();
 			foreach (var type in statement.Ancestors.OfType<TypeDeclaration>().Select(t => t.GetSymbol()).OfType<ITypeDefinition>())
 			{
-				foreach (var field in type.Fields.Where(f => f.IsConst && f.Type.Equals(literalType) && Equals(f.GetConstantValue(), literal.Value)))
+				foreach (var field in type.Fields.Where(f => f.IsConst && f.Type.ReflectionName == literalType.ReflectionName && Equals(f.GetConstantValue(), literal.Value)))
 				{
 					// the name must mean the constant where it is used (no local or parameter of that name)
 					var member = statement.Ancestors.OfType<EntityDeclaration>().FirstOrDefault(e => e is not TypeDeclaration);
