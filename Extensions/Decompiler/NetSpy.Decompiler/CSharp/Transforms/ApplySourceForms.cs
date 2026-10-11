@@ -181,6 +181,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					IntroduceHoistedArrayForeach(block);
 					InlineSameStatementTemporaries(block);
 					IntroduceImplicitIndexInitializer(block);
+					IntroduceNullConditionalAssignmentOnNull(block);
 				}
 				foreach (var checkedStatement in rootNode.Descendants.OfType<CheckedStatement>().ToList())
 					SplitCheckedBlock(checkedStatement);
@@ -895,6 +896,45 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			context.Step("Dynamic creation type", creation);
 			creation.Type = context.TypeSystemAstBuilder.ConvertType(localType);
+		}
+
+		/// <summary>
+		/// "T? t = null; t?.M = v;" (C# 14): the compiler folds the null and keeps "if (false) ((T)null).M = v", which comes
+		/// back as "bool flag = false; if (flag) { ((T)null).M = v; }" (the flag the decompiler adds against CS0162).
+		/// </summary>
+		void IntroduceNullConditionalAssignmentOnNull(BlockStatement block)
+		{
+			if (!context.Settings.NullConditionalAssignment)
+				return;
+			var statements = block.Statements.ToList();
+			for (int i = 0; i + 1 < statements.Count; i++)
+			{
+				if (statements[i] is not VariableDeclarationStatement { Variables.Count: 1 } flagDeclaration
+					|| flagDeclaration.Variables.Single() is not { Initializer: PrimitiveExpression { Value: false } } flagVariable
+					|| flagVariable.GetILVariable() is not { SourceName: null } flag
+					|| statements[i + 1] is not IfElseStatement { Condition: IdentifierExpression test, FalseStatement: null,
+						TrueStatement: BlockStatement { Statements.Count: 1 } body } ifElse
+					|| test.GetILVariable() != flag
+					|| body.Statements.Single() is not ExpressionStatement { Expression: AssignmentExpression { Operator: AssignmentOperatorType.Assign,
+						Left: MemberReferenceExpression { Target: CastExpression { Expression: NullReferenceExpression, Type: { } type } } member, Right: { } value } }
+					|| block.Ancestors.OfType<EntityDeclaration>().FirstOrDefault() is not { } entity)
+					continue;
+				string baseName = type is SimpleType { Identifier: { Length: > 0 } typeName } ? char.ToLowerInvariant(typeName[0]) + typeName.Substring(1) : "value";
+				string name = baseName;
+				for (int n = 2; entity.Descendants.OfType<Identifier>().Any(id => id.Name == name); n++)
+					name = baseName + n;
+				context.Step("Introduce null-conditional assignment on null", ifElse);
+				var declaration = new VariableDeclarationStatement(new ComposedType { BaseType = type.Clone(), HasNullableSpecifier = true }, name, new NullReferenceExpression());
+				declaration.CopyAnnotationsFrom(flagDeclaration);
+				var assignment = new AssignmentExpression(
+					new MemberReferenceExpression(new UnaryOperatorExpression(UnaryOperatorType.NullConditional, new IdentifierExpression(name)), member.MemberName),
+					value.Detach());
+				var statement = new ExpressionStatement(assignment);
+				statement.CopyAnnotationsFrom(ifElse);
+				flagDeclaration.ReplaceWith(declaration);
+				ifElse.ReplaceWith(statement);
+				statements = block.Statements.ToList();
+			}
 		}
 
 		/// <summary>
