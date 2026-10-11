@@ -820,6 +820,18 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 			return null;
 		}
 
+		/// <summary>NetSpy: the outermost initializer of the statement holding these elements.</summary>
+		static ArrayInitializerExpression? OutermostInitializer(AstNodeCollection<Expression> elements)
+		{
+			ArrayInitializerExpression? top = null;
+			for (var n = elements.FirstOrDefault()?.Parent; n is not null and not Statement; n = n.Parent)
+			{
+				if (n is ArrayInitializerExpression initializer)
+					top = initializer;
+			}
+			return top;
+		}
+
 		protected bool CanBeConfusedWithObjectInitializer(Expression expr)
 		{
 			// "int a; new List<int> { a = 1 };" is an object initalizers and invalid, but
@@ -860,6 +872,11 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 				wrapAlways = wrap = false;
 			else if (layout is not null && layout.IsMultiLine && outermost && !wrap && elements.Count > 0)
 				wrapAlways = wrap = true;
+			// NetSpy: a nested initializer of a statement spanning exactly "header, {, one line per element, }" was on one line
+			else if (layout is not null && layout.IsMultiLine && !outermost && wrap && FitsOnOneLine(elements, int.MaxValue)
+				&& OutermostInitializer(elements) is { } top && top != elements.FirstOrDefault()?.Parent
+				&& layout.EndLine - layout.StartLine + 1 == top.Elements.Count + 3)
+				wrapAlways = wrap = false;
 			OpenBrace(wrap ? policy.ArrayInitializerBraceStyle : BraceStyle.EndOfLine, newLine: wrap);
 			if (!wrap)
 				Space();
