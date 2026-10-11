@@ -1945,9 +1945,18 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			if (omittable.Count == 0 || omittable.Count > 6)
 				return;
 			var site = Add(sites);
-			for (int mask = 1; mask < (1 << omittable.Count); mask++)
+			// the arguments after the first omitted one are named; or all of them (the source may have reordered them:
+			// "M(b: 1, a: 2)" compiles like "M(a: 2, b: 1)", which has the same width)
+			for (int variant = 0; variant < 2 * (1 << omittable.Count); variant++)
 			{
+				int mask = variant >> 1;
+				bool allNamed = (variant & 1) != 0;
+				if (mask == 0)
+					continue;
 				var omitted = new HashSet<int>(omittable.Where((_, bit) => (mask & (1 << bit)) != 0));
+				// (all named is a different spelling only when an argument before the first omitted one is kept)
+				if (allNamed && !Enumerable.Range(0, omitted.Min()).Any(i => !omitted.Contains(i)))
+					continue;
 				site.Alternatives.Add(() => {
 					int first = omitted.Min();
 					var rebuilt = new List<Expression>();
@@ -1957,7 +1966,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					{
 						if (omitted.Contains(i))
 							continue;
-						rebuilt.Add(i > first ? new NamedArgumentExpression { Name = parameters[i + offset].Name, Expression = list[i] } : list[i]);
+						rebuilt.Add(i > first || allNamed ? new NamedArgumentExpression { Name = parameters[i + offset].Name, Expression = list[i] } : list[i]);
 					}
 					arguments.AddRange(rebuilt);
 					return () => {
