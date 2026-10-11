@@ -1537,6 +1537,20 @@ namespace NetSpy.Decompiler.CSharp
 				{
 					for (int i = 0; i < argumentList.Length; i++)
 					{
+						// NetSpy: "new { c.Name, Items = n }": an element whose name C# infers stays a projection
+						var argument = argumentList.Arguments[i].Expression;
+						string? inferred = argument switch {
+							IdentifierExpression id => id.Identifier,
+							MemberReferenceExpression member => member.MemberName,
+							_ => null
+						};
+						if (inferred == argumentList.ExpectedParameters[i].Name
+							&& (NormalizeTypeVisitor.IgnoreNullability.EquivalentTypes(argumentList.Arguments[i].Type, argumentList.ExpectedParameters[i].Type)
+								|| argumentList.ExpectedParameters[i].Type.Kind == TypeKind.TypeParameter))
+						{
+							atce.Initializers.Add(argument);
+							continue;
+						}
 						atce.Initializers.Add(
 							new NamedExpression {
 								Name = argumentList.ExpectedParameters[i].Name,

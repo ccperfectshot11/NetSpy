@@ -627,6 +627,13 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			var changed = new List<NamedExpression>();
 			foreach (var initializer in creation.Initializers)
 			{
+				// a projection "x.A" is "A = x.A"
+				if (initializer is MemberReferenceExpression { Target: IdentifierExpression projected } && projected.GetResolveResult()?.Type is { } projectedType
+					&& projectedType.Equals(type) && (source is null || source.Identifier == projected.Identifier))
+				{
+					source = projected;
+					continue;
+				}
 				if (initializer is not NamedExpression named)
 					return;
 				if (named.Expression is MemberReferenceExpression { Target: IdentifierExpression x } member && member.MemberName == named.Name
