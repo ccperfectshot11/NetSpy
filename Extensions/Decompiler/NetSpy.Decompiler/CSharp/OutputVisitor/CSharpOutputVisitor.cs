@@ -2489,8 +2489,13 @@ namespace NetSpy.Decompiler.CSharp.OutputVisitor
 				if (usingStatement.EmbeddedStatement is BlockStatement blockStatement)
 				{
 					StartNode(blockStatement);
+					bool firstInBody = true;
 					foreach (var node in blockStatement.Statements)
 					{
+						// NetSpy: the source's empty lines (PDB) also in the rest of the block a "using var" covers
+						if (!firstInBody && node.Annotation<Transforms.SourceLayoutAnnotation>() is { BlankLineBefore: true })
+							NewLine();
+						firstInBody = false;
 						node.AcceptVisitor(this);
 					}
 					EndNode(blockStatement);
