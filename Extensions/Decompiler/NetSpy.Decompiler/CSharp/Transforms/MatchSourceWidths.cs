@@ -600,6 +600,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					case ObjectCreateExpression creation:
 						AddOmittedArgumentsSite(creation, creation.Arguments, sites);
 						AddReturnedTargetTypedNewSite(creation, sites);
+						AddInitializerTargetTypedNewSite(creation, sites);
 						AddCollectionExpressionSite(creation, sites);
 						break;
 				}
@@ -1572,6 +1573,26 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		/// "d(x)" → "d.Invoke(x)" / "d!.Invoke(x)" for a delegate local; with "!" the local was declared nullable (the "?" goes
 		/// on its declaration, which is another statement).
 		/// </summary>
+		/// <summary>"{ [k] = new T { ... } }" / "{ P = new T() }" → "new() { ... }" when T is the member's type.</summary>
+		void AddInitializerTargetTypedNewSite(ObjectCreateExpression creation, List<Site> sites)
+		{
+			if (context.Settings.GetMinimumRequiredVersion() < LanguageVersion.CSharp9_0 || creation.Annotation<TargetTypedNewAnnotation>() is not null
+				|| creation.GetResolveResult()?.Type is not { } created)
+				return;
+			IType? target = creation.Parent switch {
+				AssignmentExpression { Left: IndexerExpression { Target: null } } assignment when assignment.Right == creation
+					=> (assignment.GetSymbol() as IMember)?.ReturnType,
+				NamedExpression named when named.Parent is ArrayInitializerExpression => (named.GetSymbol() as IMember)?.ReturnType,
+				_ => null
+			};
+			if (target is null || !NormalizeTypeVisitor.IgnoreNullability.EquivalentTypes(target, created))
+				return;
+			Add(sites).Alternatives.Add(() => {
+				creation.AddAnnotation(TargetTypedNewAnnotation.Instance);
+				return () => creation.RemoveAnnotations<TargetTypedNewAnnotation>();
+			});
+		}
+
 		static void AddDelegateInvokeSite(InvocationExpression invocation, List<Site> sites)
 		{
 			if (invocation.Target is not IdentifierExpression { } target || target.GetResolveResult()?.Type is not { Kind: TypeKind.Delegate }
