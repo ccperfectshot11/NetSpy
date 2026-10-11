@@ -103,6 +103,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 							between -= TrailingBraces(previousStatement!);
 							// "break;" / "continue;" at the end of its block often have no sequence point, but a line
 							between -= TrailingUnlocated(previousStatement!, body, sequencePoints);
+							// "try {", "do {", "while (true) {": a header without a point of its own starts above the first statement
+							between -= LeadingHeaderLines(statement, layout, body, sequencePoints);
 							layout.BlankLineBefore = between > 0;
 						}
 					}
@@ -173,6 +175,25 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					break;
 				statement.Remove();
 			}
+		}
+
+		/// <summary>
+		/// NetSpy: the lines of a compound statement's header ("try" / "do" / "while (true)" and its "{") when its first
+		/// point is its body's first statement (the header has no IL of its own).
+		/// </summary>
+		static int LeadingHeaderLines(Statement statement, SourceLayoutAnnotation layout, BlockStatement body, List<DebugInfo.SequencePoint> sequencePoints)
+		{
+			var inner = statement switch {
+				TryCatchStatement tryCatch => tryCatch.TryBlock,
+				DoWhileStatement doWhile => doWhile.EmbeddedStatement,
+				WhileStatement whileStatement => whileStatement.EmbeddedStatement,
+				ForStatement { Initializers.Count: 0, Condition: null } forStatement => forStatement.EmbeddedStatement,
+				_ => null
+			};
+			if (inner is not BlockStatement { Statements.Count: > 0 } block || block.Statements.First() is not { } first
+				|| GetLayout(first, body, sequencePoints) is not { } firstLayout || firstLayout.StartLine != layout.StartLine)
+				return 0;
+			return 2 + LeadingHeaderLines(first, firstLayout, body, sequencePoints);
 		}
 
 		/// <summary>The source lines of a statement: the sequence points of the IL it was decompiled from.</summary>
