@@ -114,6 +114,37 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					nullable.BaseType = plain;
 				}
 			}
+			// in nullable-enabled code a reference-typed local initialized with null is declared nullable, and an array
+			// with null elements has a nullable element type (else the source had warnings CS8600 / CS8625)
+			foreach (var typeDeclaration in rootNode.Descendants.OfType<TypeDeclaration>().ToList())
+			{
+				if (!InNullableContext(typeDeclaration))
+					continue;
+				foreach (var declaration in typeDeclaration.Descendants.OfType<VariableDeclarationStatement>().ToList())
+				{
+					if (declaration.Type is SimpleType or MemberType && !declaration.Type.IsVar() && declaration.Variables.Count == 1
+						&& declaration.Variables.Single() is { Initializer: NullReferenceExpression } variable
+						&& variable.GetILVariable()?.Type is { IsReferenceType: true })
+					{
+						var plain = declaration.Type;
+						var nullable = new ComposedType { HasNullableSpecifier = true };
+						plain.ReplaceWith(nullable);
+						nullable.BaseType = plain;
+					}
+				}
+				foreach (var creation in typeDeclaration.Descendants.OfType<ArrayCreateExpression>().ToList())
+				{
+					if (creation.Type is Syntax.PrimitiveType { Keyword: "object" or "string" } or SimpleType or MemberType && creation.AdditionalArraySpecifiers.Count <= 1
+						&& creation.Initializer?.Elements.Any(e => e is NullReferenceExpression) == true
+						&& creation.GetResolveResult()?.Type is ArrayType { ElementType.IsReferenceType: true })
+					{
+						var plain = creation.Type;
+						var nullable = new ComposedType { HasNullableSpecifier = true };
+						plain.ReplaceWith(nullable);
+						nullable.BaseType = plain;
+					}
+				}
+			}
 			// a mask-like constant whose hex spelling is as wide as the decimal one (the width can't tell): hex
 			foreach (var literal in rootNode.Descendants.OfType<PrimitiveExpression>().ToList())
 			{
@@ -927,6 +958,23 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			context.Step("Dynamic creation type", creation);
 			creation.Type = context.TypeSystemAstBuilder.ConvertType(localType);
+		}
+
+		/// <summary>
+		/// The type was compiled with nullable reference types enabled: a reference type in its members' signatures is
+		/// annotated (nullable or not) rather than oblivious.
+		/// </summary>
+		static bool InNullableContext(TypeDeclaration typeDeclaration)
+		{
+			if (typeDeclaration.GetSymbol() is not ITypeDefinition type)
+				return false;
+			foreach (var member in type.Members)
+			{
+				var types = member is IMethod method ? method.Parameters.Select(p => p.Type).Append(method.ReturnType) : new[] { member.ReturnType };
+				if (types.Any(t => t.IsReferenceType == true && t.Nullability != Nullability.Oblivious))
+					return true;
+			}
+			return false;
 		}
 
 		/// <summary>
