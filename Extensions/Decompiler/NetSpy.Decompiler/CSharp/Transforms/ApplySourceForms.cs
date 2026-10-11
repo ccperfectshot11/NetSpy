@@ -241,6 +241,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					MoveConditionIntoBody(forStatement);
 				foreach (var switchStatement in rootNode.Descendants.OfType<SwitchStatement>().ToList())
 					UnwrapSwitchSectionBlocks(switchStatement);
+				foreach (var lambda in rootNode.Descendants.OfType<LambdaExpression>().ToList())
+					IntroduceSingleLineAnonymousMethod(lambda);
 				// a string with n lines in a statement whose single sequence point spans n + 1 more lines: a multi-line raw
 				// string ("""<newline> lines <newline>""")
 				foreach (var literal in rootNode.Descendants.OfType<PrimitiveExpression>().ToList())
@@ -1081,6 +1083,50 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			context.Step("Dynamic creation type", creation);
 			creation.Type = context.TypeSystemAstBuilder.ConvertType(localType);
+		}
+
+		/// <summary>
+		/// "F f = x => { a; b; };" (a block lambda) in a statement written on one line (its sequence point is single-line):
+		/// "delegate { a; b; }" / "delegate (T x) { a; b; }", the spelling whose width is the statement's.
+		/// </summary>
+		void IntroduceSingleLineAnonymousMethod(LambdaExpression lambda)
+		{
+			if (lambda.Body is not BlockStatement { Statements.Count: > 0 } body || lambda.Attributes.Count > 0
+				|| lambda.Ancestors.OfType<Statement>().FirstOrDefault() is not { } statement
+				|| statement.Annotation<SourceLayoutAnnotation>() is not { Width: > 0, IsSingleLine: true } layout
+				|| lambda.Annotation<ILFunction>()?.Method is not { } method || method.Parameters.Count != lambda.Parameters.Count
+				|| lambda.Parameters.Any(p => p.ParameterModifier != ReferenceKind.None)
+				|| body.Descendants.Any(n => n is LambdaExpression or AnonymousMethodExpression or BlockStatement && n != body && n.Parent is not Statement))
+				return;
+			var options = context.Settings.CSharpFormattingOptions;
+			bool parametersUsed = lambda.Parameters.Any(p => body.Descendants.OfType<IdentifierExpression>().Any(id => id.Identifier == p.Name));
+			foreach (bool withList in new[] { false, true })
+			{
+				if (!withList && parametersUsed)
+					continue;
+				var anonymous = new AnonymousMethodExpression { IsAsync = lambda.IsAsync };
+				if (withList)
+				{
+					for (int i = 0; i < method.Parameters.Count; i++)
+					{
+						anonymous.Parameters.Add(new ParameterDeclaration {
+							Type = context.TypeSystemAstBuilder.ConvertType(method.Parameters[i].Type),
+							Name = lambda.Parameters.ElementAt(i).Name
+						}.CopyAnnotationsFrom(lambda.Parameters.ElementAt(i)));
+					}
+				}
+				anonymous.Body = (BlockStatement)body.Clone();
+				anonymous.CopyAnnotationsFrom(lambda);
+				anonymous.AddAnnotation(SingleLineBlockAnnotation.Instance);
+				lambda.ReplaceWith(anonymous);
+				string text = statement.ToString(options).Trim();
+				if (text.IndexOf('\n') < 0 && text.Length == layout.Width)
+				{
+					context.Step("Single-line anonymous method", statement);
+					return;
+				}
+				anonymous.ReplaceWith(lambda);
+			}
 		}
 
 		/// <summary>

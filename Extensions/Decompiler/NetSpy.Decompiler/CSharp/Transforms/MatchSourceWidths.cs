@@ -61,6 +61,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			this.context = context;
 			this.formatting = context.Settings.CSharpFormattingOptions;
+			nameLengths.Clear();
+			var candidates = new List<(AstNode Statement, int Target)>();
 			foreach (var node in rootNode.Descendants.OfType<Statement>().ToList())
 			{
 				var statement = node;
@@ -81,8 +83,11 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				if (statement.Descendants.Any(n => n is PrimitiveExpression { Value: string text } && text.IndexOfAny(Escaped) >= 0
 					|| n is InterpolatedStringText { Text: var part } && part.IndexOfAny(EscapedInInterpolation) >= 0))
 					continue;
-				Process(statement, target);
+				candidates.Add((statement, target));
 			}
+			InferNameLengths(candidates);
+			foreach (var (statement, target) in candidates)
+				Process(statement, target);
 			if (context.Settings.ImplicitlyTypedLocals)
 			{
 				foreach (var foreachStatement in rootNode.Descendants.OfType<ForeachStatement>().ToList())
@@ -304,27 +309,12 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 
 		void Process(AstNode statement, int target)
 		{
+			// names of the compiler's locals (not in the PDB) whose source length is known: the width they'd have
+			target -= NameAdjustment(statement);
 			int width = Measure(MeasuredNode(statement));
 			if (width < 0 || width == target)
 				return;
-			var sites = new List<Site>();
-			CollectSites(statement, sites);
-			if (sites.Count == 0 || sites.Count > 4 * MaxSites)
-				return;
-			// the effect of each alternative on its own
-			foreach (var site in sites)
-			{
-				foreach (var alternative in site.Alternatives)
-				{
-					var undo = alternative();
-					int w = Measure(MeasuredNode(statement));
-					undo();
-					site.Deltas.Add(w < 0 ? int.MinValue : w - width);
-				}
-			}
-			// places whose spelling changes nothing don't count
-			sites.RemoveAll(s => s.Deltas.All(d => d == 0 || d == int.MinValue));
-			if (sites.Count == 0 || sites.Count > MaxSites)
+			if (MeasureSites(statement, width) is not { } sites)
 				return;
 			// the combinations with the fewest changes that close the gap
 			var best = new List<int[]>();
@@ -375,6 +365,129 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 			for (int i = undos.Count - 1; i >= 0; i--)
 				undos[i]();
+		}
+
+		/// <summary>The sites of a statement with the width change of each alternative (null if none or too many).</summary>
+		List<Site>? MeasureSites(AstNode statement, int width)
+		{
+			var sites = new List<Site>();
+			CollectSites(statement, sites);
+			if (sites.Count == 0 || sites.Count > 4 * MaxSites)
+				return null;
+			// the effect of each alternative on its own
+			foreach (var site in sites)
+			{
+				foreach (var alternative in site.Alternatives)
+				{
+					var undo = alternative();
+					int w = Measure(MeasuredNode(statement));
+					undo();
+					site.Deltas.Add(w < 0 ? int.MinValue : w - width);
+				}
+			}
+			// places whose spelling changes nothing don't count
+			sites.RemoveAll(s => s.Deltas.All(d => d == 0 || d == int.MinValue));
+			return sites.Count is 0 or > MaxSites ? null : sites;
+		}
+
+		/// <summary>The source name length of locals the compiler removed from the PDB, where the widths agree on one.</summary>
+		readonly Dictionary<IL.ILVariable, int> nameLengths = new Dictionary<IL.ILVariable, int>();
+
+		/// <summary>
+		/// The occurrences of the compiler's locals (no PDB name) in the measured part of a statement, with their count.
+		/// </summary>
+		static Dictionary<IL.ILVariable, int> UnnamedLocals(AstNode statement)
+		{
+			var result = new Dictionary<IL.ILVariable, int>();
+			foreach (var node in MeasuredNode(statement).DescendantsAndSelf)
+			{
+				var variable = node switch {
+					IdentifierExpression id => id.GetILVariable(),
+					VariableInitializer v => v.GetILVariable(),
+					SingleVariableDesignation d => d.Annotation<ILVariableResolveResult>()?.Variable,
+					_ => null
+				};
+				if (variable is { Kind: IL.VariableKind.Local or IL.VariableKind.StackSlot, HasGeneratedName: true, SourceName: null, Name: not null })
+					result[variable] = result.TryGetValue(variable, out int count) ? count + 1 : 1;
+			}
+			return result;
+		}
+
+		int NameAdjustment(AstNode statement)
+		{
+			int adjustment = 0;
+			foreach (var pair in UnnamedLocals(statement))
+			{
+				if (nameLengths.TryGetValue(pair.Key, out int length))
+					adjustment += pair.Value * (length - pair.Key.Name!.Length);
+			}
+			return adjustment;
+		}
+
+		/// <summary>
+		/// A local the compiler removed from the PDB ("var circles = ...": the decompiler names it "list") makes the widths of
+		/// its statements off by the name's length difference. The statements a single such local appears in each allow
+		/// some lengths (those some combination of spellings reaches); the one length they all allow is the name's.
+		/// </summary>
+		void InferNameLengths(List<(AstNode Statement, int Target)> candidates)
+		{
+			for (int round = 0; round < 2; round++)
+			{
+				var allowed = new Dictionary<IL.ILVariable, List<HashSet<int>>>();
+				foreach (var (statement, target) in candidates)
+				{
+					var unnamed = UnnamedLocals(statement).Where(u => !nameLengths.ContainsKey(u.Key)).ToList();
+					if (unnamed.Count != 1)
+						continue;
+					var variable = unnamed[0].Key;
+					int count = unnamed[0].Value;
+					int adjustedTarget = target - NameAdjustment(statement);
+					int width = Measure(MeasuredNode(statement));
+					if (width < 0)
+						continue;
+					// the width changes some combination of spellings reaches (0: none)
+					var reachable = new HashSet<int> { 0 };
+					if (MeasureSites(statement, width) is { } sites)
+					{
+						foreach (var site in sites)
+						{
+							foreach (int reached in reachable.ToList())
+							{
+								foreach (int delta in site.Deltas.Where(d => d != int.MinValue && d != 0))
+									reachable.Add(reached + delta);
+							}
+						}
+					}
+					var lengths = new HashSet<int>();
+					foreach (int delta in reachable)
+					{
+						// width + delta == adjustedTarget - count * (length - current)
+						int difference = adjustedTarget - width - delta;
+						if (difference % count != 0)
+							continue;
+						int length = variable.Name!.Length + difference / count;
+						if (length is >= 1 and <= 40)
+							lengths.Add(length);
+					}
+					if (lengths.Count == 0)
+						continue;
+					if (!allowed.TryGetValue(variable, out var sets))
+						allowed[variable] = sets = new List<HashSet<int>>();
+					sets.Add(lengths);
+				}
+				foreach (var pair in allowed)
+				{
+					var variable = pair.Key;
+					var sets = pair.Value;
+					if (sets.Count < 2)
+						continue;
+					var common = new HashSet<int>(sets[0]);
+					foreach (var set in sets.Skip(1))
+						common.IntersectWith(set);
+					if (common.Count == 1 && common.Single() != variable.Name!.Length)
+						nameLengths[variable] = common.Single();
+				}
+			}
 		}
 
 		/// <summary>The node the sequence point covers: the expression of "=> expr" bodies, else the statement.</summary>
