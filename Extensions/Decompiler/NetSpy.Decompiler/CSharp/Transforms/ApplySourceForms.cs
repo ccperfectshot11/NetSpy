@@ -225,6 +225,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					IntroduceLateExit(ifElse);
 				foreach (var whileStatement in rootNode.Descendants.OfType<WhileStatement>().ToList())
 					IntroduceOutVarInLoopCondition(whileStatement);
+				foreach (var forStatement in rootNode.Descendants.OfType<ForStatement>().ToList())
+					MoveConditionIntoBody(forStatement);
 				// a string with n lines in a statement whose single sequence point spans n + 1 more lines: a multi-line raw
 				// string ("""<newline> lines <newline>""")
 				foreach (var literal in rootNode.Descendants.OfType<PrimitiveExpression>().ToList())
@@ -995,6 +997,31 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			context.Step("Dynamic creation type", creation);
 			creation.Type = context.TypeSystemAstBuilder.ConvertType(localType);
+		}
+
+		/// <summary>
+		/// "for (int i = 0; i &lt;= max; i += 2)" whose condition's sequence point is on a line of the body, not the "for"
+		/// line: the source tested it in the body, "for (int i = 0; ; i += 2) { if (i &gt; max) { yield break; } ... }"
+		/// ("yield break" for the last loop of an iterator, "break" otherwise).
+		/// </summary>
+		void MoveConditionIntoBody(ForStatement loop)
+		{
+			if (loop.Condition is not { } condition || loop.Annotation<SourceLayoutAnnotation>() is not { } layout
+				|| loop.EmbeddedStatement is not BlockStatement body
+				|| ApplySourceLayout.MethodPoints(loop, context) is not { } points)
+				return;
+			var ranges = condition.DescendantsAndSelf.SelectMany(n => n.Annotations.OfType<ILInstruction>()).SelectMany(i => i.ILRanges).Where(r => !r.IsEmpty).ToList();
+			var conditionPoints = points.Where(sp => ranges.Any(r => r.Start < sp.EndOffset && sp.Offset <= r.InclusiveEnd)).ToList();
+			if (conditionPoints.Count == 0 || conditionPoints.Any(sp => sp.StartLine <= layout.StartLine))
+				return;
+			bool iterator = loop.Ancestors.OfType<EntityDeclaration>().FirstOrDefault()?.Descendants.Any(n => n is YieldReturnStatement) == true;
+			bool last = loop.Parent is BlockStatement { Parent: EntityDeclaration or Accessor } && loop.NextSibling is null;
+			context.Step("Move loop condition into the body", loop);
+			Statement exit = iterator && last ? new YieldBreakStatement() : new BreakStatement();
+			var test = new IfElseStatement(IntroduceReturnTernaries.Negate(condition.Detach()), new BlockStatement { exit });
+			test.AddAnnotation(new SourceLayoutAnnotation { StartLine = conditionPoints[0].StartLine, StartColumn = conditionPoints[0].StartColumn,
+				EndLine = conditionPoints[0].EndLine, Width = conditionPoints[0].EndColumn - conditionPoints[0].StartColumn, IsSingleLine = true });
+			body.Statements.InsertBefore(body.Statements.FirstOrDefault(), test);
 		}
 
 		/// <summary>The out parameter an argument goes to is annotated nullable or [MaybeNullWhen] / [NotNullWhen].</summary>
