@@ -97,6 +97,14 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					result.Insert(at, member);
 				}
 			}
+			// two fields whose source lines are apart had an empty line between them
+			for (int i = 1; i < result.Count; i++)
+			{
+				if (result[i - 1] is FieldDeclaration or FixedFieldDeclaration && result[i] is FieldDeclaration or FixedFieldDeclaration
+					&& lines[members.IndexOf(result[i - 1])] is { } above && lines[members.IndexOf(result[i])] is { } below
+					&& below.Line - above.Line >= 2)
+					result[i].AddAnnotation(BlankLineBeforeFieldAnnotation.Instance);
+			}
 			if (result.SequenceEqual(members))
 				return;
 			context.Step("Order members by source", type);

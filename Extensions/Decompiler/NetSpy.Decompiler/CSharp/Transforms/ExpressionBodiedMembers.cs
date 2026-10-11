@@ -144,6 +144,18 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 	}
 
 	/// <summary>
+	/// NetSpy: the annotated field had an empty line before it in the source (fields are otherwise grouped).
+	/// </summary>
+	public sealed class BlankLineBeforeFieldAnnotation
+	{
+		public static readonly BlankLineBeforeFieldAnnotation Instance = new BlankLineBeforeFieldAnnotation();
+
+		BlankLineBeforeFieldAnnotation()
+		{
+		}
+	}
+
+	/// <summary>
 	/// NetSpy: the annotated member access of a call chain starts a new line, one level deeper (".Where(...)").
 	/// </summary>
 	public sealed class ChainWrapAnnotation
