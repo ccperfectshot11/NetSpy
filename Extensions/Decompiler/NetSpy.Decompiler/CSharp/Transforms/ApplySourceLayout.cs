@@ -65,6 +65,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					continue;
 				PlaceLocalFunctions(body, sequencePoints, provider, mainModule);
 				AnnotateStatements(body, sequencePoints);
+				if (context.Settings.GetMinimumRequiredVersion() >= LanguageVersion.CSharp11_0)
+					RemoveStructAutoDefaults(entity, body);
 				bodies.Add((body, sequencePoints));
 			}
 			DecideBodyStyles(bodies, context, provider);
@@ -150,6 +152,26 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					block.Statements.Add(localFunction);
 				else
 					block.Statements.InsertBefore(target, localFunction);
+			}
+		}
+
+		/// <summary>
+		/// NetSpy: C# 11 auto-default structs: "B = 0;" at the start of a struct constructor without a sequence point is the
+		/// compiler's (before the body style is decided: what remains may be a single statement).
+		/// </summary>
+		static void RemoveStructAutoDefaults(EntityDeclaration entity, BlockStatement body)
+		{
+			if (entity is not ConstructorDeclaration || entity.GetSymbol() is not IMethod { DeclaringType.Kind: TypeKind.Struct }
+				|| !body.Statements.Any(s => s.Annotation<SourceLayoutAnnotation>() is not null))
+				return;
+			foreach (var statement in body.Statements.ToList())
+			{
+				if (statement.Annotation<SourceLayoutAnnotation>() is not null
+					|| statement is not ExpressionStatement { Expression: AssignmentExpression { Operator: AssignmentOperatorType.Assign,
+						Left: IdentifierExpression or MemberReferenceExpression { Target: ThisReferenceExpression }, Right: var zero } }
+					|| zero is not (NullReferenceExpression or DefaultValueExpression or PrimitiveExpression { Value: 0 or 0L or 0u or 0UL or false or 0.0 or 0f or '\0' }))
+					break;
+				statement.Remove();
 			}
 		}
 

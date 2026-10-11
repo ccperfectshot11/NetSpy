@@ -359,7 +359,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		}
 
 		/// <summary>The node the sequence point covers: the expression of "=> expr" bodies, else the statement.</summary>
-		static AstNode MeasuredNode(AstNode statement)
+		internal static AstNode MeasuredNode(AstNode statement)
 		{
 			if (statement.Parent is BlockStatement { Statements.Count: 1 } body
 				&& (AnnotateAccessorStyles.StyleOf(body) is { } style

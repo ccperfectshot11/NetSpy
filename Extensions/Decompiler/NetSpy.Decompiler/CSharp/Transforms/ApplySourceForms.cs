@@ -198,6 +198,28 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					AlignQuery(query);
 				foreach (var invocation in rootNode.Descendants.OfType<InvocationExpression>().ToList())
 					WrapCallChain(invocation);
+				// "checked { x += y; }" whose statement is as wide as "x = checked(x + y);"
+				foreach (var checkedStatement in rootNode.Descendants.OfType<CheckedStatement>().ToList())
+				{
+					if (checkedStatement.Body.Statements.Count != 1
+						|| checkedStatement.Body.Statements.Single() is not ExpressionStatement { Expression: AssignmentExpression assignment } inner
+						|| AssignmentExpression.GetCorrespondingBinaryOperator(assignment.Operator) is not { } op
+						|| op is not (BinaryOperatorType.Add or BinaryOperatorType.Subtract or BinaryOperatorType.Multiply)
+						|| (inner.Annotation<SourceLayoutAnnotation>() ?? checkedStatement.Annotation<SourceLayoutAnnotation>()) is not { Width: > 0 } checkedLayout
+						|| assignment.Left is not (IdentifierExpression or MemberReferenceExpression { Target: ThisReferenceExpression or IdentifierExpression }))
+						continue;
+					var options = context.Settings.CSharpFormattingOptions;
+					string left = assignment.Left.ToString(options).Trim();
+					var expanded = new ExpressionStatement(new AssignmentExpression(assignment.Left.Clone(),
+						new CheckedExpression(new BinaryOperatorExpression(assignment.Left.Clone(), op, assignment.Right.Clone()))));
+					if (expanded.ToString(options).Trim().Length != checkedLayout.Width)
+						continue;
+					context.Step("checked expression", checkedStatement);
+					expanded.CopyAnnotationsFrom(inner);
+					if (expanded.Annotation<SourceLayoutAnnotation>() is null)
+						expanded.AddAnnotation(checkedLayout);
+					checkedStatement.ReplaceWith(expanded);
+				}
 			}
 			// "++x;" â†’ "x++;" (statement level: the same; the usual spelling)
 			foreach (var statement in rootNode.Descendants.OfType<ExpressionStatement>().ToList())

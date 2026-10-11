@@ -447,8 +447,8 @@ namespace NetSpy.Decompiler.CSharp.ProjectDecompiler
 		static int Width(Statement statement, CSharpFormattingOptions formattingOptions)
 		{
 			// "=> expr": the sequence point covers the expression only
-			AstNode measured = statement;
-			if (statement.Parent is BlockStatement body && body.Annotation<Transforms.ExpressionBodyAnnotation>() is not null
+			AstNode measured = Transforms.MatchSourceWidths.MeasuredNode(statement);
+			if (measured == statement && statement.Parent is BlockStatement body && body.Annotation<Transforms.ExpressionBodyAnnotation>() is not null
 				&& Transforms.ExpressionBodiedMembers.GetExpression(body) is { } expression)
 				measured = expression;
 			var clone = measured.Clone();
