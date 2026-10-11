@@ -120,6 +120,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				name = baseName + i;
 			usedNames.Add(name);
 			var reference = new IdentifierExpression(name);
+			reference.AddAnnotation(new Semantics.ResolveResult(type));
 			candidate.ReplaceWith(reference);
 			// "(object)42" made the conversion the declaration did: "object o = 42;"
 			if (candidate is CastExpression { Expression: { } converted } && converted.GetResolveResult() is { Type: { Kind: not TypeKind.Unknown } convertedType }
@@ -138,6 +139,17 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				candidate = new DirectionExpression(FieldDirection.Ref, candidate);
 			}
 			var declaration = new VariableDeclarationStatement(declaredType, name, candidate);
+			// its sequence point is the first one (a removed cast took the IL annotations the layout is found by)
+			var point = covering[0];
+			declaration.AddAnnotation(new SourceLayoutAnnotation {
+				StartLine = point.StartLine,
+				StartColumn = point.StartColumn,
+				EndLine = point.EndLine,
+				IsSingleLine = point.StartLine == point.EndLine,
+				IsMultiLine = point.StartLine != point.EndLine,
+				Document = point.DocumentUrl,
+				Width = point.StartLine == point.EndLine ? point.EndColumn - point.StartColumn : -1
+			});
 			statement.Parent!.InsertChildBefore(statement, declaration, Slots.Statement);
 		}
 

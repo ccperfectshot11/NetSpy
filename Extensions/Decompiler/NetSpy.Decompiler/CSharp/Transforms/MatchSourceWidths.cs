@@ -307,12 +307,18 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			foreachStatement.VariableType = alternative;
 		}
 
-		void Process(AstNode statement, int target)
+		void Process(AstNode statement, int target, bool adjusted = false)
 		{
 			// names of the compiler's locals (not in the PDB) whose source length is known: the width they'd have
-			target -= NameAdjustment(statement);
+			if (!adjusted)
+				target -= NameAdjustment(statement);
 			int width = Measure(MeasuredNode(statement));
-			if (width < 0 || width == target)
+			if (width < 0)
+			{
+				TrySingleLineAnonymousMethod(statement, target);
+				return;
+			}
+			if (width == target)
 				return;
 			if (MeasureSites(statement, width) is not { } sites)
 				return;
@@ -365,6 +371,61 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			}
 			for (int i = undos.Count - 1; i >= 0; i--)
 				undos[i]();
+		}
+
+		/// <summary>
+		/// A statement with a block lambda ("x => { a; b; }") whose source was one line: "delegate { a; b; }" or
+		/// "delegate (T x) { a; b; }" written on one line, then the usual search.
+		/// </summary>
+		void TrySingleLineAnonymousMethod(AstNode statement, int target)
+		{
+			foreach (bool withList in new[] { false, true })
+			{
+				if (SingleLineAnonymousMethod(statement, withList) is not { } undo)
+					continue;
+				int width = Measure(MeasuredNode(statement));
+				if (width >= 0)
+				{
+					if (width != target)
+						Process(statement, target, adjusted: true);
+					if (Measure(MeasuredNode(statement)) == target)
+					{
+						context.Step("Single-line anonymous method", statement);
+						return;
+					}
+				}
+				undo();
+			}
+		}
+
+		/// <summary>The statement's one block lambda as a single-line anonymous method (null if it has none); returns the undo.</summary>
+		Action? SingleLineAnonymousMethod(AstNode statement, bool withList)
+		{
+			var lambdas = MeasuredNode(statement).Descendants.OfType<LambdaExpression>().Where(l => l.Body is BlockStatement).ToList();
+			if (lambdas.Count != 1 || lambdas[0] is not { Body: BlockStatement { Statements.Count: > 0 } body } lambda
+				|| lambda.Attributes.Count > 0 || lambda.Annotation<IL.ILFunction>()?.Method is not { } method
+				|| method.Parameters.Count != lambda.Parameters.Count || lambda.Parameters.Any(p => p.ParameterModifier != ReferenceKind.None)
+				|| body.Descendants.Any(n => n is LambdaExpression or AnonymousMethodExpression || n is BlockStatement && n.Parent is not Statement))
+				return null;
+			bool parametersUsed = lambda.Parameters.Any(p => body.Descendants.OfType<IdentifierExpression>().Any(id => id.Identifier == p.Name));
+			if (!withList && parametersUsed)
+				return null;
+			var anonymous = new AnonymousMethodExpression { IsAsync = lambda.IsAsync };
+			if (withList)
+			{
+				for (int i = 0; i < method.Parameters.Count; i++)
+				{
+					anonymous.Parameters.Add(new ParameterDeclaration {
+						Type = context.TypeSystemAstBuilder.ConvertType(method.Parameters[i].Type),
+						Name = lambda.Parameters.ElementAt(i).Name
+					}.CopyAnnotationsFrom(lambda.Parameters.ElementAt(i)));
+				}
+			}
+			anonymous.Body = (BlockStatement)body.Clone();
+			anonymous.CopyAnnotationsFrom(lambda);
+			anonymous.AddAnnotation(SingleLineBlockAnnotation.Instance);
+			lambda.ReplaceWith(anonymous);
+			return () => anonymous.ReplaceWith(lambda);
 		}
 
 		/// <summary>The sites of a statement with the width change of each alternative (null if none or too many).</summary>
@@ -443,8 +504,15 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					int count = unnamed[0].Value;
 					int adjustedTarget = target - NameAdjustment(statement);
 					int width = Measure(MeasuredNode(statement));
+					// a block lambda the source wrote on one line: measured as such
+					Action? undoSingleLine = null;
+					if (width < 0 && (undoSingleLine = SingleLineAnonymousMethod(statement, false) ?? SingleLineAnonymousMethod(statement, true)) is not null)
+						width = Measure(MeasuredNode(statement));
 					if (width < 0)
+					{
+						undoSingleLine?.Invoke();
 						continue;
+					}
 					// the width changes some combination of spellings reaches (0: none)
 					var reachable = new HashSet<int> { 0 };
 					if (MeasureSites(statement, width) is { } sites)
@@ -458,6 +526,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 							}
 						}
 					}
+					undoSingleLine?.Invoke();
 					var lengths = new HashSet<int>();
 					foreach (int delta in reachable)
 					{

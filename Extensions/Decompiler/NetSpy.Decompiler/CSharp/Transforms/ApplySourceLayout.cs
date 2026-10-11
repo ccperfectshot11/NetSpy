@@ -91,6 +91,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						layout = later;
 					if (layout is not null)
 					{
+						// (a statement may carry a layout already, e.g. a declaration split out of another statement)
+						statement.RemoveAnnotations<SourceLayoutAnnotation>();
 						statement.AddAnnotation(layout);
 						if (previous is not null)
 						{

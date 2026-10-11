@@ -243,6 +243,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					UnwrapSwitchSectionBlocks(switchStatement);
 				foreach (var lambda in rootNode.Descendants.OfType<LambdaExpression>().ToList())
 					IntroduceSingleLineAnonymousMethod(lambda);
+				foreach (var invocation in rootNode.Descendants.OfType<InvocationExpression>().ToList())
+					IntroduceVarianceLocal(invocation);
 				// a string with n lines in a statement whose single sequence point spans n + 1 more lines: a multi-line raw
 				// string ("""<newline> lines <newline>""")
 				foreach (var literal in rootNode.Descendants.OfType<PrimitiveExpression>().ToList())
@@ -1083,6 +1085,36 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return;
 			context.Step("Dynamic creation type", creation);
 			creation.Type = context.TypeSystemAstBuilder.ConvertType(localType);
+		}
+
+		/// <summary>
+		/// "Sink&lt;object&gt; sink = ...; Sink&lt;string&gt; s2 = sink; s2(x);": a variance conversion has no IL, so the compiler
+		/// drops the local. The call still invokes the other delegate type, and the source line of the dropped
+		/// declaration has no sequence point between the two statements.
+		/// </summary>
+		void IntroduceVarianceLocal(InvocationExpression invocation)
+		{
+			if (invocation.Target is not IdentifierExpression target
+				|| (target.GetResolveResult()?.Type is { Kind: TypeKind.Delegate } resolved ? resolved : target.GetILVariable()?.Type) is not { Kind: TypeKind.Delegate } localType
+				|| invocation.GetSymbol() is not IMethod { Name: "Invoke", DeclaringType: { Kind: TypeKind.Delegate } invokedType }
+				|| NormalizeTypeVisitor.IgnoreNullability.EquivalentTypes(invokedType, localType)
+				|| invocation.Ancestors.OfType<Statement>().FirstOrDefault() is not { Parent: BlockStatement block } statement
+				|| statement.Annotation<SourceLayoutAnnotation>() is not { } layout
+				|| statement.PrevSibling is not Statement previous || previous.Annotation<SourceLayoutAnnotation>() is not { } before
+				|| layout.StartLine != before.EndLine + 2)
+				return;
+			string baseName = invokedType.Name.Length > 0 ? char.ToLowerInvariant(invokedType.Name[0]) + invokedType.Name.Substring(1) : "value";
+			var entity = statement.Ancestors.OfType<EntityDeclaration>().FirstOrDefault();
+			string name = baseName;
+			for (int n = 2; entity?.Descendants.OfType<Identifier>().Any(id => id.Name == name) == true; n++)
+				name = baseName + n;
+			context.Step("Introduce variance local", statement);
+			var declaration = new VariableDeclarationStatement(context.TypeSystemAstBuilder.ConvertType(invokedType), name, target.Clone());
+			declaration.AddAnnotation(new SourceLayoutAnnotation { StartLine = layout.StartLine - 1, StartColumn = layout.StartColumn,
+				EndLine = layout.StartLine - 1, IsSingleLine = true, Document = layout.Document, Width = -1 });
+			layout.BlankLineBefore = false;
+			block.Statements.InsertBefore(statement, declaration);
+			target.ReplaceWith(new IdentifierExpression(name));
 		}
 
 		/// <summary>
