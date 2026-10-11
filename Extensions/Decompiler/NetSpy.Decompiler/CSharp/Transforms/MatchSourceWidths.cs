@@ -464,6 +464,21 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						return () => literal.ReplaceWith(nameofCall);
 					});
 				}
+				if (node is Expression spanArgument && ParameterOf(spanArgument) is { Type: { } spanType } && spanType.IsKnownType(KnownTypeCode.ReadOnlySpanOfT)
+					&& spanType.TypeArguments[0].IsKnownType(KnownTypeCode.Char) && spanArgument.GetResolveResult()?.Type.IsKnownType(KnownTypeCode.String) == true)
+				{
+					// "M(s)" → "M(s.AsSpan())" (the C# 14 implicit span conversion calls AsSpan too)
+					Add(sites).Alternatives.Add(() => {
+						var placeholder = new NullReferenceExpression();
+						spanArgument.ReplaceWith(placeholder);
+						var call = new InvocationExpression(new MemberReferenceExpression(spanArgument, "AsSpan"));
+						placeholder.ReplaceWith(call);
+						return () => {
+							spanArgument.Remove();
+							call.ReplaceWith(spanArgument);
+						};
+					});
+				}
 				switch (node)
 				{
 					case AssignmentExpression assignment:
@@ -508,6 +523,15 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						break;
 					case InterpolatedStringExpression interpolated:
 						AddInterpolatedFormSite(interpolated, sites);
+						break;
+					case StackAllocExpression { Initializer: { } stackInitializer, CountExpression: PrimitiveExpression { Value: int stackCount } } stackAlloc
+						when stackCount == stackInitializer.Elements.Count:
+						// "stackalloc int[] { 4, 5 }": the count is implied
+						Add(sites).Alternatives.Add(() => {
+							var count = stackAlloc.CountExpression!;
+							count.Remove();
+							return () => stackAlloc.CountExpression = count;
+						});
 						break;
 					case InvocationExpression { Target: MemberReferenceExpression { MemberName: "Substring" or "Slice" } } sliceCall:
 						AddRangeSite(sliceCall, sites);

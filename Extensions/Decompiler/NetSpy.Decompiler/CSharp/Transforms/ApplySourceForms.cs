@@ -1230,12 +1230,14 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					// after an await's resumption the rest of the statement may have no sequence point of its own
 					|| statements[i + 1].Annotation<SourceLayoutAnnotation>() is { } next
 						&& (next.StartLine != layout.StartLine || next.StartColumn != layout.StartColumn)
-					|| value is LambdaExpression or AnonymousMethodExpression or StackAllocExpression or ArrayInitializerExpression
+					|| value is LambdaExpression or AnonymousMethodExpression or ArrayInitializerExpression
 					|| block.Ancestors.OfType<EntityDeclaration>().FirstOrDefault() is not { } entity)
 					continue;
 				var uses = entity.Descendants.OfType<IdentifierExpression>().Where(id => id.GetILVariable() == temp).ToList();
 				if (uses.Count != 1 || !uses[0].Ancestors.Contains(statements[i + 1]) || uses[0].Ancestors.Any(a => a is LambdaExpression or AnonymousMethodExpression)
-					|| uses[0].Parent is DirectionExpression || uses[0].Parent is AssignmentExpression assigned && assigned.Left == uses[0])
+					|| uses[0].Parent is DirectionExpression || uses[0].Parent is AssignmentExpression assigned && assigned.Left == uses[0]
+					// a nested stackalloc only as an argument (it then converts to the parameter's span)
+					|| value is StackAllocExpression && uses[0].Parent is not (InvocationExpression or ObjectCreateExpression))
 					continue;
 				// everything evaluated before the use has no effect: literals, names, member reads
 				var ancestors = new HashSet<AstNode>(uses[0].Ancestors);
