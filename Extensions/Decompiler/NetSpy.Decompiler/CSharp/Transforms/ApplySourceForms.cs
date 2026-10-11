@@ -1518,6 +1518,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				if (statements[i] is not VariableDeclarationStatement { Variables.Count: 1, Modifiers: Modifiers.None } declaration
 					|| declaration.Variables.Single() is not { Initializer: { } value } variable
 					|| variable.GetILVariable() is not { Kind: VariableKind.Local or VariableKind.StackSlot, HasGeneratedName: true, SourceName: null } temp
+					// (a local split out of a statement because of the PDB: the source had it)
+					|| temp.Function is null
 					|| declaration.Annotation<SourceLayoutAnnotation>() is not { } layout
 					|| statements[i + 1] is not (ExpressionStatement or ReturnStatement or VariableDeclarationStatement or ThrowStatement)
 					// after an await's resumption the rest of the statement may have no sequence point of its own

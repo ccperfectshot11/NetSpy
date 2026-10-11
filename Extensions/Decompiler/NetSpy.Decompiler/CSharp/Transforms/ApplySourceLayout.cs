@@ -84,6 +84,14 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				foreach (var statement in blockStatements)
 				{
 					var layout = GetLayout(statement, body, sequencePoints) ?? statement.Annotation<SourceLayoutAnnotation>();
+					// an await spills the start of a statement ("ldstr"...) before its resumption point: the one point between the
+					// previous statement's IL and this one's is its own
+					if (layout is null && previousStatement is not null && IlRange(previousStatement, body) is { } previousRange && IlRange(statement, body) is { } ownRange)
+					{
+						var between = sequencePoints.Where(sp => !IsBrace(sp) && sp.Offset > previousRange.End && sp.Offset < ownRange.Start).ToList();
+						if (between.Count == 1)
+							layout = GetLayout(statement, body, between, force: true);
+					}
 					// NetSpy: a statement can't start before the previous one ends; a point that early belongs to shared IL
 					// (cached delegates...): use the statement's points after the previous statement
 					if (layout is not null && previous is not null && layout.StartLine < previous.EndLine
@@ -194,8 +202,16 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			return 2 + LeadingHeaderLines(first, firstLayout, body, sequencePoints);
 		}
 
+		/// <summary>The IL range of a statement's own instructions (null if none are annotated).</summary>
+		static (int Start, int End)? IlRange(Statement statement, BlockStatement body)
+		{
+			var ranges = statement.DescendantsAndSelf.Where(n => !IsInOtherFunction(n, body))
+				.SelectMany(n => n.Annotations.OfType<ILInstruction>()).SelectMany(i => i.ILRanges).Where(r => !r.IsEmpty).ToList();
+			return ranges.Count == 0 ? null : (ranges.Min(r => r.Start), ranges.Max(r => r.InclusiveEnd));
+		}
+
 		/// <summary>The source lines of a statement: the sequence points of the IL it was decompiled from.</summary>
-		static SourceLayoutAnnotation? GetLayout(Statement statement, BlockStatement body, List<DebugInfo.SequencePoint> sequencePoints)
+		static SourceLayoutAnnotation? GetLayout(Statement statement, BlockStatement body, List<DebugInfo.SequencePoint> sequencePoints, bool force = false)
 		{
 			var ranges = statement.DescendantsAndSelf
 				.Where(n => !IsInOtherFunction(n, body))
@@ -207,7 +223,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				return null;
 			// the IL of a sequence point is [Offset, EndOffset); some of its instructions (a ldloc inlined into its
 			// user) carry no annotation, so any overlap with the statement's IL counts
-			var points = sequencePoints.Where(sp => !IsBrace(sp) && ranges.Any(r => r.Start < sp.EndOffset && sp.Offset <= r.InclusiveEnd)).ToList();
+			var points = force ? sequencePoints : sequencePoints.Where(sp => !IsBrace(sp) && ranges.Any(r => r.Start < sp.EndOffset && sp.Offset <= r.InclusiveEnd)).ToList();
 			if (points.Count == 0)
 				return null;
 			var first = points.OrderBy(sp => sp.StartLine).ThenBy(sp => sp.StartColumn).First();

@@ -119,8 +119,10 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			for (int i = 2; usedNames.Contains(name); i++)
 				name = baseName + i;
 			usedNames.Add(name);
+			// the compiler's local (no PDB name): later passes see it as one
+			var local = new ILVariable(VariableKind.Local, type, type.GetStackType()) { Name = name, HasGeneratedName = true };
 			var reference = new IdentifierExpression(name);
-			reference.AddAnnotation(new Semantics.ResolveResult(type));
+			reference.AddAnnotation(new Semantics.ILVariableResolveResult(local, type));
 			candidate.ReplaceWith(reference);
 			// "(object)42" made the conversion the declaration did: "object o = 42;"
 			if (candidate is CastExpression { Expression: { } converted } && converted.GetResolveResult() is { Type: { Kind: not TypeKind.Unknown } convertedType }
@@ -139,6 +141,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				candidate = new DirectionExpression(FieldDirection.Ref, candidate);
 			}
 			var declaration = new VariableDeclarationStatement(declaredType, name, candidate);
+			declaration.Variables.Single().AddAnnotation(new Semantics.ILVariableResolveResult(local, type));
 			// its sequence point is the first one (a removed cast took the IL annotations the layout is found by)
 			var point = covering[0];
 			declaration.AddAnnotation(new SourceLayoutAnnotation {

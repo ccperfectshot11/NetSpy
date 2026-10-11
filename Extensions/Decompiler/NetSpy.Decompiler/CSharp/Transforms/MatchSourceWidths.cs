@@ -311,7 +311,12 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 		{
 			// names of the compiler's locals (not in the PDB) whose source length is known: the width they'd have
 			if (!adjusted)
+			{
+				// a local the compiler removed from the PDB whose name length isn't known: the width says nothing reliable
+				if (UnnamedLocals(statement).Keys.Any(v => !nameLengths.ContainsKey(v) && v.Function is null))
+					return;
 				target -= NameAdjustment(statement);
+			}
 			int width = Measure(MeasuredNode(statement));
 			if (width < 0)
 			{
@@ -553,7 +558,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					var common = new HashSet<int>(sets[0]);
 					foreach (var set in sets.Skip(1))
 						common.IntersectWith(set);
-					if (common.Count == 1 && common.Single() != variable.Name!.Length)
+					if (common.Count == 1)
 						nameLengths[variable] = common.Single();
 				}
 			}
