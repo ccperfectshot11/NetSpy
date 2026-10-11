@@ -199,8 +199,6 @@ namespace NetSpy.Decompiler.Engine.Core.CSharp {
 				asm = null;
 			}
 			var module = asm?.ManifestModule ?? ResolveWithFallback(reference);
-			if (debugResolve)
-				Console.Error.WriteLine($"[NetSpy resolve] {reference.FullName} => {(module is null ? "NOT FOUND" : module.Location)}");
 			return module is null ? null : DnlibMetadata.GetMetadataFile(module);
 		}
 
@@ -232,9 +230,6 @@ namespace NetSpy.Decompiler.Engine.Core.CSharp {
 		}
 		UniversalAssemblyResolver? fallbackResolver;
 		static readonly Dictionary<string, ModuleDef> fallbackModules = new Dictionary<string, ModuleDef>(StringComparer.OrdinalIgnoreCase);
-
-		/// <summary>Set NETSPY_DEBUG_RESOLVE=1 to log every assembly the NetSpy engine asks for</summary>
-		static readonly bool debugResolve = Environment.GetEnvironmentVariable("NETSPY_DEBUG_RESOLVE") == "1";
 
 		public MetadataFile? ResolveModule(MetadataFile mainModuleFile, string moduleName) {
 			var owner = DnlibMetadata.TryGetModule(mainModuleFile) ?? mainModule;

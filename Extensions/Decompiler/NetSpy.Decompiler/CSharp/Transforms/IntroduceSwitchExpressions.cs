@@ -87,39 +87,18 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 			var parser = new ArmParser { LineOf = SourceLines(method) };
 			var arms = parser.ParseList(body.Statements.ToList(), 0, out bool exhaustive);
 			if (arms is null || !exhaustive || arms.Count < 2)
-			{
-				Trace(method, arms is null ? "not arms" : $"exhaustive={exhaustive} arms={arms.Count}");
 				return;
-			}
 			if (!parser.SawNoMatchThrow && !ReturnsWereMerged(body, method))
 			{
 				// NetSpy: every arm returns on its own: a pattern switch statement, if the PDB has "switch (subject)"
-				if (TryIntroduceSwitchStatement(body, method, arms))
-					return;
-				Trace(method, $"no evidence (optimized={IsOptimized(method)}, ret={CountRetInstructions(method)})");
+				TryIntroduceSwitchStatement(body, method, arms);
 				return;
 			}
 			var switchExpression = new SwitchBuilder().Build(arms);
 			if (switchExpression is null)
-			{
-				Trace(method, "patterns failed: " + Failure);
 				return;
-			}
 			body.Statements.Clear();
 			body.Statements.Add(new ReturnStatement { Expression = switchExpression });
-		}
-
-		/// <summary>Why the last conversion failed (for <see cref="Trace"/>).</summary>
-		[ThreadStatic]
-		static string? Failure;
-
-		static readonly bool traceEnabled = Environment.GetEnvironmentVariable("NETSPY_DEBUG_SWITCH") == "1";
-
-		/// <summary>Dev aid: NETSPY_DEBUG_SWITCH=1 prints why a method isn't a switch expression.</summary>
-		static void Trace(IMethod method, string reason)
-		{
-			if (traceEnabled)
-				Console.Error.WriteLine($"[switch] {method.FullName}: {reason}");
 		}
 
 		/// <summary>
@@ -761,8 +740,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				var subjects = rootOrder.Where(name => built.Any(b => b.Roots.TryGetValue(name, out var root) && HasConstraint(root))).ToList();
 				if (subjects.Count == 0)
 				{
-					Failure = "no subject";
-						return null;
+					return null;
 				}
 				Expression subject;
 				if (subjects.Count == 1)
@@ -786,9 +764,8 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 				{
 					return Emit(subject, subjects, built);
 				}
-				catch (PatternFailure failure)
+				catch (PatternFailure)
 				{
-					Failure = failure.Message;
 					return null;
 				}
 			}
@@ -871,8 +848,7 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						continue;
 					if (node.Designation is not null && node.Designation != id.Identifier)
 					{
-						Failure = "two names for one value: " + id.Identifier;
-							return false;
+						return false;
 					}
 					node.Designation = id.Identifier;
 					node.DesignationVariable ??= id.GetILVariable();
@@ -888,15 +864,13 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					var node = GetNode(variable.Initializer!);
 					if (node is null)
 					{
-						Failure = "binding " + variable;
-							return false;
+						return false;
 					}
 					var initializerType = variable.Initializer!.GetResolveResult().Type;
 					if (!declaration.Type.IsVar() && declaration.Type.GetResolveResult() is { Type: var declaredType }
 						&& declaredType.Kind != TypeKind.Unknown && !NormalizeTypeVisitor.IgnoreNullability.EquivalentTypes(declaredType, initializerType))
 					{
-						Failure = "binding conversion " + variable;
-							return false; // a conversion, not just a name for the value
+						return false; // a conversion, not just a name for the value
 					}
 					node.Names.Add(variable.Name);
 					bound[variable.Name] = node;
@@ -920,7 +894,6 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					};
 					if (name is null)
 					{
-						Failure = "deconstruct argument " + argument;
 						return false;
 					}
 					if (name != "_")

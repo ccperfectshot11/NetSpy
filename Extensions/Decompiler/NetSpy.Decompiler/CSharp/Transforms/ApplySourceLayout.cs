@@ -36,8 +36,6 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 	/// </summary>
 	public sealed class ApplySourceLayout : IAstTransform
 	{
-		static readonly bool traceEnabled = System.Environment.GetEnvironmentVariable("NETSPY_DEBUG_LAYOUT") == "1";
-
 		public void Run(AstNode rootNode, TransformContext context)
 		{
 			if (!context.Settings.SourceLayoutFromPdb || context.DecompileRun.DebugInfoProvider is not { } provider)
@@ -91,8 +89,6 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 					if (layout is not null && previous is not null && layout.StartLine < previous.EndLine
 						&& GetLayout(statement, body, sequencePoints.Where(sp => sp.StartLine > previous.EndLine).ToList()) is { } later)
 						layout = later;
-					if (traceEnabled)
-						System.Console.Error.WriteLine($"[layout] {(layout is null ? "?" : $"{layout.StartLine}:{layout.StartColumn}-{layout.EndLine}")} {statement.ToString().Split('\n')[0].Trim()}");
 					if (layout is not null)
 					{
 						statement.AddAnnotation(layout);
@@ -464,8 +460,6 @@ namespace NetSpy.Decompiler.CSharp.Transforms
 						else if (blockColumn is { } column)
 							expressionBody = first.StartColumn > column;
 					}
-					if (traceEnabled)
-						System.Console.Error.WriteLine($"[body] {body.Parent?.GetSymbol()} col={layout.StartColumn} blockColumn={blockColumn} => {expressionBody}");
 					if (expressionBody is { } value)
 						body.AddAnnotation(value ? BodyStyleAnnotation.ExpressionBody : BodyStyleAnnotation.Block);
 				}
